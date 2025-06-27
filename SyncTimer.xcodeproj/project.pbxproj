@@ -1,0 +1,700 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		961396C22E0D503800B847F3 /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 961396B22E0D503800B847F3 /* SharedModels.swift */; };
+		961396D22E0D503800B847F3 /* SharedModels.swift in Resources */ = {isa = PBXBuildFile; fileRef = 961396B22E0D503800B847F3 /* SharedModels.swift */; };
+		966A13362DF6D3E000C2ADF2 /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9640DBA32DF695F0002688A4 /* WatchConnectivity.framework */; };
+		96A0D8092E0D655F00DF3C27 /* ConnectivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 966A133D2DF6F11500C2ADF2 /* ConnectivityManager.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		96DB421E2DE84D190027E9AA /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 96DB42052DE84D160027E9AA /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 96DB420C2DE84D160027E9AA;
+			remoteInfo = SyncTimer;
+		};
+		96DB42282DE84D190027E9AA /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 96DB42052DE84D160027E9AA /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 96DB420C2DE84D160027E9AA;
+			remoteInfo = SyncTimer;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		962A5F1B2E0D53AE005A36E9 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9633A7042DF6CCFD00875623 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Watch;
+			dstSubfolderSpec = 7;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		961396B22E0D503800B847F3 /* SharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedModels.swift; sourceTree = "<group>"; };
+		9640DBA32DF695F0002688A4 /* WatchConnectivity.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WatchConnectivity.framework; path = System/Library/Frameworks/WatchConnectivity.framework; sourceTree = SDKROOT; };
+		9640DBAD2DF69F1E002688A4 /* WatchConnectivity.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WatchConnectivity.framework; path = Platforms/WatchOS.platform/Developer/SDKs/WatchOS11.2.sdk/System/Library/Frameworks/WatchConnectivity.framework; sourceTree = DEVELOPER_DIR; };
+		966A133D2DF6F11500C2ADF2 /* ConnectivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectivityManager.swift; sourceTree = "<group>"; };
+		96A52D8E2DEBD95A00136C53 /* LinkKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = LinkKit.xcframework; sourceTree = "<group>"; };
+		96DB420D2DE84D160027E9AA /* SyncTimer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SyncTimer.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		96DB421D2DE84D190027E9AA /* SyncTimerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SyncTimerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		96DB42272DE84D190027E9AA /* SyncTimerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SyncTimerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		96F6611B2E0D304B00F78CC3 /* Exceptions for "SyncTimer" folder in "SyncTimer" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 96DB420C2DE84D160027E9AA /* SyncTimer */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		96DB420F2DE84D160027E9AA /* SyncTimer */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				96F6611B2E0D304B00F78CC3 /* Exceptions for "SyncTimer" folder in "SyncTimer" target */,
+			);
+			path = SyncTimer;
+			sourceTree = "<group>";
+		};
+		96DB42202DE84D190027E9AA /* SyncTimerTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SyncTimerTests;
+			sourceTree = "<group>";
+		};
+		96DB422A2DE84D190027E9AA /* SyncTimerUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SyncTimerUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		96DB420A2DE84D160027E9AA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				966A13362DF6D3E000C2ADF2 /* WatchConnectivity.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		96DB421A2DE84D190027E9AA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		96DB42242DE84D190027E9AA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		966A133E2DF6F11500C2ADF2 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				961396B22E0D503800B847F3 /* SharedModels.swift */,
+				966A133D2DF6F11500C2ADF2 /* ConnectivityManager.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		96DB42042DE84D160027E9AA = {
+			isa = PBXGroup;
+			children = (
+				96DB420F2DE84D160027E9AA /* SyncTimer */,
+				96DB42202DE84D190027E9AA /* SyncTimerTests */,
+				96DB422A2DE84D190027E9AA /* SyncTimerUITests */,
+				96E33BE82DEBEB6600244D10 /* Frameworks */,
+				96DB420E2DE84D160027E9AA /* Products */,
+				966A133E2DF6F11500C2ADF2 /* Shared */,
+			);
+			sourceTree = "<group>";
+		};
+		96DB420E2DE84D160027E9AA /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				96DB420D2DE84D160027E9AA /* SyncTimer.app */,
+				96DB421D2DE84D190027E9AA /* SyncTimerTests.xctest */,
+				96DB42272DE84D190027E9AA /* SyncTimerUITests.xctest */,
+				96A52D8E2DEBD95A00136C53 /* LinkKit.xcframework */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		96E33BE82DEBEB6600244D10 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				9640DBAD2DF69F1E002688A4 /* WatchConnectivity.framework */,
+				9640DBA32DF695F0002688A4 /* WatchConnectivity.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		96DB420C2DE84D160027E9AA /* SyncTimer */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 96DB42312DE84D190027E9AA /* Build configuration list for PBXNativeTarget "SyncTimer" */;
+			buildPhases = (
+				96DB42092DE84D160027E9AA /* Sources */,
+				96DB420A2DE84D160027E9AA /* Frameworks */,
+				96DB420B2DE84D160027E9AA /* Resources */,
+				9633A7042DF6CCFD00875623 /* CopyFiles */,
+				962A5F1B2E0D53AE005A36E9 /* Embed Watch Content */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				96DB420F2DE84D160027E9AA /* SyncTimer */,
+			);
+			name = SyncTimer;
+			packageProductDependencies = (
+			);
+			productName = SyncTimer;
+			productReference = 96DB420D2DE84D160027E9AA /* SyncTimer.app */;
+			productType = "com.apple.product-type.application";
+		};
+		96DB421C2DE84D190027E9AA /* SyncTimerTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 96DB42342DE84D190027E9AA /* Build configuration list for PBXNativeTarget "SyncTimerTests" */;
+			buildPhases = (
+				96DB42192DE84D190027E9AA /* Sources */,
+				96DB421A2DE84D190027E9AA /* Frameworks */,
+				96DB421B2DE84D190027E9AA /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				96DB421F2DE84D190027E9AA /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				96DB42202DE84D190027E9AA /* SyncTimerTests */,
+			);
+			name = SyncTimerTests;
+			packageProductDependencies = (
+			);
+			productName = SyncTimerTests;
+			productReference = 96DB421D2DE84D190027E9AA /* SyncTimerTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		96DB42262DE84D190027E9AA /* SyncTimerUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 96DB42372DE84D190027E9AA /* Build configuration list for PBXNativeTarget "SyncTimerUITests" */;
+			buildPhases = (
+				96DB42232DE84D190027E9AA /* Sources */,
+				96DB42242DE84D190027E9AA /* Frameworks */,
+				96DB42252DE84D190027E9AA /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				96DB42292DE84D190027E9AA /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				96DB422A2DE84D190027E9AA /* SyncTimerUITests */,
+			);
+			name = SyncTimerUITests;
+			packageProductDependencies = (
+			);
+			productName = SyncTimerUITests;
+			productReference = 96DB42272DE84D190027E9AA /* SyncTimerUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		96DB42052DE84D160027E9AA /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1620;
+				LastUpgradeCheck = 1620;
+				TargetAttributes = {
+					96DB420C2DE84D160027E9AA = {
+						CreatedOnToolsVersion = 16.2;
+					};
+					96DB421C2DE84D190027E9AA = {
+						CreatedOnToolsVersion = 16.2;
+						TestTargetID = 96DB420C2DE84D160027E9AA;
+					};
+					96DB42262DE84D190027E9AA = {
+						CreatedOnToolsVersion = 16.2;
+						TestTargetID = 96DB420C2DE84D160027E9AA;
+					};
+				};
+			};
+			buildConfigurationList = 96DB42082DE84D160027E9AA /* Build configuration list for PBXProject "SyncTimer" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 96DB42042DE84D160027E9AA;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 96DB420E2DE84D160027E9AA /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				96DB420C2DE84D160027E9AA /* SyncTimer */,
+				96DB421C2DE84D190027E9AA /* SyncTimerTests */,
+				96DB42262DE84D190027E9AA /* SyncTimerUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		96DB420B2DE84D160027E9AA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				961396D22E0D503800B847F3 /* SharedModels.swift in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		96DB421B2DE84D190027E9AA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		96DB42252DE84D190027E9AA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		96DB42092DE84D160027E9AA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				961396C22E0D503800B847F3 /* SharedModels.swift in Sources */,
+				96A0D8092E0D655F00DF3C27 /* ConnectivityManager.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		96DB42192DE84D190027E9AA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		96DB42232DE84D190027E9AA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		96DB421F2DE84D190027E9AA /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 96DB420C2DE84D160027E9AA /* SyncTimer */;
+			targetProxy = 96DB421E2DE84D190027E9AA /* PBXContainerItemProxy */;
+		};
+		96DB42292DE84D190027E9AA /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 96DB420C2DE84D160027E9AA /* SyncTimer */;
+			targetProxy = 96DB42282DE84D190027E9AA /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		96DB422F2DE84D190027E9AA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		96DB42302DE84D190027E9AA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		96DB42322DE84D190027E9AA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"SyncTimer/Preview Content\"";
+				DEVELOPMENT_TEAM = S74572Q65M;
+				ENABLE_PREVIEWS = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					$inherited,
+					"$(PROJECT_DIR)/**",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					$inherited,
+					"$(PROJECT_DIR)/SyncTimer",
+				);
+				INFOPLIST_FILE = SyncTimer/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = SyncTimer;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "We need Bluetooth to sync timers with other devices.";
+				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "This app uses Bluetooth to automatically discover and synchronize timers with nearby devices.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "We need to scan a pairing code to set up Bluetooth sync.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "SyncTimer needs to discover other SyncTimer instances on your local network to form a lobby.";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UIMainStoryboardFile = Main;
+				INFOPLIST_KEY_UIStatusBarHidden = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				"IPHONEOS_DEPLOYMENT_TARGET[sdk=iphoneos*]" = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = $inhereted;
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/SyncTimer",
+					"$(SRCROOT)",
+					"$(PROJECT_DIR)",
+				);
+				MARKETING_VERSION = 0.5;
+				OTHER_LDFLAGS = "";
+				PRODUCT_BUNDLE_IDENTIFIER = com.StageDevices.SyncTimer;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		96DB42332DE84D190027E9AA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"SyncTimer/Preview Content\"";
+				DEVELOPMENT_TEAM = S74572Q65M;
+				ENABLE_PREVIEWS = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					$inherited,
+					"$(PROJECT_DIR)/**",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					$inherited,
+					"$(PROJECT_DIR)/SyncTimer",
+				);
+				INFOPLIST_FILE = SyncTimer/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = SyncTimer;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "We need Bluetooth to sync timers with other devices.";
+				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "This app uses Bluetooth to automatically discover and synchronize timers with nearby devices.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "We need to scan a pairing code to set up Bluetooth sync.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "SyncTimer needs to discover other SyncTimer instances on your local network to form a lobby.";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UIMainStoryboardFile = Main;
+				INFOPLIST_KEY_UIStatusBarHidden = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				"IPHONEOS_DEPLOYMENT_TARGET[sdk=iphoneos*]" = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = $inhereted;
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/SyncTimer",
+					"$(SRCROOT)",
+					"$(PROJECT_DIR)",
+				);
+				MARKETING_VERSION = 0.5;
+				ONLY_ACTIVE_ARCH = NO;
+				OTHER_LDFLAGS = "";
+				PRODUCT_BUNDLE_IDENTIFIER = com.StageDevices.SyncTimer;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		96DB42352DE84D190027E9AA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 866679QA9V;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = cbassuarez.SyncTimerTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SyncTimer.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SyncTimer";
+			};
+			name = Debug;
+		};
+		96DB42362DE84D190027E9AA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 866679QA9V;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = cbassuarez.SyncTimerTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SyncTimer.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SyncTimer";
+			};
+			name = Release;
+		};
+		96DB42382DE84D190027E9AA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S74572Q65M;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				"IPHONEOS_DEPLOYMENT_TARGET[sdk=iphoneos*]" = 18.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = stagedevices.SyncTimerUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = SyncTimer;
+			};
+			name = Debug;
+		};
+		96DB42392DE84D190027E9AA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S74572Q65M;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				"IPHONEOS_DEPLOYMENT_TARGET[sdk=iphoneos*]" = 18.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = stagedevices.SyncTimerUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = SyncTimer;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		96DB42082DE84D160027E9AA /* Build configuration list for PBXProject "SyncTimer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				96DB422F2DE84D190027E9AA /* Debug */,
+				96DB42302DE84D190027E9AA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		96DB42312DE84D190027E9AA /* Build configuration list for PBXNativeTarget "SyncTimer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				96DB42322DE84D190027E9AA /* Debug */,
+				96DB42332DE84D190027E9AA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		96DB42342DE84D190027E9AA /* Build configuration list for PBXNativeTarget "SyncTimerTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				96DB42352DE84D190027E9AA /* Debug */,
+				96DB42362DE84D190027E9AA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		96DB42372DE84D190027E9AA /* Build configuration list for PBXNativeTarget "SyncTimerUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				96DB42382DE84D190027E9AA /* Debug */,
+				96DB42392DE84D190027E9AA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 96DB42052DE84D160027E9AA /* Project object */;
+}

@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>SchemeUserState</key>
+	<dict>
+		<key>SyncTimer Watch App Watch App.xcscheme_^#shared#^_</key>
+		<dict>
+			<key>orderHint</key>
+			<integer>1</integer>
+		</dict>
+		<key>SyncTimer.xcscheme_^#shared#^_</key>
+		<dict>
+			<key>orderHint</key>
+			<integer>1</integer>
+		</dict>
+		<key>SyncTimerWatch Watch App.xcscheme_^#shared#^_</key>
+		<dict>
+			<key>orderHint</key>
+			<integer>2</integer>
+		</dict>
+		<key>SyncTimerWatchApp Watch App.xcscheme_^#shared#^_</key>
+		<dict>
+			<key>orderHint</key>
+			<integer>0</integer>
+		</dict>
+	</dict>
+	<key>SuppressBuildableAutocreation</key>
+	<dict>
+		<key>962A5EF32E0D53AC005A36E9</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>962A5F022E0D53AE005A36E9</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>962A5F0C2E0D53AE005A36E9</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>963AA33E2DF6726D005F87D0</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>963AA34D2DF6726F005F87D0</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>963AA3572DF6726F005F87D0</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>969FBB6F2DF692C100612EF3</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>969FBB7E2DF692C300612EF3</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>969FBB882DF692C300612EF3</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>96DB420C2DE84D160027E9AA</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>96DB421C2DE84D190027E9AA</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>96DB42262DE84D190027E9AA</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+	</dict>
+</dict>
+</plist>
