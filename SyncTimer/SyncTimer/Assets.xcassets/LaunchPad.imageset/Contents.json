@@ -1,15 +1,17 @@
 {
   "images" : [
     {
-      "filename" : "user.png",
+      "filename" : "LaunchPad.png",
       "idiom" : "universal",
       "scale" : "1x"
     },
     {
+      "filename" : "LaunchPad 1.png",
       "idiom" : "universal",
       "scale" : "2x"
     },
     {
+      "filename" : "LaunchPad 2.png",
       "idiom" : "universal",
       "scale" : "3x"
     }

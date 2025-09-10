@@ -1,7 +1,7 @@
 {
   "images" : [
     {
-      "filename" : "user.png",
+      "filename" : "HourglassOrange.png",
       "idiom" : "universal",
       "scale" : "1x"
     },
@@ -10,6 +10,7 @@
       "scale" : "2x"
     },
     {
+      "filename" : "HourglassOrange 1.png",
       "idiom" : "universal",
       "scale" : "3x"
     }
