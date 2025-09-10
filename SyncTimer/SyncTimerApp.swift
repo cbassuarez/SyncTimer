@@ -14,6 +14,7 @@ import WatchConnectivity
 import CoreImage.CIFilterBuiltins
 import CoreBluetooth
 import SpriteKit
+import UIKit
 
 
 //───────────────────
@@ -2731,7 +2732,7 @@ struct MainScreen: View {
                 }
             }
         }
-
+        .dynamicTypeSize(.medium ... .medium)
         .alert(isPresented: $showSyncErrorAlert) {
                     Alert(
                         title: Text("Cannot Start Sync"),
@@ -5575,7 +5576,7 @@ private struct HallOfFameCard: View {
     
     private let friends: [Backer] = [
         Backer(
-            name: "The New Uncertainty Collective",
+            name: "Your Ensemble Here",
             imageName: "nuc_avatar",
             tier: .gold,
             founderTier: .sustainer,
@@ -5584,7 +5585,7 @@ private struct HallOfFameCard: View {
             contributionShare: 0.10
         ),
         Backer(
-            name: "The New Uncertainty Collective",
+            name: "Your Ensemble Here",
             imageName: "nuc_avatar",
             tier: .platinum,
             founderTier: .founder,
@@ -5594,7 +5595,7 @@ private struct HallOfFameCard: View {
             
         ),
         Backer(
-            name: "Paul Yorke",
+            name: "Your Ensemble Here",
             imageName: "paul_avatar",
             tier: .silver,
             founderTier: .supporter,
@@ -5603,7 +5604,7 @@ private struct HallOfFameCard: View {
             contributionShare: 0.05
         ),
         Backer(
-            name: "Paul Yorke",
+            name: "Your Ensemble Here",
             imageName: "paul_avatar",
             tier: .bronze,
             founderTier: .founder,
@@ -5612,7 +5613,7 @@ private struct HallOfFameCard: View {
             contributionShare: 0.05
         ),
         Backer(
-            name: "The New Uncertainty Collective",
+            name: "Your Ensemble Here",
             imageName: "nuc_avatar",
             tier: .gold,
             founderTier: .founder,
@@ -5621,7 +5622,7 @@ private struct HallOfFameCard: View {
             contributionShare: 0.05
         ),
         Backer(
-            name: "The New Uncertainty Collective",
+            name: "Your Ensemble Here",
             imageName: "nuc_avatar",
             tier: .platinum,
             founderTier: .founder,
@@ -5630,7 +5631,7 @@ private struct HallOfFameCard: View {
             contributionShare: 0.05
         ),
         Backer(
-            name: "Paul Yorke",
+            name: "Your Ensemble Here",
             imageName: "paul_avatar",
             tier: .silver,
             founderTier: .founder,
@@ -5639,7 +5640,7 @@ private struct HallOfFameCard: View {
             contributionShare: 0.15
         ),
         Backer(
-            name: "Paul Yorke",
+            name: "Your Ensemble Here",
             imageName: "paul_avatar",
             tier: .bronze,
             founderTier: .founder,
@@ -6341,13 +6342,20 @@ struct SyncTimerApp: App {
         let bonjourManager = syncSettings.bonjourManager
         
         WindowGroup {
-            ContentView()
-                .transition(.opacity.animation(.easeOut(duration: 0.3)))
-                .environmentObject(appSettings)
-                .environmentObject(syncSettings)
-                .preferredColorScheme(appSettings.appTheme == .dark ? .dark : .light)
-            
-        }
+                    // wrap the if/else in a Group so modifiers apply to the whole thing
+                    Group {
+                        if UIDevice.current.userInterfaceIdiom == .pad {
+                            ContentView()
+                                .frame(minWidth: 600, minHeight: 800)
+                        } else {
+                            ContentView()
+                        }
+                    }
+                    .transition(.opacity.animation(.easeOut(duration: 0.3)))
+                    .environmentObject(appSettings)
+                    .environmentObject(syncSettings)
+                    .preferredColorScheme(appSettings.appTheme == .dark ? .dark : .light)
+                }
         
         // Tear-down logic when connection method changes
         .onChange(of: syncSettings.connectionMethod) { _ in

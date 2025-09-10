@@ -212,143 +212,87 @@ struct WalkthroughView: View {
 
                 
 
-            // Wrap all possible page‐views in a single Group
-            Group {
-                if currentPage == 0 {
-                    // Page 0: BLE‐permission explanation, styled like the other cards
-                    PageZero_BLEPermission(mode: $currentPage)
-                        .frame(maxWidth: 360, maxHeight: 640)
-                        .padding(.horizontal, 20)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                           .pageShadow(
-                               color: Color.black.opacity(0.15),
-                               radius: 8,
-                               x: 0,
-                               y: 4
-                           )
+            // 3) Adaptive container that keeps phone sizes but centers/scales on iPad
+            GeometryReader { geo in
+                // Designed content area for the walkthrough card + overlays
+                // We keep the phone layout identical and only scale on iPad if needed.
+                let baseWidth: CGFloat = 400   // 360 card + 20pt horizontal padding on each side
+                let baseHeight: CGFloat = 720  // 640 card + top/bottom breathing room/overlays
+                let isPad = UIDevice.current.userInterfaceIdiom == .pad
+                // Fit within available size but never upscale beyond 1.0
+                let scale: CGFloat = {
+                    guard isPad else { return 1.0 }
+                    let s = min(geo.size.width / baseWidth, geo.size.height / baseHeight)
+                    return min(1.0, s)
+                }()
 
-                    
+                Group {
+                    if currentPage == 0 {
+                        // Page 0: BLE‐permission explanation, styled like the other cards
+                        PageZero_BLEPermission(mode: $currentPage)
+                            .frame(maxWidth: 360, maxHeight: 640)
+                            .padding(.horizontal, 20)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                               .pageShadow(
+                                   color: Color.black.opacity(0.15),
+                                   radius: 8,
+                                   x: 0,
+                                   y: 4
+                               )
+
+                        
                         
 
 
-                } else if currentPage == 1 {
-                    PageOne_TimerCard(mode: $currentPage)
-                        .frame(maxWidth: 360, maxHeight: 640)
-                        .padding(.horizontal, 20)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                           .pageShadow(
-                               color: Color.black.opacity(0.15),
-                               radius: 8,
-                               x: 0,
-                               y: 4
-                           )
+                    } else if currentPage == 1 {
+                        PageOne_TimerCard(mode: $currentPage)
+                            .frame(maxWidth: 360, maxHeight: 640)
+                            .padding(.horizontal, 20)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                               .pageShadow(
+                                   color: Color.black.opacity(0.15),
+                                   radius: 8,
+                                   x: 0,
+                                   y: 4
+                               )
                         
 
 
-                } else if currentPage == 2 {
-                    PageTwo_Countdown(mode: $currentPage)
-                        .frame(maxWidth: 360, maxHeight: 640)
-                        .padding(.horizontal, 20)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                           .pageShadow(
-                               color: Color.black.opacity(0.15),
-                               radius: 8,
-                               x: 0,
-                               y: 4
-                           )
+                    } else if currentPage == 2 {
+                        PageTwo_Countdown(mode: $currentPage)
+                            .frame(maxWidth: 360, maxHeight: 640)
+                            .padding(.horizontal, 20)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                               .pageShadow(
+                                   color: Color.black.opacity(0.15),
+                                   radius: 8,
+                                   x: 0,
+                                   y: 4
+                               )
 
                         
 
 
-                } else if currentPage == 3 {
-                    PageThree_AddEvent(mode: $currentPage)
-                        .frame(maxWidth: 360, maxHeight: 640)
-                        .padding(.horizontal, 20)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                           .pageShadow(
-                               color: Color.black.opacity(0.15),
-                               radius: 8,
-                               x: 0,
-                               y: 4
-                           )
+                    } else if currentPage == 3 {
+                        PageThree_AddEvent(mode: $currentPage)
+                            .frame(maxWidth: 360, maxHeight: 640)
+                            .padding(.horizontal, 20)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                               .pageShadow(
+                                   color: Color.black.opacity(0.15),
+                                   radius: 8,
+                                   x: 0,
+                                   y: 4
+                               )
 
                         
 
-                } else if currentPage == 4 {
-                    PageFour_Sync(mode: $currentPage) {
-                                        // Instead of ending the walkthrough here,
-                                        // advance to our new Support page at index 5
-                                        currentPage = 5
-                                    }
-                    .frame(maxWidth: 360, maxHeight: 640)
-                    .padding(.horizontal, 20)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                       .pageShadow(
-                           color: Color.black.opacity(0.15),
-                           radius: 8,
-                           x: 0,
-                           y: 4
-                       )
-
-                    
-
-                } else if currentPage == 5 {
-                                    // ── PAGE 5: Support & Quick Start ──────────────────
-                                    VStack(spacing: 24) {
-                                        Spacer(minLength: 40)
-                
-                                        Text("Still stuck?")
-                                            .font(.custom("Roboto-SemiBold", size: 24))
-                                            .multilineTextAlignment(.center)
-                                        Text("Watch our quick-start video, or browse the full docs for more details.")
-                                            .font(.custom("Roboto-Regular", size: 14))
-                                            .foregroundColor(.secondary)
-                                            .multilineTextAlignment(.center)
-                                            .padding(.horizontal, 16)
-                                        Button("Watch Quick Start Video") {
-                                            guard let url = URL(string: "https://www.stagedevices.com/support/quickstart") else { return }
-                                            UIApplication.shared.open(url)
+                    } else if currentPage == 4 {
+                        PageFour_Sync(mode: $currentPage) {
+                                            // Instead of ending the walkthrough here,
+                                            // advance to our new Support page at index 5
+                                            currentPage = 5
                                         }
-                                        .font(.custom("Roboto-SemiBold", size: 18))
-                                        .padding(.vertical, 12)
-                                        .padding(.horizontal, 32)
-                                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                                        .colorScheme(.dark)
-                                        .foregroundColor(.primary)
-                                        .cornerRadius(8)
-                
-                                        Button("View Full Documentation") {
-                                            guard let url = URL(string: "https://stagedevices.com/support/docs") else { return }
-                                            UIApplication.shared.open(url)
-                                        }
-                                        .font(.custom("Roboto-SemiBold", size: 18))
-                                        .padding(.vertical, 12)
-                                        .padding(.horizontal, 32)
-                                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                                        .colorScheme(.dark)
-                                        .foregroundColor(.primary)
-                                        .cornerRadius(8)
-                
-                                        // Done button to exit the walkthrough
-                                                                Button("Done") {
-                                                                    finishWalkthrough()
-                                                                }
-                                                                .font(.custom("Roboto-SemiBold", size: 18))
-                                                                .padding(.vertical, 12)
-                                                                .padding(.horizontal, 32)
-                                                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                                                                .colorScheme(.dark)
-                                                                .foregroundColor(.primary)
-                                                                .cornerRadius(8)
-                                                                Spacer()                                    }
-                                    .frame(maxWidth: 360, maxHeight: 640)
-                                    .padding(.horizontal, 20)
-                                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                                       .pageShadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
-                
-                                } else {
-                                    // Fallback for any out‐of‐range page index:
-                    EmptyView()
                         .frame(maxWidth: 360, maxHeight: 640)
                         .padding(.horizontal, 20)
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
@@ -359,44 +303,118 @@ struct WalkthroughView: View {
                                y: 4
                            )
 
-                }
-            }
-            // overlay the skip button on every page
-            .overlay(
-                Button {
-                    finishWalkthrough()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(.secondary)
-                        .opacity(0.1125)
-                        .padding(12)
-                }
-                , alignment: .topTrailing )
-            .overlay(alignment: .bottomLeading) {
-                if currentPage > 0 {
-                    let total = didAutoSkipBLE ? totalWithoutBLE : totalWithBLE
-                    let step  = didAutoSkipBLE ? currentPage : (currentPage + 1)
-                    Text("\((step) - 1)/\((total) - 1)")
-                        .font(.custom("Roboto-Regular", size: 14))
-                        .foregroundColor(.gray)
-                        .padding(.leading, 12)
-                        .padding(.bottom, 12)
-                }
-            }
+                        
 
-            // Attach .onAppear to that single Group
-            .onAppear {
-                // if BLE already on, skip page 0 immediately
-                if centralDelegate.state == .poweredOn && currentPage == 0 {
-                    didAutoSkipBLE = true
-                    currentPage = 1
+                    } else if currentPage == 5 {
+                                        // ── PAGE 5: Support & Quick Start ──────────────────
+                                        VStack(spacing: 24) {
+                                            Spacer(minLength: 40)
+                    
+                                            Text("Still stuck?")
+                                                .font(.custom("Roboto-SemiBold", size: 24))
+                                                .multilineTextAlignment(.center)
+                                            Text("Watch our quick-start video, or browse the full docs for more details.")
+                                                .font(.custom("Roboto-Regular", size: 14))
+                                                .foregroundColor(.secondary)
+                                                .multilineTextAlignment(.center)
+                                                .padding(.horizontal, 16)
+                                            Button("Watch Quick Start Video") {
+                                                guard let url = URL(string: "https://www.stagedevices.com/support/quickstart") else { return }
+                                                UIApplication.shared.open(url)
+                                            }
+                                            .font(.custom("Roboto-SemiBold", size: 18))
+                                            .padding(.vertical, 12)
+                                            .padding(.horizontal, 32)
+                                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                                            .colorScheme(.dark)
+                                            .foregroundColor(.primary)
+                                            .cornerRadius(8)
+                    
+                                            Button("View Full Documentation") {
+                                                guard let url = URL(string: "https://stagedevices.com/support/docs") else { return }
+                                                UIApplication.shared.open(url)
+                                            }
+                                            .font(.custom("Roboto-SemiBold", size: 18))
+                                            .padding(.vertical, 12)
+                                            .padding(.horizontal, 32)
+                                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                                            .colorScheme(.dark)
+                                            .foregroundColor(.primary)
+                                            .cornerRadius(8)
+                    
+                                            // Done button to exit the walkthrough
+                                                                    Button("Done") {
+                                                                        finishWalkthrough()
+                                                                    }
+                                                                    .font(.custom("Roboto-SemiBold", size: 18))
+                                                                    .padding(.vertical, 12)
+                                                                    .padding(.horizontal, 32)
+                                                                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                                                                    .colorScheme(.dark)
+                                                                    .foregroundColor(.primary)
+                                                                    .cornerRadius(8)
+                                                                    Spacer()                                    }
+                                        .frame(maxWidth: 360, maxHeight: 640)
+                                        .padding(.horizontal, 20)
+                                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                                           .pageShadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
+                    
+                                    } else {
+                                        // Fallback for any out‐of‐range page index:
+                        EmptyView()
+                            .frame(maxWidth: 360, maxHeight: 640)
+                            .padding(.horizontal, 20)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                               .pageShadow(
+                                   color: Color.black.opacity(0.15),
+                                   radius: 8,
+                                   x: 0,
+                                   y: 4
+                               )
+
+                    }
                 }
-            }
-            .onAppear {
-                // If the user has already seen the walkthrough, do nothing
-                guard !hasSeenWalkthrough else { return }
-                
+                // Keep overlays attached to the card content
+                .overlay(
+                    Button {
+                        finishWalkthrough()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(.secondary)
+                            .opacity(0.1125)
+                            .padding(12)
+                    }
+                    , alignment: .topTrailing )
+                .overlay(alignment: .bottomLeading) {
+                    if currentPage > 0 {
+                        let total = didAutoSkipBLE ? totalWithoutBLE : totalWithBLE
+                        let step  = didAutoSkipBLE ? currentPage : (currentPage + 1)
+                        Text("\((step) - 1)/\((total) - 1)")
+                            .font(.custom("Roboto-Regular", size: 14))
+                            .foregroundColor(.gray)
+                            .padding(.leading, 12)
+                            .padding(.bottom, 12)
+                    }
+                }
+                // Scale only on iPad to ensure the designed card fits in any orientation
+                .scaleEffect(scale, anchor: .center)
+                // Give the scaled content a predictable base area, then center in screen
+                .frame(width: baseWidth, height: baseHeight)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                // Attach .onAppear to that single Group
+                .onAppear {
+                    // if BLE already on, skip page 0 immediately
+                    if centralDelegate.state == .poweredOn && currentPage == 0 {
+                        didAutoSkipBLE = true
+                        currentPage = 1
+                    }
+                }
+                .onAppear {
+                    // If the user has already seen the walkthrough, do nothing
+                    guard !hasSeenWalkthrough else { return }
+                    
+                }
             }
         }
     }
