@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
    LastUpgradeVersion = "1620"
-   version = "2.2">
+   version = "1.7">
    <BuildAction
       parallelizeBuildables = "YES"
       buildImplicitDependencies = "YES"
@@ -27,15 +27,6 @@
             buildForProfiling = "YES"
             buildForArchiving = "YES"
             buildForAnalyzing = "YES">
-            <AutocreatedTestPlanReference>
-            </AutocreatedTestPlanReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "NO"
-            buildForRunning = "YES"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
-            buildForAnalyzing = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "96DB420C2DE84D160027E9AA"
@@ -75,6 +66,28 @@
                ReferencedContainer = "container:SyncTimer.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "96DB421C2DE84D190027E9AA"
+               BuildableName = "SyncTimerTests.xctest"
+               BlueprintName = "SyncTimerTests"
+               ReferencedContainer = "container:SyncTimer.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "96DB42262DE84D190027E9AA"
+               BuildableName = "SyncTimerUITests.xctest"
+               BlueprintName = "SyncTimerUITests"
+               ReferencedContainer = "container:SyncTimer.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction
@@ -104,15 +117,16 @@
       savedToolIdentifier = ""
       useCustomWorkingDirectory = "NO"
       debugDocumentVersioning = "YES">
-      <MacroExpansion>
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "969FBB7E2DF692C300612EF3"
-            BuildableName = "SyncTimerWatchApp Watch AppTests.xctest"
-            BlueprintName = "SyncTimerWatchApp Watch AppTests"
+            BlueprintIdentifier = "969FBB6F2DF692C100612EF3"
+            BuildableName = "SyncTimerWatchApp Watch App.app"
+            BlueprintName = "SyncTimerWatchApp Watch App"
             ReferencedContainer = "container:SyncTimer.xcodeproj">
          </BuildableReference>
-      </MacroExpansion>
+      </BuildableProductRunnable>
    </ProfileAction>
    <AnalyzeAction
       buildConfiguration = "Debug">

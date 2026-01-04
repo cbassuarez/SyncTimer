@@ -41,6 +41,72 @@ final class BLEDriftManager: NSObject {
     // Once powered on, the delegate method will pick up this flag.
     private var shouldActAsParent = false
     private var shouldActAsChild = false
+    // Link health
+        private var linkWatchdog: Timer?
+        private var lastPacketAt: TimeInterval = 0
+        private var childIsNotifying = false
+    
+    // MARK: – Discovery helpers (keep amber when SYNC is ON)
+        private func restartScanIfChild() {
+            guard shouldActAsChild,
+                  centralManager.state == .poweredOn,
+                  owner?.isEnabled == true else { return }
+            startScanningAsChild()
+        }
+        private func ensureAdvertisingIfParent() {
+            guard shouldActAsParent,
+                  peripheralManager.state == .poweredOn,
+                  owner?.isEnabled == true else { return }
+            if !peripheralManager.isAdvertising {
+                let adv: [String: Any] = [
+                    CBAdvertisementDataServiceUUIDsKey: [timerServiceUUID],
+                    CBAdvertisementDataLocalNameKey: owner?.pairingDeviceName ?? "TimerParent"
+                ]
+                peripheralManager.startAdvertising(adv)
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.owner?.setEstablished(false)
+                self?.owner?.statusMessage = "Bluetooth: advertising…"
+            }
+        }
+    
+    // MARK: – Link watchdog
+        @objc private func watchdogTick() {
+            let now = Date().timeIntervalSince1970
+            // Parent side: green only if we truly have at least one subscriber and traffic is fresh
+            if shouldActAsParent {
+                let hasSubs = !(driftCharacteristic?.subscribedCentrals?.isEmpty ?? true)
+                let stale   = (now - lastPacketAt) > 8.0 // ~1.5× your 5s drift ping
+                if !hasSubs || stale {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let s = self else { return }
+                        s.owner?.setEstablished(false)
+                        if s.owner?.isEnabled == true {
+                            s.owner?.statusMessage = "Bluetooth: advertising…"
+                        } else {
+                            s.owner?.statusMessage = "Bluetooth: off"
+                        }
+                    }
+                    ensureAdvertisingIfParent()
+                }
+            }
+            // Child side: green only if we’re notifying AND traffic is fresh
+            if shouldActAsChild {
+                let stale = (now - lastPacketAt) > 8.0
+                if !childIsNotifying || stale {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let s = self else { return }
+                        s.owner?.setEstablished(false)
+                        if s.owner?.isEnabled == true {
+                            s.owner?.statusMessage = "Bluetooth: searching…"
+                        } else {
+                            s.owner?.statusMessage = "Bluetooth: off"
+                        }
+                    }
+                    restartScanIfChild()
+                }
+            }
+        }
     
     init(owner: SyncSettings) {
         self.owner = owner
@@ -54,18 +120,40 @@ final class BLEDriftManager: NSObject {
     func start() {
         guard let role = owner?.role else { return }
         print("BLEDriftManager.start() as \(role)")
+        lastPacketAt = Date().timeIntervalSince1970
+                linkWatchdog?.invalidate()
+                linkWatchdog = Timer.scheduledTimer(timeInterval: 2.0,
+                                                    target: self,
+                                                    selector: #selector(watchdogTick),
+                                                    userInfo: nil,
+                                                    repeats: true)
         switch role {
         case .parent:
             shouldActAsParent = true
+            DispatchQueue.main.async { [weak self] in
+                    self?.owner?.setEstablished(false)
+                    self?.owner?.statusMessage = "Bluetooth: advertising…"
+                }
+            // Seed child-visible identifiers (used in discovery UI / optional filters)
+                        owner?.pairingServiceUUID = timerServiceUUID
+                        owner?.pairingDeviceName  = "TimerParent"
             if peripheralManager.state == .poweredOn {
                 print("Parent: setting up peripheral immediately")
                 setupParentPeripheral()
             }
         case .child:
             shouldActAsChild = true
+            DispatchQueue.main.async { [weak self] in
+                    self?.owner?.setEstablished(false)
+                self?.owner?.statusMessage = "Bluetooth: searching…"
+                }
+            // Ensure we always have a service UUID to scan for
+                        if owner?.pairingServiceUUID == nil {
+                            owner?.pairingServiceUUID = timerServiceUUID
+                        }
             // if already powered on, kick off scan immediately; otherwise delegate will handle it
             if centralManager.state == .poweredOn {
-                centralManagerDidUpdateState(centralManager)
+                            startScanningAsChild()   // ⟵ scan NOW, don’t depend on isEnabled race
             }
         }
     }
@@ -77,13 +165,17 @@ final class BLEDriftManager: NSObject {
         // 1) Stop any pending drift‐timer
         driftTimer?.invalidate()
         driftTimer = nil
+        linkWatchdog?.invalidate()
+                linkWatchdog = nil
+                childIsNotifying = false
+                lastPacketAt = 0
         
         // 2) Tear down *both* peripheral & central
-        peripheralManager.stopAdvertising()
+        if peripheralManager.isAdvertising { peripheralManager.stopAdvertising() }
         peripheralManager.removeAllServices()
         driftCharacteristic = nil
         
-        centralManager.stopScan()
+        if centralManager.isScanning { centralManager.stopScan() }
         if let p = discoveredPeripheral {
             centralManager.cancelPeripheralConnection(p)
         }
@@ -96,7 +188,10 @@ final class BLEDriftManager: NSObject {
         
         // 🛑 Notify any listeners that parent has stopped
         NotificationCenter.default.post(name: .parentDidStop, object: nil)
-        
+        DispatchQueue.main.async { [weak self] in
+                self?.owner?.setEstablished(false)
+                self?.owner?.statusMessage = "Bluetooth: off"
+            }
             }
 
 
@@ -123,6 +218,10 @@ final class BLEDriftManager: NSObject {
         let timerService = CBMutableService(type: timerServiceUUID, primary: true)
         timerService.characteristics = [driftCharacteristic!]
         peripheralManager.add(timerService)
+        print("Parent: Advertising \(timerServiceUUID)")
+            DispatchQueue.main.async { [weak self] in
+                self?.owner?.statusMessage = "Bluetooth: advertising…"
+            }
     }
 
 
@@ -133,7 +232,7 @@ final class BLEDriftManager: NSObject {
 
         let tReq = Date().timeIntervalSince1970
         let eReq = owner?.getCurrentElapsed() ?? 0
-
+        lastPacketAt = tReq  // activity on the link
         let packet = DriftRequest(requestTimestamp: tReq, elapsedSeconds: eReq)
         guard let data = try? JSONEncoder().encode(packet) else { return }
 
@@ -146,6 +245,7 @@ final class BLEDriftManager: NSObject {
     private func handleWriteFromChild(_ data: Data) {
         // First try decode as DriftResponse
         if let resp = try? JSONDecoder().decode(DriftResponse.self, from: data) {
+            lastPacketAt = Date().timeIntervalSince1970
             handleDriftResponse(resp)
         }
         // Else ignore or decode other packet types if you like
@@ -247,6 +347,12 @@ extension BLEDriftManager: CBPeripheralManagerDelegate {
                            central: CBCentral,
                            didSubscribeTo characteristic: CBCharacteristic) {
         print("Parent: central \(central) DID subscribe to \(characteristic.uuid)")
+        // Bluetooth link is “up” — show green
+            DispatchQueue.main.async { [weak self] in
+                self?.owner?.setEstablished(true)
+                self?.owner?.statusMessage = "Bluetooth: connected"
+            }
+        lastPacketAt = Date().timeIntervalSince1970
         if driftTimer == nil {
           driftTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             self?.sendDriftRequestIfNeeded()
@@ -261,6 +367,14 @@ extension BLEDriftManager: CBPeripheralManagerDelegate {
         if driftCharacteristic?.subscribedCentrals?.isEmpty ?? true {
             driftTimer?.invalidate()
             driftTimer = nil
+            // Link is down — if SYNC is ON, keep amber & advertising; else go off
+                        ensureAdvertisingIfParent() // (no-op if SYNC is OFF)
+                        if owner?.isEnabled != true {
+                            DispatchQueue.main.async { [weak self] in
+                                self?.owner?.setEstablished(false)
+                                self?.owner?.statusMessage = "Bluetooth: off"
+                            }
+                        }
         }
     }
 
@@ -275,7 +389,7 @@ extension BLEDriftManager: CBPeripheralManagerDelegate {
         }
     }
 }
-// MARK: – CBCentralManagerDelegate (Child)
+
 // MARK: – CBCentralManagerDelegate (Child)
 extension BLEDriftManager: CBCentralManagerDelegate, CBPeripheralDelegate {
 
@@ -293,9 +407,7 @@ extension BLEDriftManager: CBCentralManagerDelegate, CBPeripheralDelegate {
             var options: [String:Any] = [
                 CBCentralManagerScanOptionAllowDuplicatesKey: false
             ]
-            if let name = owner?.pairingDeviceName {
-                options[CBAdvertisementDataLocalNameKey] = name
-            }
+            
             print("Child: central poweredOn → scanning for \(serviceUUIDs) with options \(options)")
             central.scanForPeripherals(withServices: serviceUUIDs, options: options)
 
@@ -310,17 +422,17 @@ extension BLEDriftManager: CBCentralManagerDelegate, CBPeripheralDelegate {
 
 
         private func startScanningAsChild() {
-            // only scan if we've actually stored a pairing service UUID
-            guard let svcUUID = owner?.pairingServiceUUID else {
-                print("Child: no pairingServiceUUID set, not scanning")
-                return
-            }
-            print("Child: scanning for service \(svcUUID)")
+            // Default to our known service if the app hasn’t seeded it yet
+                   let svcUUID = owner?.pairingServiceUUID ?? timerServiceUUID
             let options: [String: Any] = [CBCentralManagerScanOptionAllowDuplicatesKey: false]
             centralManager.scanForPeripherals(
                 withServices: [svcUUID],
                 options: options
             )
+            print("Child: scanning for service \(svcUUID)")
+                DispatchQueue.main.async { [weak self] in
+                    self?.owner?.statusMessage = "Bluetooth: searching…"
+                }
         }
     
     func centralManager(
@@ -329,6 +441,11 @@ extension BLEDriftManager: CBCentralManagerDelegate, CBPeripheralDelegate {
         advertisementData: [String : Any],
         rssi RSSI: NSNumber
     ) {
+        // Prefer close parents only (quick heuristic)
+                guard RSSI.intValue >= -80 else {
+                    // too far; ignore to reduce accidental picks in dense rooms
+                    return
+                }
         // log everything we see on discovery
         print("Child: discovered \(peripheral.name ?? "<no name>") [\(peripheral.identifier)] → advData:", advertisementData)
 
@@ -375,6 +492,7 @@ extension BLEDriftManager: CBCentralManagerDelegate, CBPeripheralDelegate {
         func centralManager(_ central: CBCentralManager,
                         didConnect peripheral: CBPeripheral) {
         print("Child: didConnect to \(peripheral.name ?? "<no-name>")")
+            lastPacketAt = Date().timeIntervalSince1970
         peripheral.discoverServices([timerServiceUUID])
     }
         
@@ -382,35 +500,78 @@ extension BLEDriftManager: CBCentralManagerDelegate, CBPeripheralDelegate {
                             didFailToConnect peripheral: CBPeripheral,
                             error: Error?) {
             cleanupPeripheral(peripheral)
+            DispatchQueue.main.async { [weak self] in
+                            self?.owner?.setEstablished(false)
+                            self?.owner?.statusMessage = (self?.owner?.isEnabled == true) ? "Bluetooth: searching…" : "Bluetooth: off"
+                        }
+                        // resume scan only while SYNC is ON
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                            self?.restartScanIfChild()
+                        }
         }
         
         func centralManager(_ central: CBCentralManager,
                             didDisconnectPeripheral peripheral: CBPeripheral,
                             error: Error?) {
             cleanupPeripheral(peripheral)
+            DispatchQueue.main.async { [weak self] in
+                            self?.owner?.setEstablished(false)
+                            self?.owner?.statusMessage = (self?.owner?.isEnabled == true) ? "Bluetooth: searching…" : "Bluetooth: off"
+                        }
+                        // resume scan only while SYNC is ON
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                            self?.restartScanIfChild()
+                        }
         }
+    
         
     func peripheral(_ peripheral: CBPeripheral,
                     didDiscoverServices error: Error?) {
         print("Child: didDiscoverServices:", peripheral.services ?? [])
-        guard let svcs = peripheral.services else { return }
-        for svc in svcs where svc.uuid == timerServiceUUID {
-            peripheral.discoverCharacteristics([driftCharacteristicUUID], for: svc)
-            return
-        }
+        guard let svcs = peripheral.services, !svcs.isEmpty else {
+                    // No services → bounce and rescan
+                    centralManager.cancelPeripheralConnection(peripheral)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                        self?.restartScanIfChild()
+                    }
+                    return
+                }
+                for svc in svcs where svc.uuid == timerServiceUUID {
+                    peripheral.discoverCharacteristics([driftCharacteristicUUID], for: svc)
+                    return
+                }
+                // Timer service not present → bounce and rescan
+                print("Child: timer service not found, reconnecting…")
+                centralManager.cancelPeripheralConnection(peripheral)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                    self?.restartScanIfChild()
+                }
     }
     
     func peripheral(_ peripheral: CBPeripheral,
                     didDiscoverCharacteristicsFor service: CBService,
                     error: Error?) {
         print("Child: didDiscoverCharacteristicsFor", service.uuid, service.characteristics ?? [])
-        guard let chars = service.characteristics else { return }
-        for char in chars where char.uuid == driftCharacteristicUUID {
-            driftCharOnPeripheral = char
-            print("Child: subscribing to drift characteristic")
-            peripheral.setNotifyValue(true, for: char)
-            return
-        }
+        guard let chars = service.characteristics, !chars.isEmpty else {
+                    // No characteristics → bounce and rescan
+                    centralManager.cancelPeripheralConnection(peripheral)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                        self?.restartScanIfChild()
+                    }
+                    return
+                }
+                for char in chars where char.uuid == driftCharacteristicUUID {
+                    driftCharOnPeripheral = char
+                    print("Child: subscribing to drift characteristic")
+                    peripheral.setNotifyValue(true, for: char)
+                    return
+                }
+                // Our characteristic wasn’t found → bounce and rescan
+                print("Child: drift characteristic not found, reconnecting…")
+                centralManager.cancelPeripheralConnection(peripheral)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                    self?.restartScanIfChild()
+                }
     }
 
     func peripheral(_ peripheral: CBPeripheral,
@@ -420,8 +581,47 @@ extension BLEDriftManager: CBCentralManagerDelegate, CBPeripheralDelegate {
             print("Child: subscribe failed:", err)
         } else {
             print("Child: isNotifying =", characteristic.isNotifying)
+            if characteristic.isNotifying {
+                        // Notification stream is live — show green
+                        DispatchQueue.main.async { [weak self] in
+                            self?.owner?.setEstablished(true)
+                            self?.owner?.statusMessage = "Bluetooth: connected"
+                        }
+                childIsNotifying = true
+                                        lastPacketAt = Date().timeIntervalSince1970
+                    } else {
+                        DispatchQueue.main.async { [weak self] in
+                            self?.owner?.setEstablished(false)
+                            self?.owner?.statusMessage = (self?.owner?.isEnabled == true) ? "Bluetooth: searching…" : "Bluetooth: off"
+                        }
+                        childIsNotifying = false
+                        // If we’re still connected but not notifying, tear down and rescan to heal.
+                                                if peripheral.state == .connected {
+                                                    centralManager.cancelPeripheralConnection(peripheral)
+                                                }
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                                                    self?.restartScanIfChild()
+                                                }
+                    }
         }
     }
+    // MARK: - Timer control over BLE
+        /// Parent → all subscribed children
+        func sendTimerMessageToChildren(_ msg: TimerMessage) {
+            // We’re the parent and we have a characteristic to notify on
+            guard shouldActAsParent, let characteristic = driftCharacteristic else { return }
+            // Only bother if at least one child is subscribed
+            if (characteristic.subscribedCentrals?.isEmpty ?? true) { return }
+            guard let data = try? JSONEncoder().encode(msg) else { return }
+            _ = peripheralManager.updateValue(data, for: characteristic, onSubscribedCentrals: nil)
+        }
+
+        /// Child → parent (optional symmetry; harmless if unused)
+        func sendTimerMessageToParent(_ msg: TimerMessage) {
+            guard let p = discoveredPeripheral, let c = driftCharOnPeripheral else { return }
+            guard let data = try? JSONEncoder().encode(msg) else { return }
+            p.writeValue(data, for: c, type: .withoutResponse)
+        }
 
     func peripheral(_ peripheral: CBPeripheral,
                     didUpdateValueFor characteristic: CBCharacteristic,
@@ -431,17 +631,25 @@ extension BLEDriftManager: CBCentralManagerDelegate, CBPeripheralDelegate {
             return
         }
         guard let data = characteristic.value else { return }
+        lastPacketAt = Date().timeIntervalSince1970
 
-        if let req = try? JSONDecoder().decode(DriftRequest.self, from: data) {
-            handleDriftRequest(req)
-        }
-        else if let _ = try? JSONDecoder().decode(Double.self, from: data) {
-            handleDriftCorrection(data)
-        } else {
-            print("Child: Unexpected BLE packet")
-        }
+        // ① Try full timer control first (parent → child)
+                if let msg = try? JSONDecoder().decode(TimerMessage.self, from: data) {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.owner?.onReceiveTimer?(msg)
+                        self?.owner?.setEstablished(true) // keep lamp green while control flows
+                    }
+                    return
+                }
+                // ② Fall back to drift protocol
+                if let req = try? JSONDecoder().decode(DriftRequest.self, from: data) {
+                    handleDriftRequest(req)
+                } else if let _ = try? JSONDecoder().decode(Double.self, from: data) {
+                    handleDriftCorrection(data)
+                } else {
+                    print("Child: Unexpected BLE packet")
+                }
     }
-
     private func cleanupPeripheral(_ peripheral: CBPeripheral) {
         driftCharOnPeripheral   = nil
         discoveredPeripheral    = nil

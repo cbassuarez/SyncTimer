@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<cueSheet version="1">
+  <meta>
+    <title>Starter: Welcome to SyncTimer</title>
+    <notes>This sheet demonstrates every commonly used element:
+
+• Title, Notes, and Tags on the Details tab
+• Global Tempo &amp; Time Signature (Metered mode)
+• Tempo Changes and Time Signature Changes
+• Events list: Cue (flash), Stop (with Hold), Restart
+• Absolute-time vs Metered (musical position) authoring
+
+Tips:
++– Absolute-time events NEVER change when you edit tempo/meter.
++– Metered events display as Bar/Beat/Subdivision and update live with tempo/meter.
++– Tap the “@ position” label to momentarily reveal absolute time.
++– Paperclip in the Events bar opens the Cue Sheets library (this file lives there).</notes>
+    <timeSignature num="4" den="4"/>
+    <tempo bpm="120.0"/>
+  </meta>
+  <events>
+    <event type="cue" at="10.0" label="Rehearsal Mark 1"/>
+    <event type="cue" at="20.0" label="Rehearsal Mark 2"/>
+    <event type="stop" at="25.0" holdSeconds="4.999999999999998" label="Fermata before R.M. 3"/>
+  </events>
+</cueSheet>

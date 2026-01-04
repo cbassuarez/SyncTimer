@@ -7,13 +7,42 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		961396C22E0D503800B847F3 /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 961396B22E0D503800B847F3 /* SharedModels.swift */; };
-		961396D22E0D503800B847F3 /* SharedModels.swift in Resources */ = {isa = PBXBuildFile; fileRef = 961396B22E0D503800B847F3 /* SharedModels.swift */; };
-		966A13362DF6D3E000C2ADF2 /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9640DBA32DF695F0002688A4 /* WatchConnectivity.framework */; };
-		96A0D8092E0D655F00DF3C27 /* ConnectivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 966A133D2DF6F11500C2ADF2 /* ConnectivityManager.swift */; };
+		961396C22E0D503800B847F3 /* StopEventWire.swift in Sources */ = {isa = PBXBuildFile; fileRef = 961396B22E0D503800B847F3 /* StopEventWire.swift */; };
+		961396D22E0D503800B847F3 /* StopEventWire.swift in Resources */ = {isa = PBXBuildFile; fileRef = 961396B22E0D503800B847F3 /* StopEventWire.swift */; };
+		9636A7392E79193100A062B6 /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9640DBA32DF695F0002688A4 /* WatchConnectivity.framework */; };
+		9636A7622E791DBD00A062B6 /* SyncTimerWatch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 9636A7422E791DBB00A062B6 /* SyncTimerWatch Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		968E1B0C2E79357500F79392 /* StopEventWire.swift in Sources */ = {isa = PBXBuildFile; fileRef = 961396B22E0D503800B847F3 /* StopEventWire.swift */; };
+		968E1B102E79389800F79392 /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9640DBA32DF695F0002688A4 /* WatchConnectivity.framework */; };
+		96DF202A2E79311700FFB580 /* TimerMessage+Wire.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96DF20292E79311700FFB580 /* TimerMessage+Wire.swift */; };
+		96DF202B2E79312800FFB580 /* TimerMessage+Wire.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96DF20292E79311700FFB580 /* TimerMessage+Wire.swift */; };
+		96F296442E793F130039B071 /* ConnectivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96F296122E793F130039B071 /* ConnectivityManager.swift */; };
+		96F296452E793F130039B071 /* ControlRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96F296132E793F130039B071 /* ControlRequest.swift */; };
+		96F2965D2E793F130039B071 /* ConnectivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96F296122E793F130039B071 /* ConnectivityManager.swift */; };
+		96F2965E2E793F130039B071 /* ControlRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96F296132E793F130039B071 /* ControlRequest.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		9636A74F2E791DBD00A062B6 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 96DB42052DE84D160027E9AA /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9636A7412E791DBB00A062B6;
+			remoteInfo = "SyncTimerWatch Watch App";
+		};
+		9636A7592E791DBD00A062B6 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 96DB42052DE84D160027E9AA /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9636A7412E791DBB00A062B6;
+			remoteInfo = "SyncTimerWatch Watch App";
+		};
+		9636A7602E791DBD00A062B6 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 96DB42052DE84D160027E9AA /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9636A7412E791DBB00A062B6;
+			remoteInfo = "SyncTimerWatch Watch App";
+		};
 		96DB421E2DE84D190027E9AA /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 96DB42052DE84D160027E9AA /* Project object */;
@@ -37,6 +66,7 @@
 			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
 			dstSubfolderSpec = 16;
 			files = (
+				9636A7622E791DBD00A062B6 /* SyncTimerWatch Watch App.app in Embed Watch Content */,
 			);
 			name = "Embed Watch Content";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -53,17 +83,44 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		961396B22E0D503800B847F3 /* SharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedModels.swift; sourceTree = "<group>"; };
+		961396B22E0D503800B847F3 /* StopEventWire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StopEventWire.swift; sourceTree = "<group>"; };
+		9636A7422E791DBB00A062B6 /* SyncTimerWatch Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "SyncTimerWatch Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		9636A74E2E791DBD00A062B6 /* SyncTimerWatch Watch AppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "SyncTimerWatch Watch AppTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		9636A7582E791DBD00A062B6 /* SyncTimerWatch Watch AppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "SyncTimerWatch Watch AppUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		9640DBA32DF695F0002688A4 /* WatchConnectivity.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WatchConnectivity.framework; path = System/Library/Frameworks/WatchConnectivity.framework; sourceTree = SDKROOT; };
-		9640DBAD2DF69F1E002688A4 /* WatchConnectivity.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WatchConnectivity.framework; path = Platforms/WatchOS.platform/Developer/SDKs/WatchOS11.2.sdk/System/Library/Frameworks/WatchConnectivity.framework; sourceTree = DEVELOPER_DIR; };
-		966A133D2DF6F11500C2ADF2 /* ConnectivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectivityManager.swift; sourceTree = "<group>"; };
 		96A52D8E2DEBD95A00136C53 /* LinkKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = LinkKit.xcframework; sourceTree = "<group>"; };
 		96DB420D2DE84D160027E9AA /* SyncTimer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SyncTimer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		96DB421D2DE84D190027E9AA /* SyncTimerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SyncTimerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		96DB42272DE84D190027E9AA /* SyncTimerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SyncTimerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		96DF20292E79311700FFB580 /* TimerMessage+Wire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TimerMessage+Wire.swift"; sourceTree = "<group>"; };
+		96F296122E793F130039B071 /* ConnectivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectivityManager.swift; sourceTree = "<group>"; };
+		96F296132E793F130039B071 /* ControlRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlRequest.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		964605212E8A8FB8003B5415 /* Exceptions for "SyncTimer" folder in "SyncTimerWatch Watch App" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				AppIcon.icon,
+			);
+			target = 9636A7412E791DBB00A062B6 /* SyncTimerWatch Watch App */;
+		};
+		968E1B092E79329900F79392 /* Exceptions for "Watch" folder in "SyncTimer" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				WatchStubs.swift,
+				WatchSyncTimerApp.swift,
+			);
+			target = 96DB420C2DE84D160027E9AA /* SyncTimer */;
+		};
+		968E1B0A2E79329900F79392 /* Exceptions for "Watch" folder in "SyncTimerWatch Watch App" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				NowView.swift,
+				WatchSyncTimerApp.swift,
+			);
+			target = 9636A7412E791DBB00A062B6 /* SyncTimerWatch Watch App */;
+		};
 		96F6611B2E0D304B00F78CC3 /* Exceptions for "SyncTimer" folder in "SyncTimer" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -74,10 +131,35 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		9636A7432E791DBB00A062B6 /* SyncTimerWatch Watch App */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "SyncTimerWatch Watch App";
+			sourceTree = "<group>";
+		};
+		9636A7512E791DBD00A062B6 /* SyncTimerWatch Watch AppTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "SyncTimerWatch Watch AppTests";
+			sourceTree = "<group>";
+		};
+		9636A75B2E791DBD00A062B6 /* SyncTimerWatch Watch AppUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "SyncTimerWatch Watch AppUITests";
+			sourceTree = "<group>";
+		};
+		968E1B082E79328D00F79392 /* Watch */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				968E1B092E79329900F79392 /* Exceptions for "Watch" folder in "SyncTimer" target */,
+				968E1B0A2E79329900F79392 /* Exceptions for "Watch" folder in "SyncTimerWatch Watch App" target */,
+			);
+			path = Watch;
+			sourceTree = "<group>";
+		};
 		96DB420F2DE84D160027E9AA /* SyncTimer */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				96F6611B2E0D304B00F78CC3 /* Exceptions for "SyncTimer" folder in "SyncTimer" target */,
+				964605212E8A8FB8003B5415 /* Exceptions for "SyncTimer" folder in "SyncTimerWatch Watch App" target */,
 			);
 			path = SyncTimer;
 			sourceTree = "<group>";
@@ -95,11 +177,33 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		9636A73F2E791DBB00A062B6 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				968E1B102E79389800F79392 /* WatchConnectivity.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9636A74B2E791DBD00A062B6 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9636A7552E791DBD00A062B6 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		96DB420A2DE84D160027E9AA /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				966A13362DF6D3E000C2ADF2 /* WatchConnectivity.framework in Frameworks */,
+				9636A7392E79193100A062B6 /* WatchConnectivity.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -123,8 +227,10 @@
 		966A133E2DF6F11500C2ADF2 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
-				961396B22E0D503800B847F3 /* SharedModels.swift */,
-				966A133D2DF6F11500C2ADF2 /* ConnectivityManager.swift */,
+				961396B22E0D503800B847F3 /* StopEventWire.swift */,
+				96DF20292E79311700FFB580 /* TimerMessage+Wire.swift */,
+				96F296122E793F130039B071 /* ConnectivityManager.swift */,
+				96F296132E793F130039B071 /* ControlRequest.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -135,9 +241,13 @@
 				96DB420F2DE84D160027E9AA /* SyncTimer */,
 				96DB42202DE84D190027E9AA /* SyncTimerTests */,
 				96DB422A2DE84D190027E9AA /* SyncTimerUITests */,
+				9636A7432E791DBB00A062B6 /* SyncTimerWatch Watch App */,
+				9636A7512E791DBD00A062B6 /* SyncTimerWatch Watch AppTests */,
+				9636A75B2E791DBD00A062B6 /* SyncTimerWatch Watch AppUITests */,
 				96E33BE82DEBEB6600244D10 /* Frameworks */,
 				96DB420E2DE84D160027E9AA /* Products */,
 				966A133E2DF6F11500C2ADF2 /* Shared */,
+				968E1B082E79328D00F79392 /* Watch */,
 			);
 			sourceTree = "<group>";
 		};
@@ -148,6 +258,9 @@
 				96DB421D2DE84D190027E9AA /* SyncTimerTests.xctest */,
 				96DB42272DE84D190027E9AA /* SyncTimerUITests.xctest */,
 				96A52D8E2DEBD95A00136C53 /* LinkKit.xcframework */,
+				9636A7422E791DBB00A062B6 /* SyncTimerWatch Watch App.app */,
+				9636A74E2E791DBD00A062B6 /* SyncTimerWatch Watch AppTests.xctest */,
+				9636A7582E791DBD00A062B6 /* SyncTimerWatch Watch AppUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -155,7 +268,6 @@
 		96E33BE82DEBEB6600244D10 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				9640DBAD2DF69F1E002688A4 /* WatchConnectivity.framework */,
 				9640DBA32DF695F0002688A4 /* WatchConnectivity.framework */,
 			);
 			name = Frameworks;
@@ -164,6 +276,74 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		9636A7412E791DBB00A062B6 /* SyncTimerWatch Watch App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9636A7632E791DBD00A062B6 /* Build configuration list for PBXNativeTarget "SyncTimerWatch Watch App" */;
+			buildPhases = (
+				9636A73E2E791DBB00A062B6 /* Sources */,
+				9636A73F2E791DBB00A062B6 /* Frameworks */,
+				9636A7402E791DBB00A062B6 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				9636A7432E791DBB00A062B6 /* SyncTimerWatch Watch App */,
+			);
+			name = "SyncTimerWatch Watch App";
+			packageProductDependencies = (
+			);
+			productName = "SyncTimerWatch Watch App";
+			productReference = 9636A7422E791DBB00A062B6 /* SyncTimerWatch Watch App.app */;
+			productType = "com.apple.product-type.application";
+		};
+		9636A74D2E791DBD00A062B6 /* SyncTimerWatch Watch AppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9636A7662E791DBD00A062B6 /* Build configuration list for PBXNativeTarget "SyncTimerWatch Watch AppTests" */;
+			buildPhases = (
+				9636A74A2E791DBD00A062B6 /* Sources */,
+				9636A74B2E791DBD00A062B6 /* Frameworks */,
+				9636A74C2E791DBD00A062B6 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9636A7502E791DBD00A062B6 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				9636A7512E791DBD00A062B6 /* SyncTimerWatch Watch AppTests */,
+			);
+			name = "SyncTimerWatch Watch AppTests";
+			packageProductDependencies = (
+			);
+			productName = "SyncTimerWatch Watch AppTests";
+			productReference = 9636A74E2E791DBD00A062B6 /* SyncTimerWatch Watch AppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		9636A7572E791DBD00A062B6 /* SyncTimerWatch Watch AppUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9636A7692E791DBD00A062B6 /* Build configuration list for PBXNativeTarget "SyncTimerWatch Watch AppUITests" */;
+			buildPhases = (
+				9636A7542E791DBD00A062B6 /* Sources */,
+				9636A7552E791DBD00A062B6 /* Frameworks */,
+				9636A7562E791DBD00A062B6 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9636A75A2E791DBD00A062B6 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				9636A75B2E791DBD00A062B6 /* SyncTimerWatch Watch AppUITests */,
+			);
+			name = "SyncTimerWatch Watch AppUITests";
+			packageProductDependencies = (
+			);
+			productName = "SyncTimerWatch Watch AppUITests";
+			productReference = 9636A7582E791DBD00A062B6 /* SyncTimerWatch Watch AppUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		96DB420C2DE84D160027E9AA /* SyncTimer */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 96DB42312DE84D190027E9AA /* Build configuration list for PBXNativeTarget "SyncTimer" */;
@@ -177,8 +357,10 @@
 			buildRules = (
 			);
 			dependencies = (
+				9636A7612E791DBD00A062B6 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
+				968E1B082E79328D00F79392 /* Watch */,
 				96DB420F2DE84D160027E9AA /* SyncTimer */,
 			);
 			name = SyncTimer;
@@ -241,9 +423,20 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 1620;
+				LastSwiftUpdateCheck = 2600;
 				LastUpgradeCheck = 1620;
 				TargetAttributes = {
+					9636A7412E791DBB00A062B6 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					9636A74D2E791DBD00A062B6 = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = 9636A7412E791DBB00A062B6;
+					};
+					9636A7572E791DBD00A062B6 = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = 9636A7412E791DBB00A062B6;
+					};
 					96DB420C2DE84D160027E9AA = {
 						CreatedOnToolsVersion = 16.2;
 					};
@@ -276,16 +469,40 @@
 				96DB420C2DE84D160027E9AA /* SyncTimer */,
 				96DB421C2DE84D190027E9AA /* SyncTimerTests */,
 				96DB42262DE84D190027E9AA /* SyncTimerUITests */,
+				9636A7412E791DBB00A062B6 /* SyncTimerWatch Watch App */,
+				9636A74D2E791DBD00A062B6 /* SyncTimerWatch Watch AppTests */,
+				9636A7572E791DBD00A062B6 /* SyncTimerWatch Watch AppUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		9636A7402E791DBB00A062B6 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9636A74C2E791DBD00A062B6 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9636A7562E791DBD00A062B6 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		96DB420B2DE84D160027E9AA /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				961396D22E0D503800B847F3 /* SharedModels.swift in Resources */,
+				961396D22E0D503800B847F3 /* StopEventWire.swift in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -306,12 +523,39 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		9636A73E2E791DBB00A062B6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				96F2965D2E793F130039B071 /* ConnectivityManager.swift in Sources */,
+				96F2965E2E793F130039B071 /* ControlRequest.swift in Sources */,
+				968E1B0C2E79357500F79392 /* StopEventWire.swift in Sources */,
+				96DF202B2E79312800FFB580 /* TimerMessage+Wire.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9636A74A2E791DBD00A062B6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9636A7542E791DBD00A062B6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		96DB42092DE84D160027E9AA /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				961396C22E0D503800B847F3 /* SharedModels.swift in Sources */,
-				96A0D8092E0D655F00DF3C27 /* ConnectivityManager.swift in Sources */,
+				961396C22E0D503800B847F3 /* StopEventWire.swift in Sources */,
+				96DF202A2E79311700FFB580 /* TimerMessage+Wire.swift in Sources */,
+				96F296442E793F130039B071 /* ConnectivityManager.swift in Sources */,
+				96F296452E793F130039B071 /* ControlRequest.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -332,6 +576,21 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		9636A7502E791DBD00A062B6 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9636A7412E791DBB00A062B6 /* SyncTimerWatch Watch App */;
+			targetProxy = 9636A74F2E791DBD00A062B6 /* PBXContainerItemProxy */;
+		};
+		9636A75A2E791DBD00A062B6 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9636A7412E791DBB00A062B6 /* SyncTimerWatch Watch App */;
+			targetProxy = 9636A7592E791DBD00A062B6 /* PBXContainerItemProxy */;
+		};
+		9636A7612E791DBD00A062B6 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9636A7412E791DBB00A062B6 /* SyncTimerWatch Watch App */;
+			targetProxy = 9636A7602E791DBD00A062B6 /* PBXContainerItemProxy */;
+		};
 		96DB421F2DE84D190027E9AA /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 96DB420C2DE84D160027E9AA /* SyncTimer */;
@@ -345,6 +604,162 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		9636A7642E791DBD00A062B6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S74572Q65M;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = SyncTimerWatch;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.StageDevices.SyncTimer;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.StageDevices.SyncTimer.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		9636A7652E791DBD00A062B6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S74572Q65M;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = SyncTimerWatch;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.StageDevices.SyncTimer;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.StageDevices.SyncTimer.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
+		9636A7672E791DBD00A062B6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S74572Q65M;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "StageDevices.SyncTimerWatch-Watch-AppTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SyncTimerWatch Watch App.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SyncTimerWatch Watch App";
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		9636A7682E791DBD00A062B6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S74572Q65M;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "StageDevices.SyncTimerWatch-Watch-AppTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SyncTimerWatch Watch App.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SyncTimerWatch Watch App";
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
+		9636A76A2E791DBD00A062B6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S74572Q65M;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "StageDevices.SyncTimerWatch-Watch-AppUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_TARGET_NAME = "SyncTimerWatch Watch App";
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		9636A76B2E791DBD00A062B6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S74572Q65M;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "StageDevices.SyncTimerWatch-Watch-AppUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_TARGET_NAME = "SyncTimerWatch Watch App";
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
 		96DB422F2DE84D190027E9AA /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -470,8 +885,10 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				BUILD_LIBRARY_FOR_DISTRIBUTION = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_ASSET_PATHS = "\"SyncTimer/Preview Content\"";
 				DEVELOPMENT_TEAM = S74572Q65M;
 				ENABLE_PREVIEWS = YES;
@@ -487,17 +904,20 @@
 				INFOPLIST_FILE = SyncTimer/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = SyncTimer;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "We need Bluetooth to sync timers with other devices.";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Uses BLE to connect to other device timers.";
 				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "This app uses Bluetooth to automatically discover and synchronize timers with nearby devices.";
-				INFOPLIST_KEY_NSCameraUsageDescription = "We need to scan a pairing code to set up Bluetooth sync.";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "SyncTimer needs to discover other SyncTimer instances on your local network to form a lobby.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Uses camera to connect to other devices (deprecated).";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Uses TCP/Bonjour to connect to other device timers.";
+				INFOPLIST_KEY_NSNearbyInteractionUsageDescription = "SyncTimer uses Nearby to securely pair devices.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIMainStoryboardFile = Main;
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait";
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				"IPHONEOS_DEPLOYMENT_TARGET[sdk=iphoneos*]" = 18.0;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_UISupportsDocumentBrowser = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				"IPHONEOS_DEPLOYMENT_TARGET[sdk=iphoneos*]" = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = $inhereted;
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
@@ -505,11 +925,12 @@
 					"$(SRCROOT)",
 					"$(PROJECT_DIR)",
 				);
-				MARKETING_VERSION = 0.5;
+				MARKETING_VERSION = 0.8;
 				OTHER_LDFLAGS = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.StageDevices.SyncTimer;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SKIP_INSTALL = NO;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
@@ -527,6 +948,8 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				BUILD_LIBRARY_FOR_DISTRIBUTION = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"SyncTimer/Preview Content\"";
@@ -544,15 +967,18 @@
 				INFOPLIST_FILE = SyncTimer/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = SyncTimer;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "We need Bluetooth to sync timers with other devices.";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Uses BLE to connect to other device timers.";
 				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "This app uses Bluetooth to automatically discover and synchronize timers with nearby devices.";
-				INFOPLIST_KEY_NSCameraUsageDescription = "We need to scan a pairing code to set up Bluetooth sync.";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "SyncTimer needs to discover other SyncTimer instances on your local network to form a lobby.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Uses camera to connect to other devices (deprecated).";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Uses TCP/Bonjour to connect to other device timers.";
+				INFOPLIST_KEY_NSNearbyInteractionUsageDescription = "SyncTimer uses Nearby to securely pair devices.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIMainStoryboardFile = Main;
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_UISupportsDocumentBrowser = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				"IPHONEOS_DEPLOYMENT_TARGET[sdk=iphoneos*]" = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = $inhereted;
@@ -562,12 +988,13 @@
 					"$(SRCROOT)",
 					"$(PROJECT_DIR)",
 				);
-				MARKETING_VERSION = 0.5;
+				MARKETING_VERSION = 0.8;
 				ONLY_ACTIVE_ARCH = NO;
 				OTHER_LDFLAGS = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.StageDevices.SyncTimer;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SKIP_INSTALL = NO;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
@@ -658,6 +1085,33 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		9636A7632E791DBD00A062B6 /* Build configuration list for PBXNativeTarget "SyncTimerWatch Watch App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9636A7642E791DBD00A062B6 /* Debug */,
+				9636A7652E791DBD00A062B6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		9636A7662E791DBD00A062B6 /* Build configuration list for PBXNativeTarget "SyncTimerWatch Watch AppTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9636A7672E791DBD00A062B6 /* Debug */,
+				9636A7682E791DBD00A062B6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		9636A7692E791DBD00A062B6 /* Build configuration list for PBXNativeTarget "SyncTimerWatch Watch AppUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9636A76A2E791DBD00A062B6 /* Debug */,
+				9636A76B2E791DBD00A062B6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		96DB42082DE84D160027E9AA /* Build configuration list for PBXProject "SyncTimer" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

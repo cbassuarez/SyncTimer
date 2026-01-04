@@ -12,8 +12,7 @@ fileprivate let bonjourServiceType = "_synctimer._tcp."
 
 /// Keys for our TXT record
 private enum TXTKey {
-    static let lobbyCode = "lobby"
-    static let lock      = "lock"
+    
     static let role      = "role"
     static let timestamp = "ts"
 
@@ -78,10 +77,9 @@ final class BonjourSyncManager: NSObject {
         // Build initial TXT record from current timer state:
         let txtData = makeTXTRecord()
 
-        let svc = NetService(domain: "local.",
-                             type: bonjourServiceType,
-                             name: name,
-                             port: port)
+        if netService != nil { return }                    // idempotent
+            let svc = NetService(domain: "local.", type: bonjourServiceType, name: name, port: port)
+        svc.includesPeerToPeer = true          // ← allow AWDL
         svc.delegate = self
         svc.setTXTRecord(txtData)
         svc.publish(options: [.listenForConnections])
@@ -100,7 +98,6 @@ final class BonjourSyncManager: NSObject {
         if netService != nil { return }          // already advertising
 
         let isParent = (settings.role == .parent)
-        print("[AD] \(isParent ? "Parent" : "Child") advertising with lobby code =", settings.currentCode)
 
         // —— key change ↓ ——
         let port: Int32 = isParent ? 50000               // parent’s listener
@@ -139,8 +136,9 @@ final class BonjourSyncManager: NSObject {
         txtUpdateTimer?.invalidate()
         txtUpdateTimer = nil
 
-        netService?.stop()
-        netService = nil
+        guard let svc = netService else { return }
+            svc.stop()
+            netService = nil
     }
     // 2️⃣ Only the *child* opens the TCP connection
     private func maybeConnectTo(_ service: NetService) {
@@ -182,11 +180,7 @@ final class BonjourSyncManager: NSObject {
         dict[TXTKey.remaining] = Data(remainString.utf8)
         dict[TXTKey.rawEvents] = eventData
 
-        // Lobby code & lock
-            let code = settings.currentCode
-            dict[TXTKey.lobbyCode] = Data(code.utf8)
-            dict[TXTKey.lock]     = Data((settings.isLobbyLocked ? "1" : "0").utf8)
-
+        
             // Role
             let roleStr = (settings.role == .parent) ? "parent" : "child"
             dict[TXTKey.role]     = Data(roleStr.utf8)
@@ -208,17 +202,20 @@ final class BonjourSyncManager: NSObject {
     // MARK: – Child APIs
     func startBrowsing() {
       // tear down any old browser
-      browser?.stop()
-      browser = NetServiceBrowser()
-      browser!.delegate = self
-      browser!.searchForServices(ofType: bonjourServiceType, inDomain: "local.")
+        if browser != nil { return }                       // idempotent
+            let b = NetServiceBrowser()
+            b.includesPeerToPeer = true                        // <— AWDL
+            b.delegate = self
+            browser = b
+            b.searchForServices(ofType: bonjourServiceType, inDomain: "local.")
       DispatchQueue.main.async { self.syncSettings?.statusMessage = "Bonjour: searching…" }
       // optional timeout...
     }
 
     func stopBrowsing() {
-      browser?.stop()
-      browser = nil
+        guard let b = browser else { return }
+            b.stop()
+            browser = nil
       pendingResolve.removeAll()
     }
 

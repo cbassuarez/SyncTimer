@@ -1,0 +1,152 @@
+{
+  "fill" : "automatic",
+  "groups" : [
+    {
+      "blend-mode-specializations" : [
+        {
+          "value" : "hard-light"
+        },
+        {
+          "appearance" : "dark",
+          "value" : "screen"
+        }
+      ],
+      "blur-material" : 0.58,
+      "hidden" : false,
+      "layers" : [
+        {
+          "hidden" : false,
+          "image-name" : "New Project.svg",
+          "name" : "New Project",
+          "position" : {
+            "scale" : 0.32,
+            "translation-in-points" : [
+              218,
+              0
+            ]
+          }
+        }
+      ],
+      "lighting" : "individual",
+      "name" : "Green Circle",
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 0.96
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.33
+      }
+    },
+    {
+      "blend-mode-specializations" : [
+        {
+          "value" : "multiply"
+        },
+        {
+          "appearance" : "dark",
+          "value" : "plus-lighter"
+        }
+      ],
+      "blur-material-specializations" : [
+        {
+          "value" : 0.88
+        },
+        {
+          "appearance" : "dark",
+          "value" : 0.54
+        }
+      ],
+      "hidden" : false,
+      "layers" : [
+        {
+          "hidden" : false,
+          "image-name" : "New Project-3.svg",
+          "name" : "New Project-3",
+          "opacity" : 1,
+          "position" : {
+            "scale" : 0.32,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "lighting" : "individual",
+      "name" : "Green Circle",
+      "opacity-specializations" : [
+        {
+          "value" : 1
+        },
+        {
+          "appearance" : "dark",
+          "value" : 0.84
+        }
+      ],
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 0.86
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.41
+      }
+    },
+    {
+      "blend-mode-specializations" : [
+        {
+          "value" : "plus-darker"
+        },
+        {
+          "appearance" : "dark",
+          "value" : "plus-lighter"
+        }
+      ],
+      "blur-material" : 0.26,
+      "hidden" : false,
+      "layers" : [
+        {
+          "image-name" : "New Project-2.svg",
+          "name" : "New Project-2",
+          "opacity" : 1,
+          "position" : {
+            "scale" : 0.32,
+            "translation-in-points" : [
+              -235.046875,
+              0
+            ]
+          }
+        }
+      ],
+      "lighting" : "individual",
+      "name" : "Green Circle",
+      "opacity-specializations" : [
+        {
+          "value" : 1
+        },
+        {
+          "appearance" : "dark",
+          "value" : 0.77
+        }
+      ],
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 0.78
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.75
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}

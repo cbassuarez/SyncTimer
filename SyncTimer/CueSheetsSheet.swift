@@ -1,0 +1,1972 @@
+//
+//  CueSheetsSheet.swift — Stable minimal library + loader
+//  SyncTimer
+//
+
+import Foundation
+import SwiftUI
+import UniformTypeIdentifiers
+import UIKit
+
+// MARK: - Header explainer
+private var cueSheetsExplainer: some View {
+    VStack(alignment: .leading, spacing: 6) {
+        Text("How to use Events Sheets")
+            .font(.subheadline.weight(.semibold))
+        Text("""
+Tap a sheet to load a score on your device and any connected devices.
+Edit or share from the ••• menu when needed, and use **Load Recent** to reopen past sheets.
+""")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+    }
+    .padding(.horizontal, 12)                 // inner - match header card
+    .padding(.vertical, 12)
+    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+    .padding(.horizontal, 12)                 // outer - match header card offset
+}
+private extension NoteGrid {
+    static var subdivisionsOnly: [NoteGrid] { [.quarter, .eighth, .sixteenth, .thirtySecond] }
+}
+
+
+private struct InlineDates: View {
+    let created: Date
+    let modified: Date
+
+    var body: some View {
+        let cal = Calendar.current
+        let sameDay = cal.isDate(created, inSameDayAs: modified)
+
+        let createdStr  = created.formatted(date: .abbreviated, time: .omitted)
+        let modifiedStr = sameDay
+            ? modified.formatted(date: .omitted, time: .shortened)                  // time only if same day
+            : "\(modified.formatted(date: .abbreviated, time: .omitted)) \(modified.formatted(date: .omitted, time: .shortened))"
+
+        return HStack(spacing: 6) {
+            Text("Created \(createdStr)")
+            Text("•")
+            Text("Modified \(modifiedStr)")
+        }
+        .font(.custom("Roboto-Regular", size: 12))
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .truncationMode(.tail)
+    }
+}
+
+// MARK: - Minimal FileDocument for potential future export (kept here; not used by default)
+struct XMLDoc: FileDocument {
+    static var readableContentTypes: [UTType] = [.xml]
+    var data: Data
+    var name: String
+    init(data: Data, name: String) { self.data = data; self.name = name }
+    init(configuration: ReadConfiguration) throws {
+        self.data = configuration.file.regularFileContents ?? Data()
+        self.name = "CueSheet.xml"
+    }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        let w = FileWrapper(regularFileWithContents: data)
+        w.preferredFilename = name.hasSuffix(".xml") ? name : (name + ".xml")
+        return w
+    }
+}
+extension URL: Identifiable { public var id: String { absoluteString } }
+
+// MARK: - Cue Sheets medium-detent
+struct CueSheetsSheet: View {
+    @Binding var isPresented: Bool
+    var canBroadcast: () -> Bool = { false }
+    let onLoad: (CueSheet) -> Void
+    let onBroadcast: (CueSheet) -> Void
+
+    // Own the subscription—do NOT use @ObservedObject for a publishing singleton here
+    @StateObject private var store = CueLibraryStore.shared
+
+
+    // UI state
+    @State private var searchText: String = ""
+    @State private var showingImporter = false
+    @State private var shareURL: URL? = nil
+    @State private var pendingSheet: CueSheet? = nil
+    @State private var editingSheet: CueSheet? = nil
+    private let cardRadius: CGFloat = 12  // match Recent/All cards
+    @State private var showBroadcastChoice = false
+
+    var body: some View {
+        // Snapshot data (filtered). If the store hasn’t primed yet, render empty.
+        let sheetsMap = store.index.sheets
+        let recentIDs = store.index.recents.uniqued()
+        let recentMetas: [CueLibraryIndex.SheetMeta] = recentIDs
+            .compactMap { sheetsMap[$0] }
+            .filter { filterMatches($0, search: searchText) }
+        let allMetas: [CueLibraryIndex.SheetMeta] = Array(sheetsMap.values)
+            .filter { filterMatches($0, search: searchText) }
+            .sorted { $0.modified > $1.modified }
+            
+        ScrollView {
+            
+            VStack(spacing: 14) {
+                Color.clear.frame(height: 8) // breathing room under grabber
+                
+                // Header (matches detent curvature)
+                HStack {
+                    Text("Events Sheets")
+                    .font(.custom("Roboto-SemiBold", size: 24))
+
+                    Spacer()
+                    Button { showingImporter = true } label: {
+                        Label("Import", systemImage: "square.and.arrow.down")
+                            .font(.custom("Roboto-Regular", size: 16))
+
+                    }
+                   
+                }
+               
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cardRadius, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: cardRadius, style: .continuous).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+                .padding(.horizontal, 16)
+                
+                // Explainer (below the header)
+                    cueSheetsExplainer
+                // Search (card radius + material)
+                SearchBar(text: $searchText, cornerRadius: cardRadius)
+                    .padding(.horizontal, 16)
+                
+                // Quick actions (pills with same radius/material)
+                HStack(spacing: 10) {
+                    Button { loadMostRecentIfAny() } label: {
+                        Label("Load Recent", systemImage: "clock.arrow.circlepath")
+                            .font(.custom("Roboto-Regular", size: 15))
+                            .padding(.horizontal, 12).padding(.vertical, 8)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cardRadius, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: cardRadius, style: .continuous).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+                    }
+                    Button { newBlank() } label: {
+                        Label("New Blank", systemImage: "plus")
+                            .font(.custom("Roboto-Regular", size: 15))
+                            .padding(.horizontal, 12).padding(.vertical, 8)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cardRadius, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: cardRadius, style: .continuous).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                
+                // Recent
+                if !recentMetas.isEmpty {
+                    SectionCard(title: "Recent") {
+                        VStack(spacing: 8) {
+                            ForEach(recentMetas, id: \.id) { meta in
+                                LibraryRow(
+                                    meta: meta,
+                                    onTap: { load(meta) },
+                                    onEdit: { if let s = try? store.load(meta: meta) { editingSheet = s } },
+                                    onDuplicate: {
+                                        do {
+                                            var s = try store.load(meta: meta)   // non-optional; no `if let`
+                                            s.id = UUID()
+                                            s.fileName = ""                      // force unique filename regeneration
+                                            let now = Date()
+                                            s.created = now
+                                            s.modified = now
+                                            try store.save(s, intoFolderID: nil, tags: s.tags)  // will append " (n)" if needed
+                                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                        } catch {
+                                            UINotificationFeedbackGenerator().notificationOccurred(.error)
+                                        }
+                                    },
+                                                                        onDelete: { delete(meta) },
+                                    onShare: { share(meta) }
+                                )
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+                
+                // All
+                SectionCard(title: "All") {
+                    if allMetas.isEmpty {
+                        Text("No sheets found.")
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        VStack(spacing: 8) {
+                            ForEach(allMetas, id: \.id) { meta in
+                                LibraryRow(
+                                    meta: meta,
+                                    onTap: { load(meta) },
+                                    onEdit: { if let s = try? store.load(meta: meta) { editingSheet = s } },
+                                    onDuplicate: {
+                                        do {
+                                            var s = try store.load(meta: meta)   // non-optional; no `if let`
+                                            s.id = UUID()
+                                            s.fileName = ""                      // force unique filename regeneration
+                                            let now = Date()
+                                            s.created = now
+                                            s.modified = now
+                                            try store.save(s, intoFolderID: nil, tags: s.tags)  // will append " (n)" if needed
+                                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                        } catch {
+                                            UINotificationFeedbackGenerator().notificationOccurred(.error)
+                                        }
+                                    },
+                                                                        onDelete: { delete(meta) },
+                                    onShare: { share(meta) }
+                                )
+                            }
+                        }
+                    }
+                    
+                }
+                .padding(.horizontal, 16)
+                Spacer(minLength: 8)
+            }
+            .padding(.bottom, 16)
+        }
+        
+        .presentationDetents([.medium, .large])
+        .presentationBackground(.ultraThinMaterial)
+        .presentationDragIndicator(.hidden)
+        .background(Color.clear)
+        // Base font for the entire Cue Sheets detent
+       .font(.custom("Roboto-Regular", size: 17))
+
+        
+        // Present the editor as a proper sheet instead of a custom overlay
+        .sheet(item: $editingSheet) { s in
+            CueSheetEditorSheet(
+                sheet: s,
+                onSave: { updated in
+                    try? store.save(updated, intoFolderID: nil, tags: updated.tags)
+                    editingSheet = nil
+                },
+                onCancel: { editingSheet = nil }
+            )
+            .presentationDetents([.large])                // <- consistent, focused editor
+            .presentationDragIndicator(.visible)
+            .presentationBackground(.ultraThinMaterial)
+        }
+
+        
+        
+        // Importer (XML only)
+         .fileImporter(
+             isPresented: $showingImporter,
+             allowedContentTypes: [.xml, .cueXML],
+             allowsMultipleSelection: false
+         ) { result in
+             switch result {
+             case .success(let urls):
+                 guard let url = urls.first else { return }
+                 // hop to next runloop so we’re not mutating while the importer is dismissing
+                 DispatchQueue.main.async {
+                     do {
+                         _ = try store.importXML(from: url, intoFolderID: nil)
+                         UINotificationFeedbackGenerator().notificationOccurred(.success)
+                     } catch {
+                         UINotificationFeedbackGenerator().notificationOccurred(.error)
+                     }
+                 }
+             case .failure:
+                 break
+             }
+         }
+
+       
+        .background(SharePresenter(url: $shareURL))
+        // Broadcast confirmation
+        .confirmationDialog(
+            "Load this sheet?",
+            isPresented: $showBroadcastChoice,
+            presenting: pendingSheet
+        ) { sheet in
+            Button("Load on this device") {
+                onLoad(sheet)
+                isPresented = false
+            }
+            Button("Load and broadcast (cues are buggy)") {
+                onLoad(sheet)      // local first
+                onBroadcast(sheet) // then broadcast
+                isPresented = false
+            }
+            Button("Cancel", role: .cancel) {
+                pendingSheet = nil
+            }
+        } message: { _ in
+            Text("You’re connected to other devices. Send this sheet to them too?")
+        }
+    }
+    // MARK: - One-time starter template install
+    // MARK: - Actions (user-triggered only; no mutation during body)
+
+    private func filterMatches(_ meta: CueLibraryIndex.SheetMeta, search: String) -> Bool {
+        let q = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return true }
+        return meta.title.localizedCaseInsensitiveContains(q)
+    }
+
+    private func loadMostRecent() {
+        guard let id = store.index.recents.first,
+              let meta = store.index.sheets[id],
+              let sheet = try? store.load(meta: meta) else { return }
+        if canBroadcast() {
+            pendingSheet = sheet
+            showBroadcastChoice = true
+        } else {
+            onLoad(sheet)
+            isPresented = false
+        }
+    }
+
+    private func load(_ meta: CueLibraryIndex.SheetMeta) {
+        guard let sheet = try? store.load(meta: meta) else { return }
+        if canBroadcast() {
+            pendingSheet = sheet
+            showBroadcastChoice = true
+        } else {
+            onLoad(sheet)
+            isPresented = false
+        }
+    }
+
+    private func newBlank() {
+            var s = CueSheet(title: "Untitled")
+            // Default meter 4/4 (overrides any 5/4 legacy default in the model)
+            s.timeSigNum = 4
+            s.timeSigDen = 4
+        s.created = Date()
+        s.modified = s.created
+            editingSheet = s
+        }
+
+        private func delete(_ meta: CueLibraryIndex.SheetMeta) {
+            do { try store.delete(metaID: meta.id) }
+            catch { UINotificationFeedbackGenerator().notificationOccurred(.error) }
+        }
+    /// Share a single sheet via the iOS share sheet (UIActivityViewController).
+           private func share(_ meta: CueLibraryIndex.SheetMeta) {
+                do {
+                    // Get the canonical on-disk export URL (already normalized to what the importer expects)
+                    guard let url = try store.exportXML([meta]).first else { return }
+                            shareURL = url
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                } catch {
+                    UINotificationFeedbackGenerator().notificationOccurred(.error)
+                }
+            }
+        private func loadMostRecentIfAny() {
+            if let id = store.index.recents.first,
+               let meta = store.index.sheets[id] {
+                load(meta)
+            }
+        }
+    
+}
+
+
+ 
+
+// MARK: - Row & Section UI
+
+private struct LibraryRow: View {
+    let meta: CueLibraryIndex.SheetMeta
+    var onTap: () -> Void
+    var onEdit: () -> Void
+    var onDuplicate: () -> Void
+    var onDelete: () -> Void
+    var onShare: () -> Void
+    var body: some View {
+        HStack(spacing: 12) {
+            Button(action: onTap) {
+                HStack(spacing: 12) {
+                    Image(systemName: meta.pinned ? "pin.fill" : "doc.text")
+                        .imageScale(.medium)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(meta.title)
+                                                    .font(.custom("Roboto-Medium", size: 16))
+                                                    .lineLimit(1)
+
+                        InlineDates(created: meta.created, modified: meta.modified)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .foregroundStyle(.secondary)
+                }
+                .padding(10)
+                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            Menu {
+                            Button(role: .none) { onEdit() } label: {
+                                Label("Edit", systemImage: "pencil").font(.custom("Roboto-Regular", size: 16))
+                            }
+                            Button(role: .none) { onShare() } label: {
+                                                Label("Export as XML", systemImage: "square.and.arrow.up").font(.custom("Roboto-Regular", size: 16))
+                                            }
+                            Button(role: .none) { onDuplicate() } label: {
+                                Label("Duplicate", systemImage: "doc.on.doc").font(.custom("Roboto-Regular", size: 16))
+                            }
+                            Button(role: .destructive) { onDelete() } label: {
+                                Label("Delete", systemImage: "trash").font(.custom("Roboto-Regular", size: 16))
+                            }
+                        } label: {
+                Image(systemName: "ellipsis.circle")
+                    .imageScale(.large)
+                    .foregroundStyle(.secondary)
+                    .padding(.trailing, 4)
+            }
+        }
+    }
+}
+private struct SectionCard<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.custom("Roboto-SemiBold", size: 17))
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .shadow(color: .black.opacity(0.125), radius: 10, x: 0, y: 6)
+    }
+}
+
+// MARK: - SearchBar (card-radius, material)
+private struct SearchBar: View {
+    @Binding var text: String
+    var cornerRadius: CGFloat = 12
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.secondary)
+                        TextField("Search", text: $text)
+                            .font(.custom("Roboto-Regular", size: 16))
+
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+    }
+}
+
+private struct SharePresenter: UIViewControllerRepresentable {
+    @Binding var url: URL?
+    func makeUIViewController(context: Context) -> UIViewController { UIViewController() }
+    func updateUIViewController(_ vc: UIViewController, context: Context) {
+        guard let url else { return }
+        if vc.presentedViewController == nil {
+            let avc = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+            avc.completionWithItemsHandler = { _,_,_,_ in
+                DispatchQueue.main.async { self.url = nil }
+            }
+            vc.present(avc, animated: true)
+        }
+    }
+}
+
+// MARK: - Utilities
+
+private extension Array where Element: Hashable {
+    /// Return unique elements, preserving original order.
+    func uniqued() -> [Element] {
+        var seen = Set<Element>()
+        var out: [Element] = []
+        out.reserveCapacity(count)
+        for e in self {
+            if seen.insert(e).inserted { out.append(e) }
+        }
+        return out
+    }
+}
+// MARK: - Simple wrap layout for tag chips
+private struct Wrap<Data: RandomAccessCollection, Content: View>: View where Data.Element: Hashable {
+    let data: Data
+    let content: (Data.Element) -> Content
+    init(_ data: Data, @ViewBuilder content: @escaping (Data.Element) -> Content) {
+        self.data = data; self.content = content
+    }
+    // Compatibility init to support `id: \.self` call sites
+    init(_ data: Data, id: KeyPath<Data.Element, some Hashable>, @ViewBuilder content: @escaping (Data.Element) -> Content) {
+        self.data = data; self.content = content
+    }
+    var body: some View {
+        GeometryReader { geo in
+            var x: CGFloat = 0
+            var y: CGFloat = 0
+            ZStack(alignment: .topLeading) {
+                ForEach(Array(data), id: \.self) { item in
+                    content(item)
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 6)
+                        .background(.thinMaterial, in: Capsule())
+                        .alignmentGuide(.leading) { d in
+                            if x + d.width > geo.size.width {
+                                x = 0
+                                y += d.height + 8
+                            }
+                            let result = x
+                            x += d.width + 8
+                            return result
+                        }
+                        .alignmentGuide(.top) { _ in y }
+                }
+            }
+        }
+        .frame(minHeight: 0, idealHeight: 0)
+    }
+}
+private struct AbsoluteEntry: View {
+    @Binding var timeText: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Time (HH:MM:SS.cc or MM:SS.cc)")
+                            .font(.custom("Roboto-Regular", size: 13))
+                            .foregroundStyle(.secondary)
+
+            TextField("00:00.00", text: $timeText)
+                .font(.custom("Roboto-Regular", size: 16))
+                .textFieldStyle(.roundedBorder)
+                .keyboardType(.numbersAndPunctuation)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        }
+    }
+
+
+}
+
+// MARK: - Large-detent editor (stable)
+private struct CueSheetEditorSheet: View {
+    @State var sheet: CueSheet
+    var onSave: (CueSheet) -> Void
+    var onCancel: () -> Void
+
+    @State private var tab: Tab = .details
+    @State private var isDirty: Bool = false
+    enum Tab: String, CaseIterable { case details = "Details", events = "Events" /* tempoMeter to add next */ }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+                        HStack(spacing: 10) {
+                            HStack(spacing: 8) {
+                                let title = sheet.title.isEmpty ? "Untitled" : sheet.title
+                                Text("Editing '\(title)'")
+                                    .font(.custom("Roboto-SemiBold", size: 17))
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                if isDirty {
+                                    Circle()
+                                        .fill(Color.accentColor) // uses global app tint/flash color if you theme accent
+                                        .frame(width: 8, height: 8)
+                                        .accessibilityLabel("Unsaved changes")
+                                }
+                            }
+                            Spacer()
+                            Button("Cancel", action: onCancel)
+                                .font(.custom("Roboto-Regular", size: 16))
+                            Button {
+                                // normalize before save
+                                sheet.events.sort { $0.at < $1.at }
+                                onSave(sheet)
+                                isDirty = false
+                            } label: { Text("Save").font(.custom("Roboto-SemiBold", size: 16)) }
+                            .buttonStyle(.borderedProminent)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 18)     // moved down by 8pt
+                        .padding(.bottom, 10)
+
+
+            // Tabs
+            Picker("", selection: $tab) {
+                ForEach(Tab.allCases, id: \.self) { t in
+                    Text(t.rawValue)
+                                            .font(.custom("Roboto-SemiBold", size: 17))
+                                            .tag(t)
+
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
+
+            // Content
+            Group {
+                switch tab {
+                case .details: DetailsSection(sheet: $sheet)
+                case .events:  EventsSection(sheet: $sheet)
+                }
+            }
+            .onChange(of: sheet) { _ in isDirty = true }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
+        }
+    }
+}
+// Simple identifiable wrapper for `.sheet(item:)`
+private struct IdentifiableIndex: Identifiable {
+    let id = UUID()
+    let value: Int
+    init(_ value: Int) { self.value = value }
+}
+
+// MARK: Details
+private struct DetailsSection: View {
+    @Binding var sheet: CueSheet
+   @State private var tagDraft: String = ""
+   @FocusState private var focus: Field?
+    enum Field { case title, tag, notes }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                // Large editable title (full-width, no card)
+                TextField("Title", text: $sheet.title)
+                .font(.custom("Roboto-SemiBold", size: 42))
+
+                    .textInputAutocapitalization(.words)
+                    .submitLabel(.next)
+                    .focused($focus, equals: .title)
+                    .onSubmit { focus = .tag }
+                    .padding(.top, 6)
+                Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
+
+                // Meta
+                MetaStrip(created: sheet.created, modified: sheet.modified)
+
+                // Tags (full width)
+                VStack(alignment: .leading, spacing: 10) {
+                    FieldHeader("Tags").font(.custom("Roboto-SemiBold", size: 15))
+                    TagEditor(
+                        tags: $sheet.tags,
+                        draft: $tagDraft,
+                        onCommit: addTag
+                    )
+                    .focused($focus, equals: .tag)
+                }
+
+                // Notes (full width)
+                VStack(alignment: .leading, spacing: 8) {
+                    FieldHeader("Notes").font(.custom("Roboto-SemiBold", size: 15))
+                    TextEditor(text: Binding(
+                        get: { sheet.notes ?? "" },
+                        set: { sheet.notes = $0.isEmpty ? nil : $0 }
+                    ))
+                    .frame(minHeight: 160)
+                    .padding(10)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    )
+                    .focused($focus, equals: .notes)
+                }
+            }
+            .padding(.vertical, 6)
+            .padding(.bottom, 12)
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Button("Title") { focus = .title }
+                Button("Tags")  { focus = .tag }
+                Button("Notes") { focus = .notes }
+                Spacer()
+                Button("Done")  { focus = nil }.bold()
+            }
+        }
+    }
+
+    // MARK: Helpers
+    private func addTag() {
+        let t = tagDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, !sheet.tags.contains(t) else { return }
+        sheet.tags.append(t)
+        tagDraft = ""
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+}
+
+
+
+private struct FieldHeader: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+    var body: some View {
+        Text(text)
+            .font(.custom("Roboto-Regular", size: 13))
+            .textCase(.uppercase)
+            .foregroundStyle(.secondary)
+
+    }
+}
+
+private struct TagEditor: View {
+    @Binding var tags: [String]
+    @Binding var draft: String
+    var onCommit: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Chips
+            if !tags.isEmpty {
+                Wrap(tags, id: \.self) { tag in
+                    TagChip(tag: tag) {
+                        if let idx = tags.firstIndex(of: tag) {
+                            tags.remove(at: idx)
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        }
+                    }
+                }
+            }
+            // Composer
+            HStack(spacing: 8) {
+                Image(systemName: "number")
+                    .foregroundStyle(.secondary)
+                TextField("Add tag", text: $draft)
+                    .font(.custom("Roboto-Regular", size: 16))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .onSubmit(onCommit)
+                Button {
+                    onCommit()
+                } label: {
+                    Label("Add", systemImage: "plus.circle.fill")
+                        .font(.custom("Roboto-SemiBold", size: 15))
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
+        }
+    }
+}
+
+private struct TagChip: View {
+    let tag: String
+    var onDelete: () -> Void
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(tag)
+                .font(.custom("Roboto-Regular", size: 15))
+            Button(action: onDelete) {
+                Image(systemName: "xmark")
+                    .font(.custom("Roboto-SemiBold", size: 12))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(.thinMaterial, in: Capsule())
+        .overlay(
+            Capsule().stroke(Color.primary.opacity(0.10), lineWidth: 1)
+        )
+    }
+}
+
+private struct MetaStrip: View {
+    let created: Date
+    let modified: Date
+    var body: some View {
+        HStack(spacing: 8) {
+            Label(created.formatted(date: .abbreviated, time: .shortened),
+                  systemImage: "calendar.badge.plus")
+            .labelStyle(.iconOnly)
+            Text("Created \(created.formatted(date: .abbreviated, time: .shortened))")
+                .font(.custom("Roboto-Regular", size: 12))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 12)
+            Image(systemName: "arrow.clockwise.circle")
+                .imageScale(.small)
+                .foregroundStyle(.secondary)
+            Text("Modified \(modified.formatted(date: .abbreviated, time: .shortened))")
+                .font(.custom("Roboto-Regular", size: 12))
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+// MARK: Events
+private struct EventsSection: View {
+    @Binding var sheet: CueSheet
+
+    enum EntryMode { case musical, absolute }
+        // Global timing selector (drives all sub-sections)
+        @State private var globalTiming: EntryMode = .absolute
+
+    @State private var kind: CueSheet.Event.Kind = .cue
+        @State private var cueColorIndex: Int = 0
+        // Musical token inputs
+        @State private var bar: Int = 1       // supports negative for anacrusis
+        @State private var beat: Int = 1
+        @State private var grid: NoteGrid = .quarter
+        @State private var tuplet: TupletMode = .off
+        @State private var index: Int = 1     // 1…(slotsPerBeat * tuplet.count)
+        @State private var showTupletCustom = false
+        @State private var customM: String = "3"
+        @State private var customN: String = "2"
+
+    // Absolute input
+    @State private var timeText: String = "00:00.00"
+    // Stop hold
+    @State private var hold: Double = 2.0
+    // Show absolute time temporarily (1s) for tapped rows
+    @State private var revealAbs: Set<Int> = []
+
+    // ── TEMPO CONFIG (separate section) ─────────────────────────────
+        @State private var tBar: Int = 1
+        @State private var tBeat: Int = 1
+        @State private var tGrid: NoteGrid = .quarter
+        @State private var tTuplet: TupletMode = .off
+        @State private var tIndex: Int = 1
+        @State private var tBPM: Double = 120
+    // Preset denominators for snapping
+        private let presetDenoms: [Int] = [1, 2, 4, 8, 12, 16, 20, 32, 64]
+        // Editing an existing meter change
+      @State private var editingMeterItem: IdentifiableIndex? = nil
+
+        @State private var editNumDraft: Int = 4
+        @State private var editDenDraft: Int = 4
+
+
+
+    // ── METER CONFIG (separate section) ─────────────────────────────
+      @State private var mBar: Int = 1
+      @State private var mNum: Int = 4
+      @State private var mDen: Int = 4
+    @State private var mTimeText: String = "00:00.00"
+    
+    // ── Live musical anchors for recompute (only for musical-origin events) ──
+       private enum Origin { case absolute, musical }
+       /// bar/beat/slot labeling with precise subdivision
+       private struct MusicalAnchor: Equatable {
+           var bar: Int              // 1-based
+           var beat: Int             // 1-based
+           var slot: Int             // 1-based
+           var slotsPerBeat: Int     // e.g. 1,2,3,4,6,8...
+       }
+       @State private var origins:  [Origin]            = []
+       @State private var anchors:  [MusicalAnchor?]    = []
+       @State private var revealAbsolute: Set<Int>      = []  // tap-to-toggle rows
+
+
+    
+    // Collapsible sections
+       @State private var showTempoChanges: Bool = false
+       @State private var showMeterChanges: Bool = false
+    @ViewBuilder private var timingSection: some View {
+        // ───────────────── TIMING (Global + Changes) ─────────────────
+                       VStack(alignment: .leading, spacing: 12) {
+                           Text("Timing").font(.custom("Roboto-SemiBold", size: 17))
+                                               // Global timing selector
+                                               Picker("", selection: $globalTiming) {
+                                                   Text("Absolute time").tag(EntryMode.absolute)
+                                                   Text("Metered").tag(EntryMode.musical)
+                                               }
+                                               .pickerStyle(.segmented)
+
+                           // —— Global (only when Metered) ———————————————
+                                              if globalTiming == .musical {
+                                                  Text("Global").font(.subheadline.weight(.bold)).font(.custom("Roboto-SemiBold", size: 15))
+                                                  // Initial tempo
+                                                  VStack(alignment: .leading, spacing: 6) {
+                                                      HStack {
+                                                          Text("Tempo").font(.custom("Roboto-Regular", size: 15))
+                                                          Spacer()
+                                                          Text("\(Int(sheet.bpm)) BPM")
+                                                              .font(.custom("Roboto-Regular", size: 15)).monospacedDigit()
+                                                      }
+                                                      Slider(value: $sheet.bpm, in: 20...300, step: 1)
+                                                  }
+                                                  // Initial time signature — styled fraction control
+                                                  FractionMeterControl(
+                                                      numerator: $sheet.timeSigNum,
+                                                      denominator: $sheet.timeSigDen,
+                                                      presetDenominators: presetDenoms
+                                                  )
+                                                  Divider().opacity(0.15)
+                                              }
+
+       
+                           // —— Tempo Changes (collapsible; only when Metered) ———
+                           if globalTiming == .musical {
+                               DisclosureGroup(isExpanded: $showTempoChanges) {
+                                   
+                                   VStack(alignment: .leading, spacing: 8) {
+                                       
+                                       HStack(spacing: 10) {
+                                           Spacer(minLength: 8)
+                                           
+                                           // BPM slider (same look as Global)
+                                           VStack(alignment: .leading, spacing: 6) {
+                                               HStack {
+                                                   Text("BPM").font(.custom("Roboto-Regular", size: 15))
+                                                   Spacer()
+                                                   Text("\(Int(tBPM))")
+                                                       .font(.custom("Roboto-Regular", size: 15)).monospacedDigit()
+                                               }
+                                               Slider(value: $tBPM, in: 20...300, step: 1)
+                                           }
+                                       }
+                                       
+                                       // Musical-position authoring (no absolute variant here)
+                                       
+                                       // Grid + Tuplet (bold x:y) + BeatGridPad (no Beat/Index badges)
+                                       HStack(spacing: 10) {
+                                           Picker("Grid", selection: $tGrid) {
+                                               ForEach(NoteGrid.subdivisionsOnly) { g in NoteGlyph(g, height: 32, vpad: 5).tag(g) }
+                                           }
+                                           .pickerStyle(.segmented)
+
+                                           Menu {
+                                               Button("x:y") { tTuplet = .off; tNormalizeIndex() }
+                                               Button("3:2 (Triplet)") { tTuplet = .triplet; tNormalizeIndex() }
+                                               Button("5:4 (Quintuplet)") { tTuplet = .quintuplet; tNormalizeIndex() }
+                                               Button("7:4 (Septuplet)") { tTuplet = .septuplet; tNormalizeIndex() }
+                                           } label: {
+                                               Text(tTuplet.label)
+                                                   .font(.custom("Roboto-SemiBold", size: 15))
+                                                   .padding(.horizontal, 10).padding(.vertical, 6)
+                                                   .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                                           }
+                                       }
+                                       BeatGridPad(
+                                        beats: sheet.timeSigNum,
+                                        slotsPerBeat: tTotalSlotsPerBeat,
+                                        selectedBeat: $tBeat,
+                                        selectedIndex: $tIndex
+                                       )
+                                       .padding(.top, 6)
+                                       
+                                       
+                                       HStack {
+                                           Text("Will change at \(String(format: "%.2f", tPreviewSeconds()))s")
+                                            .font(.custom("Roboto-Regular", size: 13))
+                                           .foregroundStyle(.secondary)
+
+                                           Spacer()
+                                           Button {
+                                               addTempoChange()
+                                           } label: {
+                                               Label("Add Tempo Change", systemImage: "metronome.fill")
+                                           }
+                                           .buttonStyle(.borderedProminent)
+                                       }
+                                   }
+                               } label: {
+                                   HStack {
+                                       Text("Tempo Changes").font(.custom("Roboto-SemiBold", size: 15))
+                                       Spacer()
+                                       if !sheet.tempoChanges.isEmpty {
+                                           Text("\(sheet.tempoChanges.count)")
+                                               .font(.custom("Roboto-Regular", size: 11))
+                                               .padding(.horizontal, 6).padding(.vertical, 2)
+                                               .background(.ultraThinMaterial, in: Capsule())
+                                       }
+                                   }
+                               }
+                               
+                               // Existing tempo changes (always visible list)
+                               if !sheet.tempoChanges.isEmpty {
+                                   VStack(spacing: 8) {
+                                       ForEach(Array(sheet.tempoChanges.indices), id: \.self) { i in
+                                           HStack(spacing: 10) {
+                                               Text("Bar \(sheet.tempoChanges[i].atBar)")
+                                                   .font(.custom("Roboto-Regular", size: 15))
+                                                   .foregroundStyle(.secondary)
+                                                   .frame(minWidth: 72, alignment: .leading)
+                                               Stepper(value: $sheet.tempoChanges[i].bpm, in: 20...300, step: 1) {
+                                                   Text("\(Int(sheet.tempoChanges[i].bpm)) BPM")
+                                                       .font(.custom("Roboto-Regular", size: 15))
+                                               }
+                                               Spacer()
+                                               Button(role: .destructive) {
+                                                   sheet.tempoChanges.remove(at: i)
+                                                   UIImpactFeedbackGenerator().impactOccurred()
+                                               } label: { Image(systemName: "trash") }
+                                                   .buttonStyle(.borderless)
+                                           }
+                                           .padding(10)
+                                           .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                                       }
+                                   }
+                               }
+                           }
+       
+                           // —— Time Signature Changes (collapsible; only when Metered) —
+                           if globalTiming == .musical {
+                               DisclosureGroup(isExpanded: $showMeterChanges) {
+                                   
+                                   VStack(alignment: .leading, spacing: 8) {
+                                       
+                                       Stepper(value: $mBar, in: 1...9999) {
+                                           Text("Bar \(mBar)").font(.custom("Roboto-Regular", size: 15))
+                                       }
+                                       
+                                       // Fraction control for the meter to add
+                                       FractionMeterControl(
+                                        numerator: $mNum,
+                                        denominator: $mDen,
+                                        presetDenominators: presetDenoms
+                                       )
+                                       
+                                       
+                                       HStack {
+                                           Text("Will change at \(mPreviewLabel())")
+                                           .font(.custom("Roboto-Regular", size: 13))
+                                           .foregroundStyle(.secondary)
+
+                                           Spacer()
+                                           Button {
+                                               addMeterChange()
+                                           } label: {
+                                               Label("Add Time Signature", systemImage: "flag.2.crossed")
+                                           }
+                                           .buttonStyle(.borderedProminent)
+                                       }
+                                   }
+                               } label: {
+                                   HStack {
+                                       Text("Time Signature Changes").font(.custom("Roboto-SemiBold", size: 15))
+                                       Spacer()
+                                       if !sheet.meterChanges.isEmpty {
+                                           Text("\(sheet.meterChanges.count)")
+                                               .font(.custom("Roboto-Regular", size: 11))
+                                               .padding(.horizontal, 6).padding(.vertical, 2)
+                                               .background(.ultraThinMaterial, in: Capsule())
+                                       }
+                                   }
+                               }
+                           }
+                           if !sheet.meterChanges.isEmpty {
+                               VStack(spacing: 8) {
+                                   ForEach(Array(sheet.meterChanges.indices), id: \.self) { i in
+                                       let mc = sheet.meterChanges[i]
+                                       HStack(spacing: 12) {
+                                                                           Text("Bar \(mc.atBar)")
+                                                                               .font(.custom("Roboto-Regular", size: 15))
+                                                                               .foregroundStyle(.secondary)
+                                                                               .frame(minWidth: 64, alignment: .leading)
+                                                                           Text("\(mc.num)/\(mc.den)")
+                                                                               .font(.custom("Roboto-SemiBold", size: 16)).monospacedDigit()
+                                                                               .padding(.horizontal, 10)
+                                                                               .padding(.vertical, 6)
+                                                                               .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                                                                           Spacer()
+                                                                           Button {
+                                                                               editingMeterItem = IdentifiableIndex(i)
+                                                                               editNumDraft = mc.num
+                                                                               editDenDraft = mc.den
+                                                                           } label: {
+                                                                               Label("Edit", systemImage: "pencil")
+                                                                           }
+                                                                           .buttonStyle(.borderless)
+                                                                           Button(role: .destructive) {
+                                                                               sheet.meterChanges.remove(at: i)
+                                                                               UIImpactFeedbackGenerator().impactOccurred()
+                                                                           } label: { Image(systemName: "trash") }
+                                                                           .buttonStyle(.borderless)
+                                                                       }
+
+                                       .padding(10)
+                                       .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                                   }
+                               }
+                           }
+                       }
+                       .padding(12)
+                       .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+    }
+    // MARK: - Composer (thin wrapper)
+    @ViewBuilder private var composerCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            composerEventTypeSection
+            Divider().opacity(0.12)
+            composerFlashColorSection
+            Divider().opacity(0.12)
+            composerTimeEntrySection
+            composerPreviewAndAddRow
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+    }
+    private var composerEventTypeSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionHeader("Event Type", "Choose Cue (flash), Stop (with hold), or Restart.")
+            Picker("", selection: $kind) {
+                Image(systemName: "bolt.fill").tag(CueSheet.Event.Kind.cue)
+                Image(systemName: "hand.raised.fill").tag(CueSheet.Event.Kind.stop)
+                Image(systemName: "gobackward").tag(CueSheet.Event.Kind.restart)
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 220)
+
+            if kind == .stop {
+                Stepper(value: $hold, in: 0...30, step: 0.1) {
+                    Text("Hold \(hold, specifier: "%.2f") s")
+                        .font(.custom("Roboto-Regular", size: 15))
+                }
+            }
+        }
+    }
+    private var composerFlashColorSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionHeader("Flash Color", "Color used when the event is a Cue.")
+            if kind == .cue {
+                CueColorDots(selectedIndex: $cueColorIndex)
+            } else {
+                Text("Not applicable for Stop/Restart.")
+                    .foregroundStyle(.secondary)
+                    .font(.custom("Roboto-Regular", size: 13))
+            }
+        }
+    }
+    private var composerTimeEntrySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            let desc = (globalTiming == .musical)
+            ? "Pick bar • beat • subdivision; tempo/meter will resolve the time."
+            : "Enter absolute time (MM:SS.cc). This never changes."
+            sectionHeader("Time Entry", desc)
+
+            if globalTiming == .musical {
+                musicalBarBeatRow
+                musicalGridTupletRow
+                BeatGridPad(
+                    beats: sheet.timeSigNum,
+                    slotsPerBeat: totalSlotsPerBeat,
+                    selectedBeat: $beat,
+                    selectedIndex: $index
+                )
+                .padding(.top, 6)
+            } else {
+                AbsoluteEntry(timeText: $timeText)
+            }
+        }
+    }
+    private var musicalBarBeatRow: some View {
+        HStack(spacing: 10) {
+            Stepper(value: $bar, in: -128...9999) { Text("Bar \(bar)") }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Beat is picked via the grid pad; show it read-only
+            Text("Beat \(beat)")
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.12), lineWidth: 1))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+    private var musicalGridTupletRow: some View {
+        HStack(spacing: 10) {
+            NoteGridSegmented(selection: $grid)
+
+            Menu {
+                Button("x:y") { tuplet = .off; normalizeIndex() }
+                Button("3:2 (Triplet)") { tuplet = .triplet; normalizeIndex() }
+                Button("5:4 (Quintuplet)") { tuplet = .quintuplet; normalizeIndex() }
+                Button("7:4 (Septuplet)") { tuplet = .septuplet; normalizeIndex() }
+                Button("Custom…") { showTupletCustom = true }
+            } label: {
+                Text(tuplet.label)
+                    .font(.custom("Roboto-Bold", size: 15))
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+            }
+
+            Text("Index \(index)/\(max(1, totalSlotsPerBeat))")
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.12), lineWidth: 1))
+        }
+    }
+    private struct NoteGridSegmented: View {
+        @Binding var selection: NoteGrid
+        var body: some View {
+            Picker("Grid", selection: $selection) {
+                ForEach(NoteGrid.subdivisionsOnly) { g in NoteGlyph(g, height: 32, vpad: 5).tag(g) }
+                }
+                .pickerStyle(.segmented)
+
+        }
+    }
+    private var composerPreviewAndAddRow: some View {
+        let previewText = String(format: "Will fire at %.2f s", previewSeconds())
+        return HStack {
+            Text(previewText)
+                .font(.custom("Roboto-Regular", size: 13))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button { addEvent() } label: {
+                Label("Add", systemImage: "plus.circle.fill")
+                    .font(.custom("Roboto-SemiBold", size: 15))
+
+            }
+            .buttonStyle(.borderedProminent)
+        }
+    }
+    @ViewBuilder private func sectionHeader(_ title: String, _ subtitle: String) -> some View {
+        Text(title).font(.custom("Roboto-SemiBold", size: 15))
+        Text(subtitle).font(.custom("Roboto-Regular", size: 12)).foregroundStyle(.secondary)
+    }
+
+    
+    @ViewBuilder private var eventList: some View {
+        // List (safe indices loop; no drag reorder)
+        VStack(spacing: 0) {
+                            ForEach(Array(sheet.events.indices), id: \.self) { i in
+                                let showMusical = (globalTiming == .musical) && i < origins.count && origins[i] == .musical && anchors.indices.contains(i) && anchors[i] != nil && !revealAbsolute.contains(i)
+                                
+                                // Build a semantic musical label if available (and not revealing abs)
+                                                let label: String = {
+                                                    if showMusical, !revealAbs.contains(i), let a = anchors[i] {
+                                                        if a.slotsPerBeat > 1 {
+                                                            return "Bar \(a.bar), Beat \(a.beat), Subdivision \(a.slot)/\(a.slotsPerBeat)"
+                                                        } else {
+                                                            return "Bar \(a.bar), Beat \(a.beat)"
+                                                        }
+                                                    } else {
+                                                        return String(format: "@ %.2f s", sheet.events[i].at)
+                                                    }
+                                                }()
+                                                EventRow(
+                                                    event: $sheet.events[i],
+                                                    timeLabel: label,
+                                                    onTapTime: { revealAbsFor(i) },
+                                                    onDelete: {
+                                                        sheet.events.remove(at: i)
+                                                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                                    }
+                                                )
+
+                                Divider().opacity(0.1)
+                            }
+                        }
+
+
+    }
+
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                timingSection
+                composerCard
+                eventList
+            }
+            
+        }
+        // Edit existing meter change as a sheet using the same fraction control
+        .overlay {
+            if let item = editingMeterItem {
+                ZStack {
+                    Color.black.opacity(0.25).ignoresSafeArea()
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Edit Time Signature").font(.custom("Roboto-SemiBold", size: 17))
+                        FractionMeterControl(
+                            numerator: $editNumDraft,
+                            denominator: $editDenDraft,
+                            presetDenominators: presetDenoms
+                        )
+                        HStack {
+                            Button("Cancel") { editingMeterItem = nil }
+                            Spacer()
+                            Button("Save") {
+                                let idx = item.value
+                                let clampedDen = snapDen(editDenDraft)
+                                sheet.meterChanges[idx] = CueSheet.MeterChange(
+                                    atBar: sheet.meterChanges[idx].atBar,
+                                    num: max(1, editNumDraft),
+                                    den: clampedDen
+                                )
+                                editingMeterItem = nil
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                    }
+                    .padding(16)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .frame(maxWidth: 420)
+                }
+                .transition(.opacity.combined(with: .scale))
+            }
+        }
+
+               
+               .onAppear { alignParallelState() }
+                .onChange(of: sheet.events.count) { _ in alignParallelState() }
+
+        // Keep events live-linked to Global tempo/meter while in Metered mode
+                .onChange(of: sheet.bpm) { _ in
+                    guard globalTiming == .musical else { return }
+                    recomputeAllFromAnchors()
+                    syncSortWithAnchors()
+                }
+                .onChange(of: sheet.timeSigNum) { _ in
+                    guard globalTiming == .musical else { return }
+                    recomputeAllFromAnchors()
+                    syncSortWithAnchors()
+                }
+                .onChange(of: sheet.timeSigDen) { _ in
+                    guard globalTiming == .musical else { return }
+                    recomputeAllFromAnchors()
+                    syncSortWithAnchors()
+                }
+                .onChange(of: globalTiming) { mode in
+                    // Switching modes does NOT convert existing events.
+                                // Absolute-time events remain absolute (no anchor).
+                                // Musical-origin events will keep/receive anchors only when created as musical.
+                                if mode == .absolute { revealAbsolute.removeAll() }
+
+                }
+
+    }
+    private func revealAbsFor(_ i: Int) {
+            guard !revealAbs.contains(i) else { return }
+            revealAbs.insert(i)
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                revealAbs.remove(i)
+            }
+        }
+
+    private func addEvent() {
+        let at: Double = (globalTiming == .absolute) ? parseTime(timeText) : musicalToSecondsNew()
+        var e = CueSheet.Event(kind: kind, at: max(0, at), holdSeconds: nil, label: nil)
+        if kind == .stop { e.holdSeconds = max(0, hold) }
+        sheet.events.append(e)
+                if globalTiming == .musical {
+                    // Store exact position metadata for this musical-origin event
+                    let slots = max(1, totalSlotsPerBeat)
+                    let idx   = min(max(1, index), slots)
+                    anchors.append(MusicalAnchor(bar: bar, beat: beat, slot: idx, slotsPerBeat: slots))
+                    origins.append(.musical)
+                    syncSortWithAnchors()
+                } else {
+                    anchors.append(nil)
+                    origins.append(.absolute)
+                    sheet.events.sort { $0.at < $1.at }
+                    // keep parallel arrays in sorted order too
+                    syncSortWithAnchors()
+                }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    // conversions (simple; your Kalman/engine still reigns for runtime)
+    private func musicalToSecondsNew() -> Double {
+            let beatsPerBar = Double(max(sheet.timeSigNum, 1))
+            // Scale BPM (quarter-note) to current denominator (e.g., 8th notes are half a quarter)
+            let secondsPerBeat = (60.0 / max(sheet.bpm, 1)) * (4.0 / Double(max(sheet.timeSigDen, 1)))
+            let barBeats = Double(bar - 1) * beatsPerBar
+            let beatBeats = Double(beat - 1)
+            let slots = max(1, totalSlotsPerBeat)
+            let idx = min(max(index, 1), slots)
+            let subFrac = Double(idx - 1) / Double(slots)  // 0.0 at start of beat, up to <1.0
+            let totalBeats = barBeats + beatBeats + subFrac
+            let t = totalBeats * secondsPerBeat
+            return max(0, t)
+        }
+    // MARK: - Anchoring utilities (Metered mode)
+    private func anchorToSeconds(_ a: MusicalAnchor) -> Double {
+           let beatsPerBar = Double(max(sheet.timeSigNum, 1))
+           let secPerBeat  = (60.0 / max(sheet.bpm, 1)) * (4.0 / Double(max(sheet.timeSigDen, 1)))
+        let subFrac     = Double(max(1, a.slot) - 1) / Double(max(1, a.slotsPerBeat))
+               let totalBeats  = Double(a.bar - 1) * beatsPerBar + Double(a.beat - 1) + subFrac
+
+           return max(0, totalBeats * secPerBeat)
+       }
+   
+    /// Align sizes of parallel arrays; default legacy events to absolute.
+        private func alignParallelState() {
+            if origins.count != sheet.events.count || anchors.count != sheet.events.count {
+                let n = sheet.events.count
+                if origins.count != n {
+                    if origins.isEmpty { origins = Array(repeating: .absolute, count: n) }
+                    else { origins = Array(origins.prefix(n)) + Array(repeating: .absolute, count: max(0, n - origins.count)) }
+                }
+                if anchors.count != n {
+                    if anchors.isEmpty { anchors = Array(repeating: nil, count: n) }
+                    else { anchors = Array(anchors.prefix(n)) + Array(repeating: nil, count: max(0, n - anchors.count)) }
+                }
+            }
+        }
+
+   
+       /// Recompute all event times from anchors, in place.
+       private func recomputeAllFromAnchors() {
+           let count = min(sheet.events.count, anchors.count, origins.count)
+                   guard count > 0 else { return }
+                   for i in 0..<count {
+                       if origins[i] == .musical, let a = anchors[i] {
+                           sheet.events[i].at = anchorToSeconds(a)
+                       }
+
+           }
+    }
+   
+       /// Keep events and anchors in the same sort order by `at`.
+       private func syncSortWithAnchors() {
+           let n = sheet.events.count
+                   guard anchors.count == n, origins.count == n else { return }
+                   let zipped: [(CueSheet.Event, MusicalAnchor?, Origin)] =
+                       (0..<n).map { (sheet.events[$0], anchors[$0], origins[$0]) }
+                   let sorted = zipped.sorted { $0.0.at < $1.0.at }
+                   sheet.events = sorted.map { $0.0 }
+                   anchors      = sorted.map { $0.1 }
+                   origins      = sorted.map { $0.2 }
+
+       }
+    
+    private func parseTime(_ s:String)->Double {
+        let clean = s.replacingOccurrences(of:",", with: ".")
+        let parts = clean.split(separator: ":")
+        if parts.count == 1 { return Double(clean) ?? 0 }
+        if parts.count == 2 {
+            let m = Double(parts[0]) ?? 0
+            let sc = Double(parts[1]) ?? 0
+            return m*60 + sc
+        }
+        let h = Double(parts[0]) ?? 0
+        let m = Double(parts[1]) ?? 0
+        let sc = Double(parts[2]) ?? 0
+        return h*3600 + m*60 + sc
+    }
+// MARK: - Derived, normalization
+    private var totalSlotsPerBeat: Int {
+        max(1, grid.slotsPerBeat * tuplet.count)
+    }
+    private func normalizeIndex() {
+        index = min(max(1, index), totalSlotsPerBeat)
+    }
+    private func normalizeBeatWrap() {
+        let num = max(1, sheet.timeSigNum)
+        if beat > num {
+            beat = 1
+            bar += 1
+        } else if beat < 1 {
+            beat = num
+            bar -= 1
+        }
+    }
+    private func previewSeconds() -> Double {
+        (globalTiming == .absolute) ? parseTime(timeText) : musicalToSecondsNew()
+    }
+    // ── TEMPO helpers ───────────────────────────────────────────────
+        private var tTotalSlotsPerBeat: Int {
+            max(1, tGrid.slotsPerBeat * tTuplet.count)
+        }
+        private func tNormalizeIndex() {
+            tIndex = min(max(1, tIndex), tTotalSlotsPerBeat)
+        }
+        private func tNormalizeBeatWrap() {
+            let num = max(1, sheet.timeSigNum)
+            if tBeat > num { tBeat = 1; tBar += 1 }
+            else if tBeat < 1 { tBeat = num; tBar -= 1 }
+        }
+    private func tMusicalToSeconds() -> Double {
+           let beatsPerBar = Double(max(sheet.timeSigNum, 1))
+           let secondsPerBeat = (60.0 / max(sheet.bpm, 1)) * (4.0 / Double(max(sheet.timeSigDen, 1)))
+            let barBeats = Double(tBar - 1) * beatsPerBar
+            let beatBeats = Double(tBeat - 1)
+            let slots = max(1, tTotalSlotsPerBeat)
+            let idx = min(max(tIndex, 1), slots)
+            let subFrac = Double(idx - 1) / Double(slots)
+            let totalBeats = barBeats + beatBeats + subFrac
+            return max(0, totalBeats * secondsPerBeat)
+        }
+    private func tPreviewSeconds() -> Double { tMusicalToSeconds() }
+    private func addTempoChange() {
+        // Musical only (section hidden when not metered)
+        let targetBar = max(1, tBar)
+
+            let bpmVal = max(20, min(300, tBPM))
+            sheet.tempoChanges.append(CueSheet.TempoChange(atBar: targetBar, bpm: bpmVal))
+            sheet.tempoChanges.sort { (lhs, rhs) in lhs.atBar < rhs.atBar }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+    // ── METER helpers ───────────────────────────────────────────────
+    private func snapDen(_ den: Int) -> Int {
+           // Snap arbitrary input to nearest preset
+           guard let nearest = presetDenoms.min(by: { abs($0 - den) < abs($1 - den) }) else { return 4 }
+           return nearest
+       }
+
+       private func gridForDen(_ den: Int) -> NoteGrid {
+           switch den {
+           case 1:  return .whole
+           case 2:  return .half
+           case 4:  return .quarter
+           case 8:  return .eighth
+           case 16: return .sixteenth
+           default: return .thirtySecond
+           }
+       }
+    private func mPreviewLabel() -> String { "Bar \(mBar)" }
+       private func addMeterChange() {
+           // Musical only (section hidden when not metered)
+            let atBar = max(1, mBar)
+
+           let num = max(1, mNum)
+           let den = presetDenoms.contains(mDen) ? mDen : snapDen(mDen)
+
+           sheet.meterChanges.append(CueSheet.MeterChange(atBar: atBar, num: num, den: den))
+           sheet.meterChanges.sort { $0.atBar < $1.atBar }
+           UIImpactFeedbackGenerator(style: .light).impactOccurred()
+       }
+
+}
+
+// Reuse pieces from your earlier safe components
+private struct CueColorDots: View {
+    @Binding var selectedIndex: Int
+    private let palette: [Color] = [.red, .orange, .yellow, .green, .blue, .purple, .pink]
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(palette.indices, id: \.self) { i in
+                Circle().fill(palette[i]).frame(width: 22, height: 22)
+                    .overlay {
+                        if i == selectedIndex { Circle().stroke(Color.primary, lineWidth: 2) }
+                    }
+                    .onTapGesture { selectedIndex = i }
+            }
+        }
+    }
+}
+// Musical subdivision choices (expressed in beats where a quarter-note = 1 beat).
+private enum NoteGrid: String, CaseIterable, Identifiable {
+    case whole, half, quarter, eighth, sixteenth, thirtySecond
+    var id: String { rawValue }
+    /// Asset names expected in the app bundle / asset catalog.
+    var assetName: String {
+        switch self {
+        case .whole:        return "note_whole"
+        case .half:         return "note_half"
+        case .quarter:      return "note_quarter"
+        case .eighth:       return "note_eighth"
+        case .sixteenth:    return "note_sixteenth"
+        case .thirtySecond: return "note_thirtySecond"
+        }
+    }
+    /// Unicode fallback when the asset is missing (defensive).
+        var fallback: String {
+            switch self {
+            case .whole:        return "♩×4"
+            case .half:         return "♩×2"
+            case .quarter:      return "♩"
+            case .eighth:       return "♪"
+            case .sixteenth:    return "♫"
+            case .thirtySecond: return "♬"
+            }
+        }
+
+    /// Fraction of a beat (quarter = 1.0). Dotted = ×1.5. Triplet = ×(2/3).
+    func fraction(dotted: Bool, triplet: Bool) -> Double {
+        let base: Double = {
+            switch self {
+            case .whole: return 4.0
+            case .half: return 2.0
+            case .quarter: return 1.0
+            case .eighth: return 0.5
+            case .sixteenth: return 0.25
+            case .thirtySecond: return 0.125
+            }
+        }()
+        var f = base
+        if dotted { f *= 1.5 }
+        if triplet { f *= (2.0/3.0) }
+        return f
+    }
+    /// How many equal **slots inside one beat** this grid implies (for tapping/indexing).
+       /// Coarser than a beat (whole/half) are treated as 1 slot-per-beat for targeting.
+       var slotsPerBeat: Int {
+           switch self {
+           case .quarter:      return 1
+           case .eighth:       return 2
+           case .sixteenth:    return 4
+           case .thirtySecond: return 8
+           case .whole, .half: return 1
+           }
+       }
+    }
+   
+   /// Tuplet / polyrhythm selection (m in the time of n). Off means 1:1.
+   private enum TupletMode: Equatable, Hashable {
+       case off
+       case triplet       // 3:2
+       case quintuplet    // 5:4
+       case septuplet     // 7:4
+       case custom(m: Int, n: Int?)   // m:n (n is for labeling)
+   
+       var count: Int {
+           switch self {
+           case .off: return 1
+           case .triplet: return 3
+           case .quintuplet: return 5
+           case .septuplet: return 7
+           case .custom(let m, _): return max(1, m)
+           }
+       }
+       var label: String {
+           switch self {
+           case .off: return "x:y"
+           case .triplet: return "3:2"
+           case .quintuplet: return "5:4"
+           case .septuplet: return "7:4"
+           case .custom(let m, let n): return n != nil ? "\(m):\(n!)" : "\(m):?"
+           }
+       }
+   }
+
+
+/// Renders a bundled note glyph, falling back to Unicode if the asset is missing.
+@ViewBuilder
+private func NoteGlyph(_ grid: NoteGrid, height: CGFloat = 14, vpad: CGFloat = 5) -> some View {
+    if let ui = UIImage(named: grid.assetName) {
+        Image(uiImage: ui)
+            .renderingMode(.original)
+            .resizable()
+            .scaledToFit()
+            .frame(height: height)
+            .padding(.vertical, vpad) // makes segmented control a bit taller
+            .accessibilityLabel(Text(grid.fallback))
+    } else {
+        Text(grid.fallback)
+            .font(.system(size: height)) // match visual size to image
+            .padding(.vertical, vpad)
+    }
+}
+
+
+private struct EventRow: View {
+    @Binding var event: CueSheet.Event
+    var timeLabel: String
+    var onTapTime: () -> Void
+    var onDelete: () -> Void
+
+
+
+    var body: some View {
+        HStack(spacing: 10) {
+            let symbol = (event.kind == .cue ? "bolt.fill" : event.kind == .stop ? "hand.raised.fill" : "gobackward")
+            Image(systemName: symbol).frame(width: 22)
+            TextField("Label", text: Binding(
+                get: { event.label ?? "" },
+                set: { event.label = $0.isEmpty ? nil : $0 }
+            ))
+            .font(.custom("Roboto-Regular", size: 16))
+            Spacer()
+            Text(timeLabel)
+                .font(.custom("Roboto-Regular", size: 14))
+                            .foregroundStyle(.secondary)
+                            .onTapGesture(perform: onTapTime)
+
+            if event.kind == .stop {
+                Text("hold \(event.holdSeconds ?? 0, specifier: "%.2f")s")
+                                    .font(.custom("Roboto-Regular", size: 14))
+                                    .foregroundStyle(.secondary)
+
+            }
+            Button(role: .destructive, action: onDelete) {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Delete event")
+
+        }
+        .padding(.vertical, 8)
+        // Optional: long-press as a secondary affordance
+                .contextMenu {
+                    Button(role: .destructive, action: onDelete) {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+
+    }
+}
+// MARK: - Fraction Meter Control (Num / Den)
+private struct FractionMeterControl: View {
+    @Binding var numerator: Int
+    @Binding var denominator: Int
+    let presetDenominators: [Int]
+
+    @FocusState private var focusField: Field?
+    enum Field { case num, den }
+
+    // Drag state for smooth +/- with haptics
+    @State private var dragAccumNum: CGFloat = 0
+    @State private var dragAccumDen: CGFloat = 0
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack(alignment: .center, spacing: 20) {
+                valueColumn(
+                    title: "No. of Beats (top)",
+                    value: Binding(
+                        get: { numerator },
+                        set: { numerator = clampNum($0) }
+                    ),
+                    field: .num,
+                    dragAccum: $dragAccumNum,
+                    stepper: { deltaNum($0) }
+                )
+                divider
+                valueColumn(
+                    title: "Unit Pulse (bottom)",
+                    value: Binding(
+                        get: { denominator },
+                        set: { denominator = snapDen($0) }
+                    ),
+                    field: .den,
+                    dragAccum: $dragAccumDen,
+                    stepper: { deltaDen($0) }
+                )
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var divider: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.15))
+            .frame(width: 1, height: 48)
+    }
+
+    private func valueColumn(title: String,
+                             value: Binding<Int>,
+                             field: Field,
+                             dragAccum: Binding<CGFloat>,
+                             stepper: @escaping (Int) -> Void) -> some View {
+        VStack(spacing: 6) {
+            Text(title)
+                            .font(.custom("Roboto-Regular", size: 13))
+                            .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Button { stepper(-1) } label: { Image(systemName: "minus") }
+                    .buttonStyle(.borderless)
+                TextField("", value: value, formatter: NumberFormatter.integer)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.center)
+                    .font(.custom("Roboto-SemiBold", size: 22)).monospacedDigit()
+                    .frame(minWidth: 52)
+                    .focused($focusField, equals: field)
+                Button { stepper(1) } label: { Image(systemName: "plus") }
+                    .buttonStyle(.borderless)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .gesture(
+                DragGesture(minimumDistance: 6)
+                    .onChanged { g in
+                        let dy = -g.translation.height
+                        var acc = dragAccum.wrappedValue + dy
+                        // Every ~16pt = 1 tick
+                        let tick = Int(acc / 16.0)
+                        if tick != 0 {
+                            stepper(tick)
+                            acc -= CGFloat(tick) * 16.0
+                            light()
+                        }
+                        dragAccum.wrappedValue = acc
+                    }
+                    .onEnded { _ in dragAccum.wrappedValue = 0 }
+            )
+        }
+    }
+
+    // MARK: helpers
+    private func clampNum(_ n: Int) -> Int { max(1, min(64, n)) }
+    private func snapDen(_ d: Int) -> Int {
+        guard let nearest = presetDenominators.min(by: { abs($0 - d) < abs($1 - d) }) else { return 4 }
+        return nearest
+    }
+    private func deltaNum(_ delta: Int) {
+        numerator = clampNum(numerator + delta)
+    }
+    private func deltaDen(_ delta: Int) {
+        if let idx = presetDenominators.firstIndex(of: denominator) {
+            let newIdx = max(0, min(presetDenominators.count - 1, idx + delta))
+            denominator = presetDenominators[newIdx]
+        } else {
+            denominator = snapDen(denominator)
+        }
+    }
+    private func light() { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+}
+private extension Double {
+    func rounded(to places: Int) -> Double {
+        let p = pow(10.0, Double(places))
+        return (self * p).rounded() / p
+    }
+}
+
+private extension NumberFormatter {
+    static let integer: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .none
+        f.minimum = 0
+        f.maximumFractionDigits = 0
+        return f
+    }()
+}
+
+// MARK: - Entry controls
+private struct MusicalEntry: View {
+    @Binding var bar: Int
+    @Binding var beat: Int
+    @Binding var grid: NoteGrid
+    @Binding var dotted: Bool
+    @Binding var triplet: Bool
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                            Stepper(value: $bar, in: -32...9999) {
+                                Text("Bar \(bar)").font(.custom("Roboto-Regular", size: 15))
+                            }
+                            Stepper(value: $beat, in: 1...64) {
+                                Text("Beat \(beat)").font(.custom("Roboto-Regular", size: 15))
+                            }
+                        }
+
+            HStack {
+                Picker("Grid", selection: $grid) {
+                    ForEach(NoteGrid.subdivisionsOnly) { g in NoteGlyph(g, height: 32, vpad: 5).tag(g) }
+                }
+                .pickerStyle(.segmented)
+
+            }
+            HStack(spacing: 16) {
+                Toggle(isOn: Binding(
+                    get: { dotted },
+                    set: { new in
+                        dotted = new
+                        if new { triplet = false } // keep exclusive
+                    }
+                )) {
+                                    Text("Dotted").font(.custom("Roboto-Regular", size: 15))
+                                }
+                                Toggle(isOn: Binding(
+
+                    get: { triplet },
+                    set: { new in
+                        triplet = new
+                        if new { dotted = false } // keep exclusive
+                    }
+                                )) {
+                                                    Text("Triplet").font(.custom("Roboto-Regular", size: 15))
+                                                }
+
+            }
+        }
+    }
+}
+
+
+// MARK: - Beat Grid Pad
+/// Shows `beats` columns, each with `slotsPerBeat` tappable subcells.
+/// Tapping sets (selectedBeat, selectedIndex).
+private struct BeatGridPad: View {
+    let beats: Int
+    let slotsPerBeat: Int
+    @Binding var selectedBeat: Int
+    @Binding var selectedIndex: Int
+
+    private let cellW: CGFloat = 32
+    private let cellH: CGFloat = 28
+    private let gap: CGFloat   = 6
+    private let labelH: CGFloat = 14
+    private let minSingleChipWidth: CGFloat = 56 // prevents "Beat 10" from truncating
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(1...max(1, beats), id: \.self) { b in
+                    let chips = max(1, slotsPerBeat)
+                    let baseWidth = CGFloat(chips) * cellW + CGFloat(max(chips - 1, 0)) * gap
+                    let width = chips == 1 ? max(baseWidth, minSingleChipWidth) : baseWidth
+
+                    Group {
+                        if chips == 1 {
+                            VStack(alignment: .center, spacing: 6) {
+                                Text("Beat \(b)")
+                                    .font(.custom("Roboto-Regular", size: 12))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.9)
+                                    .frame(width: width, height: labelH, alignment: .center)
+
+                                HStack(spacing: gap) {
+                                    beatCells(beat: b, chips: chips)
+                                }
+                                .frame(width: width, alignment: .center)
+                            }
+                        } else {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Beat \(b)")
+                                    .font(.custom("Roboto-Regular", size: 12))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: width, height: labelH, alignment: .leading)
+
+                                HStack(spacing: gap) {
+                                    beatCells(beat: b, chips: chips)
+                                }
+                            }
+                        }
+                    }
+
+                    // vertical divider between beats
+                    if b < max(1, beats) {
+                        Rectangle()
+                            .fill(Color.primary.opacity(0.10))
+                            .frame(width: 1, height: cellH + labelH + 12)
+                            .padding(.horizontal, 4)
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .frame(maxHeight: 72)
+    }
+
+    @ViewBuilder
+    private func beatCells(beat b: Int, chips: Int) -> some View {
+        ForEach(1...chips, id: \.self) { s in
+            let isSel = (b == selectedBeat && s == selectedIndex)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isSel ? Color.accentColor.opacity(0.25) : Color.clear)
+                .frame(width: cellW, height: cellH)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(isSel ? Color.accentColor : Color.primary.opacity(0.15),
+                                lineWidth: isSel ? 2 : 1)
+                )
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    selectedBeat = b
+                    selectedIndex = s
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
+        }
+    }
+}
+import UIKit
+
+struct ActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}

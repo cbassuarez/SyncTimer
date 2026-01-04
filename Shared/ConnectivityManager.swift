@@ -1,144 +1,116 @@
+//
+//  ConnectivityManager.swift
+//  SyncTimer
+//
+//  Created by seb on 9/15/25.
+//
+
 import Foundation
 import WatchConnectivity
 import Combine
 
-
 public final class ConnectivityManager: NSObject, ObservableObject {
     public static let shared = ConnectivityManager()
 
-
-    /// Last‐seen TimerMessage, for when the watch wakes up later
+    private(set) var session: WCSession? = nil
     private var lastTimerMessage: TimerMessage?
 
-
-    /// WCSession wrapper
-    private let session: WCSession
-
-
-    /// Publishes the most recent TimerMessage on both iOS & watchOS
     @Published public private(set) var incoming: TimerMessage?
-
-
+    public let commands = PassthroughSubject<ControlRequest, Never>()
+    /// Convenience: only returns session when supported **and** activated.
+        private var activatedSession: WCSession? {
+            #if canImport(WatchConnectivity)
+            guard WCSession.isSupported(), let s = session, s.activationState == .activated else { return nil }
+            return s
+            #else
+            return nil
+            #endif
+        }
+    // In ConnectivityManager (or wherever this init lives)
     private override init() {
-        // 1) grab the default session
-        guard WCSession.isSupported() else {
-            fatalError("WCSession not supported on this device")
-        }
-        session = .default
-
-
-        super.init()
-
-
-        // 2) set up delegate & activate *immediately*
-        session.delegate = self
-        session.activate()
-        print("[WC] ConnectivityManager init → session.activate() called")
-    }
-
-
-    /// Send any Codable.  TimerMessage payloads get stickied.
-    public func send<T: Codable>(_ payload: T) {
-        
-        guard let data = try? JSONEncoder().encode(payload) else {
-            print("⚠️ ConnectivityManager: failed to encode \(payload)")
-            return
-        }
-
-
-        // 1) Live update if reachable
-        if session.activationState == .activated && session.isReachable {
-            session.sendMessageData(data,
-                                    replyHandler: nil,
-                                    errorHandler: { err in
-                                        print("❌ WCSession.sendMessageData error: \(err.localizedDescription)")
-                                    })
-        }
-
-
-        // 2) If it's a TimerMessage, stash & push snapshot
-        if let tm = payload as? TimerMessage {
-            lastTimerMessage = tm
-            do {
-                try session.updateApplicationContext(["timer": data])
-                print("[WC] updateApplicationContext → pushed snapshot for TimerMessage")
-            } catch {
-                print("❌ WCSession.updateApplicationContext failed: \(error.localizedDescription)")
+            super.init()
+            #if canImport(WatchConnectivity)
+            guard WCSession.isSupported() else {
+                print("[WC] WatchConnectivity not supported on this device.")
+                return
             }
+            let s = WCSession.default
+            s.delegate = self
+            s.activate()
+            self.session = s
+            print("[WC] activate()")
+            #else
+            print("[WC] WatchConnectivity not available on this platform.")
+            #endif
         }
+
+
+    // MARK: Send
+
+    public func send<T: Codable>(_ payload: T) {
+         guard let data = try? JSONEncoder().encode(payload) else {
+             print("⚠️ [WC] encode failed \(T.self)"); return
+         }
+         #if canImport(WatchConnectivity)
+         guard let s = activatedSession else {
+             // Not activated or unsupported; optionally cache lastTimerMessage here
+             if let tm = payload as? TimerMessage { lastTimerMessage = tm }
+             return
+         }
+         if s.isReachable {
+             s.sendMessageData(data, replyHandler: nil) {
+                 print("❌ [WC] sendMessageData: \($0.localizedDescription)")
+             }
+         }
+         if let tm = payload as? TimerMessage {
+             lastTimerMessage = tm
+             do { try s.updateApplicationContext(["timer": data]) }
+             catch { print("❌ [WC] updateApplicationContext: \(error.localizedDescription)") }
+         }
+         #endif
+     }
+
+    public func sendCommand(_ cmd: ControlRequest.Command) {
+        send(ControlRequest(cmd))
     }
 }
 
-
-//──────────────────────────────────────────────────────────────────────────────
-// MARK: – WCSessionDelegate
-//──────────────────────────────────────────────────────────────────────────────
+// MARK: WCSessionDelegate
 extension ConnectivityManager: WCSessionDelegate {
-    // 1) Called on both sides when activation finishes
     public func session(_ session: WCSession,
                         activationDidCompleteWith activationState: WCSessionActivationState,
-                        error: Error?)
-    {
-        if let e = error {
-            print("❌ WCSession activation error: \(e.localizedDescription)")
-            return
-        }
-        print("✅ WCSession didActivate (state = \(activationState.rawValue))")
-
-
+                        error: Error?) {
+        if let e = error { print("❌ [WC] activation error: \(e.localizedDescription)"); return }
+        print("✅ [WC] didActivate=\(activationState.rawValue)")
         #if os(iOS)
-        // re-push the last TimerMessage so a newly-launched watch can catch up
-        if let tm = lastTimerMessage,
-           let data = try? JSONEncoder().encode(tm)
-        {
+        if let tm = lastTimerMessage, let data = try? JSONEncoder().encode(tm) {
             try? session.updateApplicationContext(["timer": data])
-            print("[WC-iOS] re-pushed lastTimerMessage on activation")
         }
         #endif
     }
 
-
     #if os(iOS)
-    // required for iPhone → watch hand-off on pairing/unpairing
-    public func sessionDidBecomeInactive(_ session: WCSession) {
-        session.activate()
-    }
-    public func sessionDidDeactivate(_ session: WCSession) {
-        session.activate()
-    }
+    public func sessionDidBecomeInactive(_ session: WCSession) { session.activate() }
+    public func sessionDidDeactivate(_ session: WCSession)     { session.activate() }
     #endif
 
-
-    // 2) Sticky snapshot arrives here on the *other* device
     public func session(_ session: WCSession,
-                        didReceiveApplicationContext applicationContext: [String : Any])
-    {
-        if let data = applicationContext["timer"] as? Data {
-            print("[WC] didReceiveApplicationContext → found ‘timer’ key, decoding…")
-            deliver(data)
-        } else {
-            print("⚠️ WC] didReceiveApplicationContext but no ‘timer’ key; keys = \(applicationContext.keys)")
-        }
+                        didReceiveApplicationContext applicationContext: [String : Any]) {
+        if let data = applicationContext["timer"] as? Data { decodeAndPublish(data) }
     }
 
-
-    // 3) Live message arrives here on the *other* device
-    public func session(_ session: WCSession,
-                        didReceiveMessageData data: Data)
-    {
-        print("[WC] didReceiveMessageData → live hop, decoding…")
-        deliver(data)
+    public func session(_ session: WCSession, didReceiveMessageData data: Data) {
+        decodeAndPublish(data)
     }
 
-
-    // common decode + publish
-    private func deliver(_ data: Data) {
-        guard let msg = try? JSONDecoder().decode(TimerMessage.self, from: data) else {
-            print("⚠️ ConnectivityManager: failed to decode TimerMessage from data")
-            return
+    private func decodeAndPublish(_ data: Data) {
+        let dec = JSONDecoder()
+        if let msg = try? dec.decode(TimerMessage.self, from: data) {
+            DispatchQueue.main.async { self.incoming = msg }; return
         }
-        DispatchQueue.main.async {
-            self.incoming = msg
+        if let cmd = try? dec.decode(ControlRequest.self, from: data) {
+            DispatchQueue.main.async { self.commands.send(cmd) }; return
         }
+        print("⚠️ [WC] unknown payload")
     }
 }

@@ -2,6 +2,25 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>SyncTimer Cue Sheet</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.xml</string>
+				<string>com.stagedevices.synctimer.cue-xml</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_synctimer._tcp.</string>
+		<string>_synctimer._udp.</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UISceneConfigurations</key>
@@ -15,5 +34,31 @@
 			</array>
 		</dict>
 	</dict>
+	<key>UIApplicationSupportsMultipleScenes</key>
+	<true/>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.xml</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>SyncTimer Cue XML</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.stagedevices.synctimer.cue-xml</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>xml</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>application/xml</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
 </dict>
 </plist>

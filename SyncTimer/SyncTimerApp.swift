@@ -14,29 +14,257 @@ import WatchConnectivity
 import CoreImage.CIFilterBuiltins
 import CoreBluetooth
 import SpriteKit
+import UIKit
 
 
 //───────────────────
 // MARK: – tiny helpers
 //───────────────────
+// MARK: - App-wide notification (optional)
+// MARK: - App-wide notifications
+extension Notification.Name {
+    /// Toasts etc. after "Open in SyncTimer" imports an XML
+    static let didImportCueSheet = Notification.Name("didImportCueSheet")
+    /// A cue sheet has been loaded (either local load or broadcast-accept)
+}
+
 extension SyncSettings.SyncConnectionMethod: SegmentedOption {
   var icon: String {
     switch self {
-    case .network:   return "network"      // pick your SF Symbol
-    case .bluetooth: return "dot.radiowaves.left.and.right"
+    case .network:   return "wifi"      // pick your SF Symbol
+    case .bluetooth: return "antenna.radiowaves.left.and.right"
     case .bonjour:   return "antenna.radiowaves.left.and.right"
     }
   }
   var label: String { rawValue }
 }
-extension AnyTransition {
-  static var settingsSlide: AnyTransition {
-    .asymmetric(
-      insertion: .move(edge: .top).combined(with: .opacity),
-      removal:   .move(edge: .top).combined(with: .opacity)
-    )
-  }
+// MARK: - Timer ↔︎ Settings morph (matched-geometry)
+/// A tiny wrapper that owns the `@Namespace` so both cards can morph cleanly.
+struct CardMorphSwitcher<TimerV: View, SettingsV: View>: View {
+    @Namespace private var ns
+    @Binding var mode: ViewMode
+    let timer: TimerV
+    let settings: SettingsV
+
+    var body: some View {
+    ZStack {
+           if mode == .settings {
+                settings
+                    .matchedGeometryEffect(id: "TimerSettingsCard", in: ns)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                    .zIndex(1)
+            } else {
+                timer
+                    .matchedGeometryEffect(id: "TimerSettingsCard", in: ns)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                    .zIndex(1)
+            }
+        }
+    }
 }
+private struct CardMorph: ViewModifier {
+    enum Phase { case identity, insertionActive, removalActive }
+    let phase: Phase
+
+    func body(content: Content) -> some View {
+        switch phase {
+        case .identity:
+            content
+        case .insertionActive:
+            content
+                .offset(y: -12)
+                .opacity(0)
+                .blur(radius: 2)
+                .scaleEffect(0.98, anchor: .top)
+                .clipped()
+        case .removalActive:
+            content
+                .opacity(0)
+                .blur(radius: 1)
+                .scaleEffect(0.97)
+                .clipped()
+        }
+    }
+}
+
+// MARK: - Sync/Events bar morph (matched-geometry; layout-safe)
+struct ModeBarMorphSwitcher<SyncV: View, EventsV: View>: View {
+    @Namespace private var ns
+    let isSync: Bool
+    let sync: SyncV
+    let events: EventsV
+
+    init(isSync: Bool,
+         @ViewBuilder sync: () -> SyncV,
+         @ViewBuilder events: () -> EventsV) {
+        self.isSync = isSync
+        self.sync   = sync()
+        self.events = events()
+    }
+
+    var body: some View {
+        ZStack {
+            if isSync {
+                sync
+                    .matchedGeometryEffect(id: "modebar", in: ns)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+            } else {
+                events
+                    .matchedGeometryEffect(id: "modebar", in: ns)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+            }
+        }
+        .animation(
+            {
+                if #available(iOS 17, *) {
+                    return .snappy(duration: 0.26, extraBounce: 0.25)
+                } else {
+                    return .easeInOut(duration: 0.26)
+                }
+            }(),
+            value: isSync
+        )
+    }
+}
+private struct PhoneStyleOnMiniLandscapeKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var phoneStyleOnMiniLandscape: Bool {
+        get { self[PhoneStyleOnMiniLandscapeKey.self] }
+        set { self[PhoneStyleOnMiniLandscapeKey.self] = newValue }
+    }
+}
+
+private struct BadgeRowLiftKey: EnvironmentKey { static let defaultValue: CGFloat = 0 }
+extension EnvironmentValues {
+    var badgeRowLift: CGFloat {
+        get { self[BadgeRowLiftKey.self] }
+        set { self[BadgeRowLiftKey.self] = newValue }
+    }
+}
+
+// pagination for ipads
+private struct LeftPanePager<Devices: View, Notes: View>: View {
+    @Binding var tab: Int
+    let titleProvider: () -> [String]
+    let onPrev: () -> Void
+    let onNext: () -> Void
+    @ViewBuilder let devicesView: () -> Devices
+    @ViewBuilder let notesView: () -> Notes
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        VStack(spacing: 12) {
+            // Header with arrows + title (like Settings)
+            HStack {
+                Button(action: onPrev) { Image(systemName: "chevron.left") }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                Spacer(minLength: 8)
+                Text(titleProvider()[safe: tab] ?? "")
+                    .font(.custom("Roboto-SemiBold", size: 20))
+                    .foregroundStyle(.secondary)
+                    .animation(nil, value: tab)
+                Spacer(minLength: 8)
+                Button(action: onNext) { Image(systemName: "chevron.right") }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+            }
+            .padding(.horizontal, 4)
+
+            // Paged content with morphy snap
+            ZStack {
+                Group {
+                    if tab == 0 { devicesView().id("devices") }
+                    else        { notesView().id("notes")   }
+                }
+                .contentTransition(.opacity)
+                .transition(.opacity)
+                .animation(
+                    {
+                        if #available(iOS 17, *) {
+                            return .snappy(duration: 0.24, extraBounce: 0.25)
+                        } else { return .easeInOut(duration: 0.24) }
+                    }(),
+                    value: tab
+                )
+            }
+        }
+        .padding(.top, 2)
+    }
+}
+
+private struct LeftPaneNav: View {
+    @Binding var tab: Int
+    let titles: [String]
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Button {
+                withAnimation(anim) { tab = (tab + titles.count - 1) % titles.count }
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 16, weight: .semibold))
+                    .padding(8)
+            }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
+
+            // Center title + dots
+            VStack(spacing: 6) {
+                Text(titles[safe: tab] ?? "")
+                    .font(.custom("Roboto-SemiBold", size: 17))
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 6) {
+                    ForEach(0..<titles.count, id: \.self) { i in
+                        Circle()
+                            .frame(width: 6, height: 6)
+                            .opacity(i == tab ? 1.0 : 0.25)
+                            .animation(nil, value: tab)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            Button {
+                withAnimation(anim) { tab = (tab + 1) % titles.count }
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 16, weight: .semibold))
+                    .padding(8)
+            }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 8)
+    }
+
+    private var anim: Animation {
+        if #available(iOS 17, *) { return .snappy(duration: 0.24, extraBounce: 0.25) }
+        else { return .easeInOut(duration: 0.24) }
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
+}
+
+ // ─────────────────────────────────────────────────────────────
+ // Presets Model (device-local)
+ // ─────────────────────────────────────────────────────────────
+ struct Preset: Identifiable, Codable, Equatable {
+     enum Kind: String, Codable { case countdown, cueRelative, cueAbsolute, sheet }
+     var id: UUID = UUID()
+     var name: String = ""
+     var kind: Kind
+     var seconds: Double?          // countdown or cue time
+     var sheetIdentifier: String?  // persisted cue sheet identifier (or filename/title)
+     var icon: String = "circle"   // SF Symbol
+ }
 
 extension View {
     /// Simple inner‐shadow for any `Shape` (e.g. Circle())
@@ -121,44 +349,43 @@ extension Color {
     }
 }
 
-
-/// Centralized app-level settings (themes, preferences, etc.)
+// Centralized app-level settings (themes, preferences, etc.)
 final class AppSettings: ObservableObject {
+
+    // High-contrast toggle — single source of truth
+    @Published var highContrastSyncIndicator: Bool {
+        didSet {
+            UserDefaults.standard.set(highContrastSyncIndicator, forKey: "highContrastSyncIndicator")
+        }
+    }
+
+    // Seed from defaults so the toggle reflects prior choice on launch
+    init() {
+        self.highContrastSyncIndicator = UserDefaults.standard.bool(forKey: "highContrastSyncIndicator")
+    }
+    @AppStorage("leftPanePaginateOnLargePads")
+        var leftPanePaginateOnLargePads: Bool = false
+    // AppSettings.swift
+    @AppStorage("allowSyncChangesInMainView")
+    public var allowSyncChangesInMainView: Bool = false
+
+    // The rest of your settings (unchanged)
+    @AppStorage("showHours") var showHours: Bool = true
     @Published var roleSwitchConfirmationMode: RoleSwitchConfirmationMode = .popup
-
-    /// Light or dark overall theme
     @Published var appTheme: AppTheme = .light
-
-    /// Overlay color for light theme (ignored if .clear)
     @Published var customThemeOverlayColor: Color = .clear
-
-    /// In low-power mode, UI effects/materials are reduced
     @Published var lowPowerMode: Bool = false
-
-    /// Use high-contrast sync indicator (checkmark/x instead of lamp)
-    @Published var highContrastSyncIndicator: Bool = false
-
-    /// Vibrate when a flash fires
+    @AppStorage("UltraSyncKalman") var ultraSyncKalman: Bool = true
     @Published var vibrateOnFlash: Bool = true
-
-    /// Flash duration (in milliseconds)
     @Published var flashDurationOption: Int = 250
-
-    /// Which flash style to use
     @Published var flashStyle: FlashStyle = .fullTimer
-
-    /// Color of the flash effect
     @Published var flashColor: Color = .red
-
-    /// Countdown reset lock mode
     @Published var countdownResetMode: CountdownResetMode = .off
-
-    /// Confirmation mode for resets
     @Published var resetConfirmationMode: ResetConfirmationMode = .off
-
-    /// Confirmation mode for stop actions
     @Published var stopConfirmationMode: ResetConfirmationMode = .off
 }
+
+
 
 extension AppSettings {
     /// `.black` in light theme, `.white` in dark theme
@@ -176,6 +403,29 @@ private func nextEventMode(after mode: EventMode) -> EventMode {
 
 @inline(__always) func lightHaptic() {
     UIImpactFeedbackGenerator(style: .light).impactOccurred()
+}
+// ──────────────────────────────────────────────────────────────
+// MARK: – Central timer formatter (HH:MM:SS.CC or MM:SS.CC)
+// ──────────────────────────────────────────────────────────────
+/// Formats a time interval in seconds into either `HH:MM:SS.CC` or `MM:SS.CC`.
+/// Minutes-only is used when `alwaysShowHours == false` and the absolute value is < 3600s.
+@inline(__always)
+func formatTimerString(_ t: TimeInterval, alwaysShowHours: Bool) -> String {
+    // We format the absolute value; any sign/prefix is handled by the caller UI.
+    let v = abs(t)
+    // Centiseconds (rounded) to stay consistent with other renderers
+    let cs = Int((v * 100).rounded())
+    let h  = cs / 360_000
+    let m  = (cs / 6_000) % 60
+    let s  = (cs / 100) % 60
+    let c  = cs % 100
+
+    if alwaysShowHours || v >= 3600.0 {
+        return String(format: "%02d:%02d:%02d.%02d", h, m, s, c)
+    } else {
+        let mm = cs / 6_000 // total minutes
+        return String(format: "%02d:%02d.%02d", mm, s, c)
+    }
 }
 private func registerRoboto() {
     let faces = [
@@ -299,30 +549,7 @@ struct AppBackdrop: View {
         }
     }
 }
-public struct TimerMessage: Codable, Equatable {
-    public enum Action: String, Codable {
-        case update, start, pause, reset, addEvent
-    }
 
-    public var action   : Action
-    public var timestamp: TimeInterval
-    public var phase    : String
-    public var remaining: TimeInterval
-    public var stopEvents: [StopEventWire]
-
-    public init(action: Action,
-                timestamp: TimeInterval,
-                phase: String,
-                remaining: TimeInterval,
-                stopEvents: [StopEventWire])
-    {
-        self.action     = action
-        self.timestamp  = timestamp
-        self.phase      = phase
-        self.remaining  = remaining
-        self.stopEvents = stopEvents
-    }
-}
 //───────────────────
 // MARK: – app models
 //───────────────────
@@ -362,43 +589,203 @@ enum RoleSwitchConfirmationMode: String, CaseIterable, Identifiable {
   var id: String { rawValue }
 }
 
+extension SyncSettings {
+    /// Centralized place to flip connection state.
+    /// Call on main when possible; this wraps main-queue just in case.
+    func setEstablished(_ connected: Bool) {
+        DispatchQueue.main.async {
+            self.isEstablished = connected
+        }
+    }
+}
 
 final class SyncSettings: ObservableObject {
-    // ── Auto-generate a lobby code on init if none exists
-        init() {
-            // ensure we never start with an empty code
-            generateCodeIfNeeded()
+    var connectedChildrenCount: Int { childConnections.count }
+
+    // Singleton-ish access (only if you already use a shared pattern)
+        static let shared = SyncSettings()
+    // Injected from App root; used by `receiveLoop` to process beacons
+    weak var clockSyncService: ClockSyncService?
+
+    // Auto-retry state (child, .network only)
+    private var reconnectWorkItem: DispatchWorkItem?
+    private var reconnectAttempt: Int = 0
+    
+    // Cancel any active retry
+    private func cancelReconnect() {
+        reconnectWorkItem?.cancel()
+        reconnectWorkItem = nil
+        reconnectAttempt = 0
+    }
+    
+    /// TEMP: best-effort disconnect for a specific child.
+        /// If we don’t yet map NWConnection ⇄ Peer, we drop all children as a fallback.
+        func disconnectPeer(_ id: UUID) {
+            // Remove from peers model
+            DispatchQueue.main.async {
+                self.peers.removeAll { $0.id == id }
+            }
+            // TODO: once mapping exists, cancel only that NWConnection.
+            // For now, safest: drop all and let remaining reconnect.
+            for c in childConnections { c.cancel() }
+            childConnections.removeAll()
+            DispatchQueue.main.async {
+                self.isEstablished = false
+                self.statusMessage = "Child disconnected"
+            }
         }
+    
+    // Schedule the next attempt with gentle backoff (0.6s, 1.2s, 2.0s, 3.0s, 4.0s… capped)
+    private func scheduleReconnect(_ reason: String) {
+        guard isEnabled, role == .child, connectionMethod == .network else { return }
+        reconnectWorkItem?.cancel()
+        
+        // Backoff curve: ~0.6 * (attempt+1)^1.2, max 4.5s
+        reconnectAttempt += 1
+        let delay = min(4.5, 0.6 * pow(Double(reconnectAttempt + 1), 1.2))
+        
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self, self.isEnabled else { return }
+            // Only try again if we still don’t have a ready connection
+            if self.clientConnection == nil || self.clientConnection?.state != .ready {
+                self._connectChildOverLAN()
+            }
+        }
+        reconnectWorkItem = work
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + delay, execute: work)
+    }
+    
+    private var syncKeepAlive: AnyCancellable?
+    
+    // Keep amber “alive” until we’re green; cancel itself once connected/disabled.
+    private func beginKeepAlive() {
+        // Reset any prior ticker
+        syncKeepAlive?.cancel()
+
+        // Only run while user wants sync
+        guard isEnabled else { return }
+
+        syncKeepAlive = Timer.publish(every: 2.5, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+
+                // If sync toggled off, stop the keep-alive entirely
+                guard self.isEnabled else {
+                    self.syncKeepAlive?.cancel()
+                    self.syncKeepAlive = nil
+                    return
+                }
+
+                // If already connected (green), stop the keep-alive
+                if self.isEstablished {
+                    self.syncKeepAlive?.cancel()
+                    self.syncKeepAlive = nil
+                    return
+                }
+
+                switch self.connectionMethod {
+                case .network:
+                    // LAN keep-alive is child-only; parent listens instead.
+                    guard self.role == .child else { return }
+
+                    // If Network.framework reports ready, promote to green and stop.
+                    if self.clientConnection?.state == .ready {
+                        DispatchQueue.main.async {
+                            self.isEstablished = true
+                            // Keep your existing status text pattern:
+                            self.statusMessage = "Connected to \(self.peerIP):\(self.peerPort)"
+                        }
+                        self.syncKeepAlive?.cancel()
+                        self.syncKeepAlive = nil
+                        return
+                    }
+
+                    // Otherwise, idempotently kick another connect attempt.
+                    // (If you added backoff helpers, they’ll manage pacing.)
+                    self.cancelReconnect()      // safe if you added it; no-op if not present
+                    self._connectChildOverLAN()
+
+                case .bluetooth, .bonjour:
+                    // Keep peer-to-peer discovery alive while amber (idempotent calls).
+                    self.bonjourManager.startBrowsing()
+                    if self.role == .parent {
+                        self.bonjourManager.startAdvertising()
+                    }
+                }
+            }
+    }
+
+    
+    private func endKeepAlive() {
+        syncKeepAlive?.cancel()
+        syncKeepAlive = nil
+    }
+    
     @AppStorage("localNickname") var localNickname: String = NicknameGenerator.make()
     @Published var pairingServiceUUID: CBUUID?        = nil
     @Published var pairingCharacteristicUUID: CBUUID? = nil
     @Published var pairingDeviceName: String?         = nil
-
+    
     // Parent’s listener endpoint (populated when you startParent())
     @Published var listenerIPAddress: String = ""
     @Published var listenerPort:      UInt16 = 50000
-
+    
     // Child’s copy of parent info (filled from QR scan)
     @Published var parentIPAddress: String?
     @Published var parentPort:      UInt16?
+    
+    // Tap pairing glue
+        private var tapMgr: TapPairingManager?
+        @Published var tapStateText: String = "Ready"
+    
+    // SyncTimerApp.swift
+    func beginTapPairing() {
+        let mgr = TapPairingManager(role: (role == .parent) ? .parent : .child)
+        self.tapMgr = mgr
 
+        // Parent: provide live listener endpoint for the tap handoff
+        mgr.endpointProvider = { [weak self] in
+            guard let self = self, !self.listenerIPAddress.isEmpty else { return nil }
+            return TapPairingManager.ResolvedEndpoint(host: self.listenerIPAddress,
+                                                      port: self.listenerPort)
+        }
+
+        mgr.onResolved = { [weak self] ep in
+            guard let self = self else { return }
+            if self.role == .child {
+                DispatchQueue.main.async {
+                    self.peerIP   = ep.host
+                    self.peerPort = String(ep.port)
+                    self._connectChildOverLAN()
+                }
+            }
+        }
+
+        mgr.start(ephemeral: ["sid": UUID().uuidString])
+    }
+
+    
+        func cancelTapPairing() {
+            tapMgr?.cancel()
+            tapMgr = nil
+            tapStateText = "Ready"
+        }
+    
     // MARK: — Lobby properties
-    /// Current 5-digit code for lobby join
-    @Published var currentCode: String = ""
-    /// Whether new peers are prevented from joining
-    @Published var isLobbyLocked: Bool = false
+    
     /// Unique ID for this device in lobby
     let localPeerID: UUID = UIDevice.current.identifierForVendor ?? UUID()
     /// List of peers in lobby (sorted by join time)
     @Published private(set) var peers: [Peer] = []
     
     /// Lazily replace a peer’s RSSI and trigger SwiftUI updates
-      func updateSignalStrength(peerID: UUID, to rssi: Int) {
+    func updateSignalStrength(peerID: UUID, to rssi: Int) {
         guard let idx = peers.firstIndex(where: { $0.id == peerID }) else { return }
         peers[idx].signalStrength = rssi
-      }
+    }
     
-
+    
     /// Model representing a lobby participant
     struct Peer: Identifiable, Equatable {
         let id: UUID
@@ -406,66 +793,31 @@ final class SyncSettings: ObservableObject {
         let role: Role
         let joinTs: UInt64
         var signalStrength: Int    // ← make this `var` not `let`
-
+        
         static func ==(a: Peer, b: Peer) -> Bool {
-          return a.id == b.id
+            return a.id == b.id
             && a.name == b.name
             && a.role == b.role
             && a.joinTs == b.joinTs
             // note: you can choose whether or not to include `signalStrength` in the equality check
         }
     }
-
-
-
-    /// Generate a new, collision-resistant 5-digit numeric lobby code
-    func generateCode() {
-        var code: String
-        repeat {
-            code = String(format: "%05d", Int.random(in: 0...99999))
-        } while code == currentCode
-        currentCode = code
-    }
-
-    /// Only generate a code if `currentCode` is empty
-        private func generateCodeIfNeeded() {
-            if currentCode.isEmpty {
-                generateCode()
-            }
-        }
+    
+    
+    
+    
     
     /// Keys for parsing Bonjour TXT records
     private enum TXTKey {
-        static let lobbyCode = "lobby"
-        static let lock      = "lock"
+        
         static let role      = "role"
         static let timestamp = "ts"
     }
-
+    
     /// Called by BonjourSyncManager when a service is resolved
     func handleResolvedService(_ service: NetService, txt: [String: Data]) {
-        // Extract the incoming lobby code first, just for logging:
-        let incomingCode = txt[TXTKey.lobbyCode]
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "(nil)"
+        //lobby lock removed
         
-        // ─── add this line ───────────────────────────────
-        print("[BR] \(role == .parent ? "Parent" : "Child") resolved \(service.name) – code =", incomingCode,
-              "expecting", currentCode)
-
-        
-        // 1) Must match current lobby code
-        guard
-            let codeData = txt[TXTKey.lobbyCode],
-            let code     = String(data: codeData, encoding: .utf8),
-            code == currentCode
-        else { return }
-
-        // 2) Respect lock
-        if let lockData = txt[TXTKey.lock],
-           String(data: lockData, encoding: .utf8) == "1" {
-            return
-        }
-
         // 3) Parse role
         let peerRole: Role = {
             if let rData = txt[TXTKey.role],
@@ -475,7 +827,7 @@ final class SyncSettings: ObservableObject {
             }
             return .child
         }()
-
+        
         // 4) Parse timestamp
         let peerTs: UInt64 = {
             if let tData = txt[TXTKey.timestamp],
@@ -485,7 +837,7 @@ final class SyncSettings: ObservableObject {
             }
             return 0
         }()
-
+        
         // 5) Parse mnemonic name (fall back to strip-and-replace)
         let peerName: String = {
             if let nameData = txt["name"],
@@ -497,7 +849,7 @@ final class SyncSettings: ObservableObject {
             return service.name
                 .replacingOccurrences(of: "SyncTimer Parent – ", with: "")
         }()
-
+        
         // 6) Build the Peer
         let peerID = service.name.hashValueAsUUID
         let peer = Peer(
@@ -507,7 +859,7 @@ final class SyncSettings: ObservableObject {
             joinTs:          peerTs,
             signalStrength:  3
         )
-
+        
         // 7) Insert & sort on the main thread
         DispatchQueue.main.async {
             if !self.peers.contains(where: { $0.id == peer.id }) {
@@ -516,16 +868,16 @@ final class SyncSettings: ObservableObject {
             }
         }
     }
-
+    
     enum Role { case parent, child }
-
+    
     enum SyncConnectionMethod: String, CaseIterable, Identifiable {
-        case network   = "LAN"
-        case bluetooth = "Bluetooth"
+        case network   = "Wi-Fi"
+        case bluetooth = "Nearby"
         case bonjour   = "Auto"
         var id: String { rawValue }
     }
-
+    
     enum SyncErrorCode: String, CaseIterable {
         case timeout      = "ERR01"
         case noWiFi       = "ERR02"
@@ -535,7 +887,7 @@ final class SyncSettings: ObservableObject {
         case invalidIP    = "ERR06"
         case bleDenied    = "ERR07"
         case unknown      = "ERR08"
-
+        
         var message: String {
             switch self {
             case .timeout:      return "No devices found"
@@ -549,13 +901,13 @@ final class SyncSettings: ObservableObject {
             }
         }
     }
-
+    
     @Published var errorCode: SyncErrorCode? = nil
     @Published var connectionMethod: SyncConnectionMethod = .network
     @Published var parentLockEnabled = false
     @Published var discoveredPeers: [Peer]   = []
     @Published var stopWires: [StopEventWire] = []
-
+    
     /// Existing API to add prior-discovered BLE/Bonjour peers
     func addDiscoveredService(name: String, role: Role, signal: Int) {
         let peer = Peer(id: UUID(), name: name, role: role, joinTs: UInt64(Date().timeIntervalSince1970*1000), signalStrength: 3)
@@ -567,14 +919,14 @@ final class SyncSettings: ObservableObject {
             }
         }
     }
-
+    
     lazy var bleDriftManager = BLEDriftManager(owner: self)
     lazy var bonjourManager  = BonjourSyncManager(owner: self)
-
+    
     var isLocked: Bool {
         role == .child && isEnabled && parentLockEnabled
     }
-
+    
     @Published var role: Role         = .parent
     @Published var isEnabled          = false
     @Published var isEstablished      = false
@@ -582,13 +934,14 @@ final class SyncSettings: ObservableObject {
     @Published var listenPort: String = "50000"
     @Published var peerIP:     String = ""
     @Published var peerPort:   String = "50000"
-
+    
     private var listener: NWListener?
+    private var beaconCancellable: AnyCancellable?
     private var childConnections: [NWConnection] = []
     private var clientConnection: NWConnection?
-
+    
     var onReceiveTimer: ((TimerMessage)->Void)? = nil
-
+    
     func integrateBonjourConnection(_ conn: NWConnection) {
         clientConnection?.cancel()
         clientConnection = conn
@@ -598,10 +951,10 @@ final class SyncSettings: ObservableObject {
         }
         receiveLoop(on: conn)
     }
-
+    
     func getCurrentElapsed() -> TimeInterval { 0 }
     func getElapsedAt(timestamp: TimeInterval) -> TimeInterval { 0 }
-
+    
     func setRawStops(_ rawStops: [StopEvent]) {
         let wires = rawStops.map {
             StopEventWire(eventTime: $0.eventTime, duration: $0.duration)
@@ -610,16 +963,16 @@ final class SyncSettings: ObservableObject {
     }
     /// Insert or replace a peer, then sort + publish
     func insertOrUpdate(_ peer: Peer) {
-      if let idx = peers.firstIndex(where: { $0.id == peer.id }) {
-        peers[idx] = peer
-      } else {
-        peers.append(peer)
-      }
-      peers.sort { $0.joinTs < $1.joinTs }
+        if let idx = peers.firstIndex(where: { $0.id == peer.id }) {
+            peers[idx] = peer
+        } else {
+            peers.append(peer)
+        }
+        peers.sort { $0.joinTs < $1.joinTs }
     }
     
-
-
+    
+    
     // ── START PARENT ───────────────────────────────────
     func startParent() {
         guard listener == nil else { return }
@@ -627,7 +980,7 @@ final class SyncSettings: ObservableObject {
             statusMessage = "Invalid port"
             return
         }
-
+        
         // never re-assign listenerPort here – wait until we know .ready
         do {
             listener = try NWListener(using: .tcp, on: .init(rawValue: portNum)!)
@@ -636,10 +989,10 @@ final class SyncSettings: ObservableObject {
             statusMessage = "Listen failed: \(error.localizedDescription)"
             return
         }
-
+        
         isEstablished  = false
         statusMessage  = "Waiting for children…"
-
+        
         listener?.stateUpdateHandler = { [weak self] newState in
             guard let self = self else { return }
             switch newState {
@@ -658,34 +1011,68 @@ final class SyncSettings: ObservableObject {
             default: break
             }
         }
-
+        
         listener?.newConnectionHandler = { [weak self] newConn in
             guard let self = self else { return }
             self.childConnections.append(newConn)
             self.setupParentConnection(newConn)
         }
-
+        
         listener?.start(queue: .global(qos: .background))
-
+        
         switch connectionMethod {
-        case .network:   break
-        case .bluetooth: bleDriftManager.start()
-        case .bonjour:
-            bonjourManager.startAdvertising()
-            statusMessage = "Bonjour: advertising"
-        }
+                case .network:   break
+                case .bluetooth: bleDriftManager.start()
+                case .bonjour:
+                    bonjourManager.startAdvertising()
+                statusMessage = "Bonjour: advertising"
+            }
+        
+                // UltraSync beacons (parent → all), 20 Hz
+                if (ConnectivityManager.shared != nil) {
+                    beaconCancellable?.cancel()
+                    beaconCancellable = Timer.publish(every: 0.05, on: .main, in: .common)
+                        .autoconnect()
+                        .sink { [weak self] _ in
+                            guard let self = self, self.isEnabled else { return }
+                            let env = BeaconEnvelope(
+                                type: .beacon,
+                                uuidP: self.localPeerID.uuidString,
+                                uuidC: nil,
+                                seq: UInt64(Date().timeIntervalSince1970 * 1000) & 0xFFFFFFFF,
+                                tP_send: ProcessInfo.processInfo.systemUptime,
+                                tC_recv: nil,
+                                tC_echoSend: nil,
+                                tP_recv: nil
+                            )
+                            if let data = try? JSONEncoder().encode(env) {
+                                let framed = data + Data([0x0A])
+                                for conn in self.childConnections { conn.send(content: framed, completion: .contentProcessed({ _ in })) }
+                            }
+                        }
+                }
+        beginKeepAlive() // <—
     }
-
+    
     private func setupParentConnection(_ conn: NWConnection) {
         conn.stateUpdateHandler = { [weak self] state in
             guard let self = self else { return }
             switch state {
             case .ready:
+                // Update UI on main
                 DispatchQueue.main.async {
                     self.isEstablished = true
                     self.statusMessage = "Child connected"
                 }
+
+                // Send a tiny newline-framed ping to flip the child lamp as soon as bytes flow
+                let ping = Data([0x0A]) // newline-delimited empty frame
+                conn.send(content: ping,
+                          completion: NWConnection.SendCompletion.contentProcessed { _ in })
+
+                // Start receiving after we’ve marked connected
                 self.receiveLoop(on: conn)
+
             case .failed, .cancelled:
                 DispatchQueue.main.async {
                     self.childConnections.removeAll { $0 === conn }
@@ -699,7 +1086,7 @@ final class SyncSettings: ObservableObject {
         }
         conn.start(queue: .global(qos: .background))
     }
-
+    
     func stopParent() {
         listener?.cancel()
         listener = nil
@@ -714,27 +1101,31 @@ final class SyncSettings: ObservableObject {
         case .bluetooth: bleDriftManager.stop()
         case .bonjour:   bonjourManager.stopAdvertising()
         }
+        beaconCancellable?.cancel()
+                beaconCancellable = nil
+        clockSyncService?.reset()
+        endKeepAlive()   // <—
     }
-
-
+    
+    
     // ── BLUETOOTH HELPER ────────────────────────────────
     func connectToParent(host: String, port: UInt16) {
         guard clientConnection == nil else {
             print("⚠️ connectToParent: already have clientConnection")
             return
         }
-
+        
         let endpoint = NWEndpoint.Host(host)
         let nwPort   = NWEndpoint.Port(rawValue: port)!
         let conn     = NWConnection(host: endpoint, port: nwPort, using: .tcp)
         clientConnection = conn
-
+        
         DispatchQueue.main.async {
             self.statusMessage   = "Connecting…"
             self.isEstablished   = false
         }
         print("👉 Child (BT) connecting to \(host):\(port)…")
-
+        
         conn.stateUpdateHandler = { [weak self] state in
             guard let self = self else { return }
             switch state {
@@ -744,7 +1135,7 @@ final class SyncSettings: ObservableObject {
                     self.statusMessage = "Connected to \(host):\(port)"
                 }
                 self.receiveLoop(on: conn)
-
+                
             case .failed(let err):
                 DispatchQueue.main.async {
                     self.isEstablished = false
@@ -752,20 +1143,20 @@ final class SyncSettings: ObservableObject {
                 }
                 conn.cancel()
                 self.clientConnection = nil
-
+                
             case .cancelled:
                 DispatchQueue.main.async {
                     self.isEstablished = false
                     self.statusMessage = "Disconnected"
                 }
                 self.clientConnection = nil
-
+                
             default: break
             }
         }
-
+        
         conn.start(queue: .global(qos: .background))
-
+        
         // 30 s timeout
         DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 30) { [weak self] in
             guard let self = self, let c = self.clientConnection else { return }
@@ -779,168 +1170,237 @@ final class SyncSettings: ObservableObject {
             }
         }
     }
-
-
+    
+    
     // ── START CHILD ───────────────────────────────────
     func startChild() {
         switch connectionMethod {
         case .network:
-            guard clientConnection == nil else {
-                print("⚠️ startChild: there is already a clientConnection, ignoring.")
+            cancelReconnect()          // clear any stale plan
+                _connectChildOverLAN()     // ⟵ single connection path
+                beginKeepAlive()
+            
+        case .bluetooth:
+            guard let h = parentIPAddress,
+                  let p = parentPort else {
+                // No manual endpoint? Use Bonjour (peer-to-peer Wi-Fi) as the transport.
+                bonjourManager.startBrowsing()
+                statusMessage = "Bonjour: searching…"
+                bleDriftManager.start() // keep BLE drift measurement
                 return
             }
+            connectToParent(host: h, port: p)
+            bonjourManager.startBrowsing()
+            bleDriftManager.start()
             
-            let ipString = peerIP.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !ipString.isEmpty else {
-                statusMessage = "Enter parent IP"
-                print("❌ startChild: peerIP is empty")
-                return
-            }
-            guard let portNum = UInt16(peerPort), portNum > 0 else {
-                statusMessage = "Invalid port"
-                print("❌ startChild: “\(peerPort)” is not a valid port")
-                return
-            }
-            
-            let endpoint = NWEndpoint.Host(ipString)
-            let port     = NWEndpoint.Port(rawValue: portNum)!
-            let conn     = NWConnection(host: endpoint, port: port, using: .tcp)
-            clientConnection = conn
-            
-            statusMessage = "Connecting…"
-            isEstablished = false
-            print("👉 Child attempting connection to \(ipString):\(portNum)…")
-            
-            conn.stateUpdateHandler = { [weak self] state in
-                guard let self = self else { return }
-                switch state {
-                case .waiting(let err):
-                    DispatchQueue.main.async {
-                        self.statusMessage = "Waiting: \(err.localizedDescription)"
-                    }
-                    print("⌛ Child waiting to connect: \(err.localizedDescription)")
-                case .preparing:
-                    print("… Child preparing connection …")
-                case .ready:
-                    DispatchQueue.main.async {
-                        self.isEstablished = true
-                        self.statusMessage = "Connected to \(ipString):\(portNum)"
-                    }
-                    print("✅ Child connected!")
-                    self.receiveLoop(on: conn)
-                case .failed(let err):
-                    DispatchQueue.main.async {
-                        self.isEstablished = false
-                        self.statusMessage = "Connect failed: \(err.localizedDescription)"
-                    }
-                    print("❌ Child failed to connect: \(err.localizedDescription)")
-                    conn.cancel()
-                    self.clientConnection = nil
-                case .cancelled:
-                    DispatchQueue.main.async {
-                        self.isEstablished = false
-                        self.statusMessage = "Disconnected"
-                    }
-                    print("🛑 Child connection cancelled")
-                    self.clientConnection = nil
-                default:
-                    break
-                }
-            }
-            
-            conn.start(queue: .global(qos: .background))
-            print("⌛ Child: NWConnection.start(queue:) called; now waiting up to 30s …")
-            
-            DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 30) { [weak self] in
-                guard let self = self, let c = self.clientConnection else { return }
-                if c.state != .ready {
-                    c.cancel()
-                    DispatchQueue.main.async {
-                        self.isEstablished = false
-                        self.statusMessage = "Timeout"
-                    }
-                    print("⌛ Child timed out after 30 s")
-                    self.clientConnection = nil
-                }
+        case .bonjour:
+            bonjourManager.startBrowsing()
+            statusMessage = "Bonjour: searching…"
+        }
+        beginKeepAlive() // <—
+    }
+    
+    func stopChild() {
+        cancelReconnect()                // ← stop any scheduled retries
+        reconnectAttempt = 0             // ← reset backoff
+        switch connectionMethod {
+        case .network:
+            clientConnection?.cancel()
+            clientConnection = nil
+            DispatchQueue.main.async {
+                self.isEstablished = false
+                self.statusMessage = "Not connected"
             }
             
         case .bluetooth:
-                    guard let h = parentIPAddress,
-                          let p = parentPort else {
-                        print("🔴 no parent endpoint, can’t startChild()")
-                        return
-                    }
-                    connectToParent(host: h, port: p)
-                    bleDriftManager.start()
-
-                case .bonjour:
-                    bonjourManager.startBrowsing()
-                    statusMessage = "Bonjour: searching…"
-                }
+            bleDriftManager.stop()
+            
+        case .bonjour:
+            bonjourManager.stopBrowsing()
+            clientConnection?.cancel()
+            clientConnection = nil
+            DispatchQueue.main.async {
+                self.isEstablished = false
+                self.statusMessage = "Not connected"
             }
-
-            func stopChild() {
-                switch connectionMethod {
-                case .network:
-                    clientConnection?.cancel()
-                    clientConnection = nil
-                    DispatchQueue.main.async {
-                        self.isEstablished = false
-                        self.statusMessage = "Not connected"
-                    }
-
-                case .bluetooth:
-                    bleDriftManager.stop()
-
-                case .bonjour:
-                    bonjourManager.stopBrowsing()
-                    clientConnection?.cancel()
-                    clientConnection = nil
-                    DispatchQueue.main.async {
-                        self.isEstablished = false
-                        self.statusMessage = "Not connected"
-                    }
-                }
+        }
+        endKeepAlive()   // <—
+        beaconCancellable?.cancel()
+                beaconCancellable = nil
+                clockSyncService?.reset()
+        // Also: when we *become* connected, stop the keep-alive
+        func setEstablished(_ connected: Bool) {
+            DispatchQueue.main.async {
+                self.isEstablished = connected
+                if connected { self.endKeepAlive() } else if self.isEnabled { self.beginKeepAlive() }
             }
+        }
+    }
     
-    // ── BROADCAST A JSON-ENCODED MESSAGE TO “ALL CHILDREN” (parent only) ──
-    func broadcastToChildren(_ msg: TimerMessage) {
-        guard role == .parent else { return }
-        let encoder = JSONEncoder()
-        guard let data = try? encoder.encode(msg) else { return }
-        let framed = data + Data([0x0A])   // newline-delimit each JSON packet
-        
-        for conn in childConnections {
-            conn.send(content: framed, completion: .contentProcessed({ _ in }))
+    private func _connectChildOverLAN() {
+        let ipString = peerIP.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !ipString.isEmpty else {
+            statusMessage = "Enter parent IP"
+            print("❌ startChild: peerIP is empty")
+            return
+        }
+        guard let portNum = UInt16(peerPort), portNum > 0 else {
+            statusMessage = "Invalid port"
+            print("❌ startChild: “\(peerPort)” is not a valid port")
+            return
         }
         
-        ConnectivityManager.shared.send(msg)
+        // If there is a stale/non-ready connection hanging around, kill it first.
+        if let c = clientConnection, c.state != .ready {
+            c.cancel()
+            clientConnection = nil
+        }
+        
+        // Fresh connection every attempt
+        let endpoint = NWEndpoint.Host(ipString)
+        let port     = NWEndpoint.Port(rawValue: portNum)!
+        let conn     = NWConnection(host: endpoint, port: port, using: .tcp)
+        
+        clientConnection = conn
+        DispatchQueue.main.async {
+            self.statusMessage = "Connecting…"
+            self.isEstablished = false
+        }
+        print("👉 Child attempting connection to \(ipString):\(portNum)… (attempt \(reconnectAttempt + 1))")
+        
+        conn.stateUpdateHandler = { [weak self] state in
+            guard let self = self else { return }
+            switch state {
+            case .waiting(let err):
+                DispatchQueue.main.async { self.statusMessage = "Waiting: \(err.localizedDescription)" }
+                print("⌛ Child waiting: \(err.localizedDescription)")
+                // Parent may not be listening yet → schedule gentle retry
+                self.scheduleReconnect("waiting")
+                
+            case .preparing:
+                print("… Child preparing connection …")
+                
+            case .ready:
+                self.cancelReconnect()
+                self.reconnectAttempt = 0
 
+                DispatchQueue.main.async {
+                    self.setEstablished(true)                 // ⟵ turn lamp green immediately
+                    self.statusMessage = "Connected to \(ipString):\(portNum)"
+                }
+
+                // Nudge the parent with one tiny frame so *both* sides see traffic
+                let ping = Data([0x0A])                      // \n
+                conn.send(content: ping, completion: .contentProcessed { _ in })
+
+                print("✅ Child connected!")
+                self.receiveLoop(on: conn)                   // then start reading
+
+                
+                
+            case .failed(let err):
+                DispatchQueue.main.async {
+                    self.isEstablished = false
+                    self.statusMessage = "Connect failed: \(err.localizedDescription)"
+                }
+                print("❌ Child failed: \(err.localizedDescription)")
+                conn.cancel()
+                self.clientConnection = nil
+                self.scheduleReconnect("failed")
+                
+            case .cancelled:
+                DispatchQueue.main.async {
+                    self.isEstablished = false
+                    self.statusMessage = "Disconnected"
+                }
+                print("🛑 Child cancelled")
+                self.clientConnection = nil
+                // If user still wants sync, keep trying
+                self.scheduleReconnect("cancelled")
+                
+            default:
+                break
+            }
+        }
+        
+        conn.start(queue: .global(qos: .background))
     }
+    
+    
+    // ── BROADCAST A JSON-ENCODED MESSAGE TO “ALL CHILDREN” (parent only) ──
+        func broadcastToChildren(_ msg: TimerMessage) {
+            guard role == .parent else { return }
+            let encoder = JSONEncoder()
+            guard let data = try? encoder.encode(msg) else { return }
+            let framed = data + Data([0x0A])   // newline-delimit each JSON packet
+    
+            // ① Existing LAN path (TCP/Bonjour)
+            for conn in childConnections {
+                conn.send(content: framed, completion: .contentProcessed({ _ in }))
+            }
+            ConnectivityManager.shared.send(msg)
+    
+            // ② NEW: BLE path (notify subscribed centrals)
+            if connectionMethod == .bluetooth {
+                bleDriftManager.sendTimerMessageToChildren(msg)
+            }
+        }
     
     // ── SEND JSON TO PARENT (child only) ─────────────────────────────────
-    func sendToParent(_ msg: TimerMessage) {
-        guard role == .child, let conn = clientConnection else { return }
-        let encoder = JSONEncoder()
-        ConnectivityManager.shared.send(msg)
-        guard let data = try? encoder.encode(msg) else { return }
-        let framed = data + Data([0x0A])
-        conn.send(content: framed, completion: .contentProcessed({ _ in }))
-    }
+        func sendToParent(_ msg: TimerMessage) {
+            guard role == .child else { return }
+            let encoder = JSONEncoder()
+            ConnectivityManager.shared.send(msg)
     
+            switch connectionMethod {
+            case .bluetooth:
+                // NEW: write to parent's BLE characteristic
+                bleDriftManager.sendTimerMessageToParent(msg)
+    
+            default:
+                // existing TCP path
+                guard let conn = clientConnection,
+                      let data = try? encoder.encode(msg) else { return }
+                let framed = data + Data([0x0A])
+                conn.send(content: framed, completion: .contentProcessed({ _ in }))
+            }
+        }
     // ── RECEIVE LOOP (both parent and child reuse) ───────────────────────
     private func receiveLoop(on connection: NWConnection) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
             guard let self = self else { return }
             if let data = data, !data.isEmpty {
-                // Split on newline, decode each JSON chunk
-                let pieces = data.split(separator: 0x0A)   // newline (10)
+                // ⬇️ turn lamp green on first packet, no button cycle required
+                if self.role == .child { self.setEstablished(true) }
+                
+                // existing: split on newline, decode, dispatch …
+                let pieces = data.split(separator: 0x0A)
                 let decoder = JSONDecoder()
                 for piece in pieces {
                     if let msg = try? decoder.decode(TimerMessage.self, from: Data(piece)) {
-                        DispatchQueue.main.async {
-                            self.onReceiveTimer?(msg)
-                        }
+                        DispatchQueue.main.async { self.onReceiveTimer?(msg) }
+                        continue
+                                            }
+                                            if self.isEnabled, let env = try? decoder.decode(BeaconEnvelope.self, from: Data(piece)) {
+                                                // Route via ClockSyncService
+                                                let roleIsChild = (self.role == .child)
+                                                                        if let reply = self.clockSyncService?.handleInbound(env,
+                                                                                                                            roleIsChild: roleIsChild,
+                                                                                                                            localUUID: self.localPeerID.uuidString) {
+                                                    // parent followup → unicast; child echo → to parent
+                                                    let payload = (try? JSONEncoder().encode(reply)).map { $0 + Data([0x0A]) }
+                                                    if let p = payload {
+                                                        if roleIsChild {
+                                                            // send to parent
+                                                            self.clientConnection?.send(content: p, completion: .contentProcessed({ _ in }))
+                                                        } else {
+                                                            // parent → target child (match by uuidC suffix in service name if needed, else broadcast)
+                                                            // Here: broadcast; the child filters on uuidC.
+                                                            for c in self.childConnections { c.send(content: p, completion: .contentProcessed({ _ in })) }
+                                                        }
+                                                    }
+                                                }
+                                                continue
                     }
                 }
             }
@@ -955,7 +1415,6 @@ final class SyncSettings: ObservableObject {
         }
     }
 }
-
 
 // MARK: — Helpers
 private extension String {
@@ -1083,7 +1542,19 @@ struct NumPadView: View {
     private var isVerySmallPhone: Bool {
         UIScreen.main.bounds.width <= 376
     }
-    
+    // NEW: iPad-landscape detector (scope the 32pt rule narrowly)
+        private var isPadLandscape: Bool {
+            UIDevice.current.userInterfaceIdiom == .pad && UIScreen.main.bounds.width > UIScreen.main.bounds.height
+        }
+
+    // NEW: 10.9″/11″ class (exclude 12.9″/13″)
+    private var isPad109Landscape: Bool {
+        guard isPadLandscape else { return false }
+        let nativeMax = max(UIScreen.main.nativeBounds.width, UIScreen.main.nativeBounds.height)
+        // 12.9/13 are 2732px+ in the long edge; treat everything below as “10.9/11 family”
+        return nativeMax < 2732
+    }
+
     // bottom row keys switch based on `isEntering`
     private var allKeys: [Key] {
         // top 3 rows are always 1–9
@@ -1115,13 +1586,19 @@ struct NumPadView: View {
     
     
     var body: some View {
-        LazyVGrid(columns: columns, spacing: vGap) {
+        LazyVGrid(
+            columns: columns,
+            spacing: isPad109Landscape ? 32 : (isPadLandscape ? 52 : vGap)
+        ) {
             ForEach(allKeys, id: \.self) { key in
                 Button {
                     handle(key)
                 } label: {
                     icon(for: key)
-                        .frame(maxWidth: .infinity, minHeight: calcKeyHeight())
+                        .frame(
+                            maxWidth: .infinity,
+                            minHeight: isPad109Landscape ? 44 : (isPadLandscape ? 52 : calcKeyHeight())
+                        )
                 }
                 .buttonStyle(.plain)
                 // disable all except settings when locked
@@ -1132,6 +1609,7 @@ struct NumPadView: View {
                 )
             }
         }
+        
         .padding(.horizontal, hGap)
         .onChange(of: isEntering) { newValue in
             print("Numpad saw isEntering = \(newValue)")
@@ -1277,7 +1755,8 @@ struct SyncBar: View {
     var isCounting: Bool
     
     var isSyncEnabled: Bool
-    let onToggleSync: () -> Void
+        /// Long-press to open the active connection subpage (LAN / BLE / Bonjour)
+        let onOpenConnections: () -> Void
 
     /// Called when the role switch is finally confirmed.
     let onRoleConfirmed: (SyncSettings.Role) -> Void
@@ -1294,6 +1773,11 @@ struct SyncBar: View {
         let isDark        = (colorScheme == .dark)
         let activeColor   = isDark ? Color.white : Color.black
         let inactiveColor = Color.gray
+        // Mirror Settings lamp state
+               let lampColor: Color = {
+                    if !syncSettings.isEnabled { return .red }
+                    return syncSettings.isEstablished ? .green : .orange
+                }()
 
         HStack(spacing: 0) {
             // ── Role toggle ────────────────────────────
@@ -1337,6 +1821,11 @@ struct SyncBar: View {
                 .layoutPriority(1)
                 .accessibilityLabel("Switch role")
                 .accessibilityHint("Double-tap to toggle between child and parent")
+                // Mirror Settings lamp state
+                        let lampColor: Color = {
+                            if !syncSettings.isEnabled { return .red }
+                            return syncSettings.isEstablished ? .green : .orange
+                        }()
             }
             .disabled(isCounting)
             .alert(isPresented: $showRoleAlert) {
@@ -1351,33 +1840,29 @@ struct SyncBar: View {
             }
 
             // ── Sync/Stop button ─────────────────────────
-            // push everything left, so this group hugs right
                         Spacer(minLength: 0)
                         // ── Sync/Stop + lamp, always 8 pt apart ─────────
-                        HStack(spacing: 8) {
-                            Button {
-                                guard !isCounting else { return }
-                                onToggleSync()
-                            } label: {
-                                Text(isSyncEnabled ? "STOP" : "SYNC")
-                                    .font(.custom("Roboto-SemiBold", size: 24))
-                                    .foregroundColor(activeColor)
-                                    .fixedSize()
-                            }
-                            .disabled(syncSettings.role == .parent && isCounting)
-            
-                            if settings.highContrastSyncIndicator {
-                                Image(systemName: syncSettings.isEstablished
-                                      ? "checkmark.circle.fill"
-                                      : "xmark.octagon.fill")
-                                    .foregroundColor(syncSettings.isEstablished ? .green : .red)
-                                    .frame(width: 18, height: 18)
-                            } else {
-                                Circle()
-                                    .fill(syncSettings.isEstablished ? .green : .red)
-                                    .frame(width: 18, height: 18)
-                            }
+            HStack(spacing: 8) {
+                            // Label mirrors Settings; tap is inert, long-press opens connections
+                            Text(isSyncEnabled ? "STOP" : "SYNC")
+                                .font(.custom("Roboto-SemiBold", size: 24))
+                                .foregroundColor(activeColor)
+                                .fixedSize()
+                let lampState: SyncStatusLamp.LampState =
+                    syncSettings.isEstablished ? .connected :
+                    (syncSettings.isEnabled ? .streaming : .off)
+
+                SyncStatusLamp(
+                    state: lampState,
+                    size: 18,
+                    highContrast: settings.highContrastSyncIndicator
+                )
+
                         }
+                        .contentShape(Rectangle())
+                        .simultaneousGesture(
+                            LongPressGesture(minimumDuration: 0.5).onEnded { _ in onOpenConnections() }
+                        )
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 2)
@@ -1725,19 +2210,76 @@ extension TimeInterval {
         return String(format: "%02d:%02d:%02d.%02d", h, m, s, c)
     }
 }
+extension TimeInterval {
+    /// Minutes-only when under 1h *and* the user toggle is OFF; otherwise HH:MM:SS.CC.
+    /// Preserves the sign for countdown.
+    func formattedAdaptiveCS(alwaysShowHours: Bool) -> String {
+        let t   = self
+        let neg = t < 0
+        let absT = abs(t)
+
+        // match your existing rounding to centiseconds
+        let cs = Int((absT * 100).rounded())
+        let h  = cs / 360_000
+        let m  = (cs / 6_000) % 60
+        let s  = (cs / 100) % 60
+        let c  = cs % 100
+
+        let body: String = {
+            if alwaysShowHours || absT >= 3600.0 {
+                return String(format: "%02d:%02d:%02d.%02d", h, m, s, c)
+            } else {
+                let mm = cs / 6_000 // total minutes (keeps digit-entry mapping intact)
+                return String(format: "%02d:%02d.%02d", mm, s, c)
+            }
+        }()
+        return neg ? "-" + body : body
+    }
+}
+private struct RoundedCorners: Shape {
+    var radius: CGFloat = 12
+    var corners: UIRectCorner = []
+    func path(in rect: CGRect) -> Path {
+        let p = UIBezierPath(roundedRect: rect,
+                             byRoundingCorners: corners,
+                             cornerRadii: CGSize(width: radius, height: radius))
+        return Path(p.cgPath)
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // MARK: - TimerCard   (single-Text flash — no ghosting)
 // ─────────────────────────────────────────────────────────────────────
 struct TimerCard: View {
+    
+    
+    // near the other derived flags in TimerCard
+    private var isPadLayout: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
+
+    @EnvironmentObject private var cueBadge: CueBadgeState
+    @EnvironmentObject private var clockSync: ClockSyncService
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var syncSettings: SyncSettings
+    @Environment(\.phoneStyleOnMiniLandscape) private var phoneStyleOnMiniLandscape
+    @Environment(\.badgeRowLift) private var badgeRowLift
 
-// ── New: detect landscape
-    @Environment(\.verticalSizeClass) private var verticalSizeClass
-    private var isLandscape: Bool {
-        verticalSizeClass == .compact
-    }
+    // ── New: detect landscape (use true window size on iPad/split)
+        @Environment(\.verticalSizeClass) private var verticalSizeClass
+        @Environment(\.containerSize) private var containerSize
+        private var isLandscape: Bool {
+            if containerSize != .zero { return containerSize.width > containerSize.height }
+            return verticalSizeClass == .compact
+        }
+    
+    
+    // Mini-iPad landscape: strip chrome/overlays/labels and lift the badge row
+      let showCardChrome: Bool = true              // controls any internal background/shadow
+      let showTapZoneOverlays: Bool = true         // disables the left/right vertical tints & dividers
+      let showSectionLabels: Bool = true           // hides "SYNC VIEW" / "EVENTS VIEW" labels
+      let badgeRowYOffset: CGFloat = 0             // vertical nudge for the badges ro
 
     // ── Hint‐flash timer and states ─────────────────────────────────
     @State private var leftFlash: Bool = false
@@ -1791,6 +2333,7 @@ struct TimerCard: View {
     var makeFlashed: () -> AttributedString
     var isCountdownActive: Bool
     var events: [Event]
+    var onClearEvents: (() -> Void)? = nil
 
     // ── Derived styling ────────────────────────────────────────────
     private var isDark: Bool  { colorScheme == .dark }
@@ -1805,14 +2348,114 @@ struct TimerCard: View {
 
     // ── Render raw digits as “HH:MM:SS.CC” ─────────────────────────────
     private func rawString(from digits: [Int]) -> String {
-        var a = digits
-        while a.count < 8 { a.insert(0, at: 0) }
-        let h  = a[0] * 10 + a[1]
-        let m  = a[2] * 10 + a[3]
-        let s  = a[4] * 10 + a[5]
-        let cs = a[6] * 10 + a[7]
-        return String(format: "%02d:%02d:%02d.%02d", h, m, s, cs)
+        var d = digits
+        while d.count < 8 { d.insert(0, at: 0) }   // keep your 8-digit HHMMSSCC model
+
+        let h  = d[0] * 10 + d[1]
+        let m  = d[2] * 10 + d[3]
+        let s  = d[4] * 10 + d[5]
+        let cc = d[6] * 10 + d[7]
+
+        let totalSeconds = h * 3600 + m * 60 + s
+
+        if settings.showHours || totalSeconds >= 3600 {
+            return String(format: "%02d:%02d:%02d.%02d", h, m, s, cc)
+        } else {
+            let mm = h * 60 + m   // ← purely a display fold; entry/backspace logic stays HHMMSSCC
+            return String(format: "%02d:%02d.%02d", mm, s, cc)
+        }
     }
+    
+
+    // MARK: - Connectivity status adapter for TimerStatusStrip
+        private func makeStatus() -> TimerConnectivityStatus {
+            // Transport (CONNECT tab selection)
+            let selected: TimerConnectivityStatus.SyncMode = {
+                let m = String(describing: syncSettings.connectionMethod).lowercased()
+                if m.contains("ble") || m.contains("bluetooth") || m.contains("nearby") { return .bluetooth }
+                if m.contains("lan") || m.contains("bonjour") || m.contains("wifi") { return .lan }
+                return .off
+            }()
+    
+            // Role / child count
+            let isParentNow = (syncSettings.role == .parent)
+            let childCount  = isParentNow ? syncSettings.peers.filter { $0.role == .child  }.count : 0
+    
+            // Watch reachability
+            // Watch reachability (safe on all platforms)
+            #if canImport(WatchConnectivity)
+            let watchConnected: Bool = {
+                guard WCSession.isSupported() else { return false }
+                let s = WCSession.default
+                return s.activationState == .activated && (s.isPaired || s.isReachable)
+            }()
+            #else
+            let watchConnected = false
+            #endif
+
+    
+            // ---- Signal strength → 0…1 (averaged RSSI across relevant peers) ----
+            func mapRSSITo01(_ rssi: Int) -> Double {
+                let clamped = max(-95, min(-45, rssi))          // typical BLE/Wi-Fi window
+                return (Double(clamped) + 95.0) / 50.0          // −95→0.0, −45→1.0
+            }
+            let relevantPeers = syncSettings.peers.filter { isParentNow ? ($0.role == .child) : ($0.role == .parent) }
+            let strength01: Double? = {
+                let values = relevantPeers.map { $0.signalStrength }
+                guard !values.isEmpty else { return nil }
+                let avg = Double(values.reduce(0, +)) / Double(values.count)
+                return mapRSSITo01(Int(avg.rounded()))
+            }()
+    
+            // ---- Drift (ms) best-effort: try any exposed “drift/skew/offset” Double on managers ----
+            func bestEffortDriftMs() -> Double? {
+                // If you have a dedicated property (e.g. clockSyncService.currentDriftMs),
+                // replace this whole function with that property.
+                func probe(_ any: Any?) -> Double? {
+                    guard let any else { return nil }
+                    let mirror = Mirror(reflecting: any)
+                    for child in mirror.children {
+                        guard let label = child.label?.lowercased() else { continue }
+                        if (label.contains("drift") || label.contains("skew") || label.contains("offset")),
+                           let v = child.value as? Double { return v }
+                        if (label.contains("drift") || label.contains("skew") || label.contains("offset")),
+                           let vOpt = child.value as? Double?, let v = vOpt { return v }
+                    }
+                    return nil
+                }
+                return probe(syncSettings.clockSyncService) ??
+                       probe(syncSettings.bleDriftManager)  ??
+                       probe(syncSettings.bonjourManager)
+            }
+            let driftMs = bestEffortDriftMs() ?? .nan   // NaN → “— ms” until real value exists
+    
+            return TimerConnectivityStatus(
+                syncMode: selected,
+                isStreaming: syncSettings.isEnabled,
+                isConnected: syncSettings.isEstablished,
+                isParent: isParentNow,
+                childCount: childCount,
+                isWatchConnected: watchConnected,
+                strength01: strength01,
+                driftMs: driftMs,
+                highContrast: settings.highContrastSyncIndicator
+            )
+        }
+    private func currentSyncMode() -> TimerConnectivityStatus.SyncMode {
+        // Robust to enum name changes; uses description text
+        let method = String(describing: syncSettings.connectionMethod).lowercased()
+        if method.contains("ble") || method.contains("bluetooth") || method.contains("nearby") { return .bluetooth }
+        if method.contains("lan") || method.contains("bonjour") || method.contains("wifi") { return .lan }
+        return .off
+    }
+
+    private func isSearchingNow() -> Bool {
+        // Show “searching” while enabled but not established; no extra types needed
+        return syncSettings.isEnabled && !syncSettings.isEstablished
+    }
+
+    
+
 
     var body: some View {
         ZStack {
@@ -1834,9 +2477,9 @@ struct TimerCard: View {
             
             GeometryReader { geo in
                 // In portrait, we inset 16pt on each side; in landscape, only 10pt each side:
-                let horizontalInset: CGFloat = isLandscape ? 10 : 16
-                let innerW = geo.size.width - (horizontalInset * 2)
-                // “fs” is the base font‐size for the big timer text; scale it up in landscape:
+                let isPadLike = (containerSize != .zero ? containerSize.width : UIScreen.main.bounds.width) >= 700
+                let horizontalInset: CGFloat = isPadLike ? 0 : (isLandscape ? 10 : 16)
+                let innerW = geo.size.width - (horizontalInset * 2)                // “fs” is the base font‐size for the big timer text; scale it up in landscape:
                 let fsPortrait = innerW / 4.6
                 let fs = isLandscape ? (fsPortrait * 1.4) : fsPortrait
                 let isCompactWidth = (geo.size.width <= 389)
@@ -1849,27 +2492,121 @@ struct TimerCard: View {
 
                 ZStack {
                     // ── (A) Card background with drop shadow ─────────────────
-                    if !isLandscape {
-                        Group {
-                            if settings.lowPowerMode {
-                                // Low‐Power: flat fill only
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(isDark ? Color.black : Color.white)
-                            } else {
-                                // Normal: material + overlay + shadow
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(.ultraThinMaterial)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(Color.black.opacity(isDark ? 0.25 : 0))
-                                    )
-                                    .shadow(
-                                        color: Color.black.opacity(0.125),
-                                        radius: 10, x: 0, y: 6
-                                    )
-                            }
+                    if !isLandscape || isPadLayout {
+                      Group {
+                          if settings.lowPowerMode {
+                                                    // Low-Power: flat fill only (no blur/material)
+                                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                      .fill(isDark ? Color.black : Color.white)
+                                                      
+
+                                                  } else {
+                          // Normal: material + subtle “glass” cues (safe on all iOS 16/17)
+                          let corner: CGFloat = 12
+                          let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
+
+                          shape
+                            .fill(.ultraThinMaterial)
+                            .glassEffect()
+                                                      
+                            // light “glass” rim stroke (looks premium, cheap to render)
+                            .overlay(
+                              shape
+                                .strokeBorder(
+                                  LinearGradient(
+                                    colors: [
+                                      Color.white.opacity(colorScheme == .light ? 0.18 : 0.08),
+                                      Color.white.opacity(0.03)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                  ),
+                                  lineWidth: 1
+                                )
+                            )
+                            // soft internal highlight for light mode only
+                            .overlay(
+                              shape
+                                .fill(
+                                  LinearGradient(
+                                    colors: [
+                                      Color.white.opacity(colorScheme == .light ? 0.10 : 0.0),
+                                      Color.white.opacity(0.00)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                  )
+                                )
+                            )
+                            .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 6)
+                                                        // ⬇️ PINNED overlays on the shape's own bounds
+                                                        .overlay(alignment: .bottomLeading) {
+                                                            if (!isLandscape || isPadLayout && !phoneStyleOnMiniLandscape) && mode == .stop {
+                                                                GeometryReader { p in
+                                                                    let tintH = floor(p.size.height * 0.4)
+                                                                    VStack(spacing: 0) {
+                                                                        Spacer()                                // ↓ pin to bottom
+                                                                        HStack(spacing: 0) {
+                                                                            LinearGradient(colors: [Color.gray.opacity(0.125), .clear],
+                                                                                           startPoint: .bottom, endPoint: .top)
+                                                                                .frame(width: floor(p.size.width * 0.5), height: tintH)
+                                                                                .mask(LinearGradient(colors: [.black, .clear],
+                                                                                                     startPoint: .trailing, endPoint: .leading))
+                                                                                .clipShape(RoundedCorners(radius: corner, corners: [.bottomLeft]))
+                                                                            Spacer()                            // ← keep on left half
+                                                                        }
+                                                                    }
+                                                                }
+                                                                .allowsHitTesting(false)
+                                                            }
+                                                        }
+                                                        .overlay(alignment: .bottomTrailing) {
+                                                            if (!isLandscape || isPadLayout && !phoneStyleOnMiniLandscape) && mode == .sync {
+                                                                GeometryReader { p in
+                                                                    let tintH = floor(p.size.height * 0.4)
+                                                                    VStack(spacing: 0) {
+                                                                        Spacer()                                // ↓ pin to bottom
+                                                                        HStack(spacing: 0) {
+                                                                            Spacer()                            // → keep on right half
+                                                                            LinearGradient(colors: [Color.gray.opacity(0.125), .clear],
+                                                                                           startPoint: .bottom, endPoint: .top)
+                                                                                .frame(width: floor(p.size.width * 0.5), height: tintH)
+                                                                                .mask(LinearGradient(colors: [.black, .clear],
+                                                                                                     startPoint: .leading, endPoint: .trailing))
+                                                                                .clipShape(RoundedCorners(radius: corner, corners: [.bottomRight]))
+                                                                        }
+                                                                    }
+                                                                }
+                                                                .allowsHitTesting(false)
+                                                            }
+                                                        }
+                                                        .overlay(alignment: .bottom) {
+                                                            if !isLandscape || isPadLayout && !phoneStyleOnMiniLandscape {
+                                                                GeometryReader { p in
+                                                                    let lineH = floor(p.size.height * 0.4)
+                                                                    let px    = 1.5 / UIScreen.main.scale
+
+                                                                    VStack(spacing: 0) {
+                                                                        Spacer() // ↓ pins the divider to the bottom of the GeometryReader
+                                                                        Rectangle()
+                                                                            .fill(
+                                                                                LinearGradient(colors: [Color.gray.opacity(0.18), .clear],
+                                                                                               startPoint: .bottom, endPoint: .top)
+                                                                            )
+                                                                            .frame(width: px, height: lineH)  // true hairline
+                                                                            .offset(y: -px * 0.5)             // half-pixel snap
+                                                                            .frame(maxWidth: .infinity, alignment: .center)
+                                                                    }
+                                                                }
+                                                                .allowsHitTesting(false)
+                                                            }
+                                                        }
+
                         }
-                        .ignoresSafeArea(edges: .horizontal)
+                      }
+                      .ignoresSafeArea(edges: .horizontal)
+                   
+                    
 
                         if settings.flashStyle == .tint && flashZero {
                         
@@ -1924,7 +2661,7 @@ struct TimerCard: View {
                                 triggerErrFlash()
                             }
                         }
-                    
+                        
                         
                         // B.2) Main time + dash + flash overlays ───────────────
                         HStack(spacing: 4) {
@@ -1932,47 +2669,73 @@ struct TimerCard: View {
                             Text("-")
                                 .font(.custom("Roboto-Light", size: fs))
                                 .foregroundColor(isCountdownActive ? .black : .gray)
-
-
+                            
+                            
                             // ZStack so we can overlay “flash” text on top of the normal timer text
                             ZStack {
-                                // 1) Idle raw-digits entry mode
-                                if mode == .stop && (phase == .idle || phase == .paused) {                                    Text(rawString(from: stopDigits))
-                                        .font(.custom("Roboto-Regular", size: fs))
-                                        .minimumScaleFactor(0.5)
-                                        .foregroundColor(txtMain)
-                                }
-                                else if mode == .sync && phase == .idle && !syncDigits.isEmpty {
-                                    Text(rawString(from: syncDigits))
-                                        .font(.custom("Roboto-Regular", size: fs))
-                                        .minimumScaleFactor(0.5)
-                                        .foregroundColor(txtMain)
-                                }
-
-
-                                // 2) Running or after idle → always show the properly formatted, rollover‐correct time
-                                else {
-                                    let fullString = mainTime.formattedCS
-                                    Text(fullString)
-                                        .font(.custom("Roboto-Regular", size: fs))
-                                        .minimumScaleFactor(0.5)
-                                        .foregroundColor(
-                                            flashStyle == .fullTimer && flashZero
-                                                ? flashColor
-                                                : txtMain
+                                // Erase the heavy conditional branches so the type-checker chills out
+                                let mainText: AnyView = {
+                                    if mode == .stop && (phase == .idle || phase == .paused) {
+                                        return AnyView(
+                                            ZStack {
+                                                Text("88:88:88.88")
+                                                    .font(.custom("Roboto-Regular", size: fs))
+                                                    .minimumScaleFactor(0.5)
+                                                    .opacity(0) // width-keeper
+                                                Text(rawString(from: stopDigits))
+                                                    .font(.custom("Roboto-Regular", size: fs))
+                                                    .minimumScaleFactor(0.5)
+                                                    .foregroundColor(txtMain)
+                                            }
                                         )
-                                }
-
-
+                                    } else if mode == .sync && phase == .idle && !syncDigits.isEmpty {
+                                        return AnyView(
+                                            ZStack {
+                                                Text("88:88:88.88")
+                                                    .font(.custom("Roboto-Regular", size: fs))
+                                                    .minimumScaleFactor(0.5)
+                                                    .opacity(0) // width-keeper
+                                                Text(rawString(from: syncDigits))
+                                                    .font(.custom("Roboto-Regular", size: fs))
+                                                    .minimumScaleFactor(0.5)
+                                                    .foregroundColor(txtMain)
+                                            }
+                                        )
+                                    } else {
+                                        // Running or after idle
+                                        
+                                        let fullString = formatTimerString(mainTime, alwaysShowHours: settings.showHours)
+                                        return AnyView(
+                                            ZStack(alignment: .center) {
+                                                // width-keeper to match HH layout even when showing MM
+                                                Text("88:88:88.88")
+                                                    .font(.custom("Roboto-Regular", size: fs))
+                                                    .minimumScaleFactor(0.5)
+                                                    .opacity(0)
+                                                // visible text
+                                                Text(fullString)
+                                                    .font(.custom("Roboto-Regular", size: fs))
+                                                    .minimumScaleFactor(0.5)
+                                                    .foregroundColor(
+                                                        (flashStyle == .fullTimer && flashZero) ? flashColor : txtMain
+                                                    )
+                                            }
+                                        )
+                                    }
+                                }()
+                                mainText
+                                
+                                
+                                
                                 // 3) Overlay the flashing delimiters / numbers—but ONLY at the zero moment
                                 if (flashStyle == .delimiters || flashStyle == .numbers) && flashZero {
                                     Text(makeFlashed())
                                         .font(.custom("Roboto-Regular", size: fs))
                                         .minimumScaleFactor(0.5)
-
+                                    
                                 }
-
-
+                                
+                                
                                 // 4) Dot style flash
                                 if flashStyle == .dot && flashZero {
                                     Circle()
@@ -1983,45 +2746,47 @@ struct TimerCard: View {
                                         )
                                         .offset(x: innerW / 2 - 36, y: -fs * 0.45)
                                 }
-
+                                
                             }
                             
                         }
                         .padding(.horizontal, 12)
                         Spacer(minLength: 4)
-                        .accessibilityElement(children: .combine)
-
+                            .accessibilityElement(children: .combine)
+                        
                         // ── NEW: when width ≤389, show failsafe icons here ─────────
-                                  if isCompactWidth {
-                                    HStack(spacing: 16) {
-                                      if settings.countdownResetMode == .manual {
-                                        ZStack {
-                                          Image(systemName: "lock.fill")
-                                          Text("C")
+                        if isCompactWidth {
+                            HStack(spacing: 16) {
+                                if settings.countdownResetMode == .manual {
+                                    ZStack {
+                                        Image(systemName: "lock.fill")
+                                        Text("C")
                                             .font(.custom("Roboto-SemiBold", size: subTextFontSize * 0.8))
-                                        }
-                                        .foregroundColor(txtMain)
-                                      }
-                                      if settings.stopConfirmationMode != .off {
-                                        ZStack {
-                                          Image(systemName: "lock.fill")
-                                          Text("S")
-                                            .font(.custom("Roboto-SemiBold", size: subTextFontSize * 0.8))
-                                        }
-                                        .foregroundColor(txtMain)
-                                      }
-                                      if settings.resetConfirmationMode != .off {
-                                        ZStack {
-                                          Image(systemName: "lock.fill")
-                                          Text("R")
-                                            .font(.custom("Roboto-SemiBold", size: subTextFontSize * 0.8))
-                                        }
-                                        .foregroundColor(txtMain)
-                                      }
                                     }
-                                    .padding(.horizontal, 12)
-                                    .padding(.bottom, 4)
-                                  }
+                                    .foregroundColor(txtMain)
+                                }
+                                if settings.stopConfirmationMode != .off {
+                                    ZStack {
+                                        Image(systemName: "lock.fill")
+                                        Text("S")
+                                            .font(.custom("Roboto-SemiBold", size: subTextFontSize * 0.8))
+                                    }
+                                    .foregroundColor(txtMain)
+                                }
+                                if settings.resetConfirmationMode != .off {
+                                    ZStack {
+                                        Image(systemName: "lock.fill")
+                                        Text("R")
+                                            .font(.custom("Roboto-SemiBold", size: subTextFontSize * 0.8))
+                                    }
+                                    .foregroundColor(txtMain)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.bottom, 4)
+                        }
+                        
+                        
                         
                         // B.3) “SYNCING…” / “NOTHING FOUND YET…” or 5 event‐circles ──
                         HStack(spacing: 0) {
@@ -2056,7 +2821,7 @@ struct TimerCard: View {
                                                 Circle()
                                                     .fill(flashColor)
                                                     .frame(width: circleDiameter,
-                                                       height: circleDiameter)
+                                                           height: circleDiameter)
                                                 Text("S")
                                                     .font(.custom("Roboto-Regular", size: subTextFontSize * 0.6))
                                                     .foregroundColor(isDark ? .black : .white)
@@ -2064,9 +2829,9 @@ struct TimerCard: View {
                                         case .cue:
                                             ZStack {
                                                 Circle()
-                                                .stroke(flashColor, lineWidth: isLandscape ? 1.5 : 1)
-                                                .frame(width: circleDiameter,
-                                                       height: circleDiameter)
+                                                    .stroke(flashColor, lineWidth: isLandscape ? 1.5 : 1)
+                                                    .frame(width: circleDiameter,
+                                                           height: circleDiameter)
                                                 Text("C")
                                                     .font(.custom("Roboto-Regular", size: subTextFontSize * 0.6))
                                                     .foregroundColor(flashColor)
@@ -2074,9 +2839,9 @@ struct TimerCard: View {
                                         case .restart:
                                             ZStack {
                                                 Circle()
-                                                .stroke(flashColor, lineWidth: isLandscape ? 1.5 : 1)
-                                                .frame(width: circleDiameter,
-                                                       height: circleDiameter)
+                                                    .stroke(flashColor, lineWidth: isLandscape ? 1.5 : 1)
+                                                    .frame(width: circleDiameter,
+                                                           height: circleDiameter)
                                                 Text("R")
                                                     .font(.custom("Roboto-Regular", size: subTextFontSize * 0.6))
                                                     .foregroundColor(isDark ? .white : .black)
@@ -2084,40 +2849,43 @@ struct TimerCard: View {
                                         }
                                     } else {
                                         Circle()
-                                        .stroke(Color.gray, lineWidth: isLandscape ? 1.5 : 1)
-                                        .frame(width: circleDiameter,
-                                               height: circleDiameter)
+                                            .stroke(Color.gray, lineWidth: isLandscape ? 1.5 : 1)
+                                            .frame(width: circleDiameter,
+                                                   height: circleDiameter)
                                     }
                                     Spacer().frame(width: isLandscape ? 8 : 4)
                                 }
                             }
-
+                            
                             Spacer()
-
-                            Text(stopActive ? stopRemaining.formattedCS : "00:00:00.00")
-                                .font(.custom("Roboto-Regular", size: stopTimerFontSize))
-                                .foregroundColor(
-                                    stopActive
-                                        ? flashColor
-                                        : (mode == .sync ? txtSec : txtMain)
-                                )
+                            
+                            Text(stopActive
+                                 ? stopRemaining.formattedAdaptiveCS(alwaysShowHours: settings.showHours)
+                                 : (settings.showHours ? "00:00:00.00" : "00:00.00"))
+                            .font(.custom("Roboto-Regular", size: stopTimerFontSize))
+                            .foregroundColor(
+                                stopActive
+                                ? flashColor
+                                : (mode == .sync ? txtSec : txtMain)
+                            )
                         }
                         .padding(.horizontal, 12)
                         .padding(.top, 4)
-
+                        
                         Spacer(minLength: 4)
-
-                        // B.4) Bottom labels “EVENTS VIEW” / “SYNC VIEW” ──────
-                        HStack {
-                            Text("EVENTS VIEW")
-                                .foregroundColor(mode == .stop ? txtMain : txtSec)
-                            Spacer()
-                            Text("SYNC VIEW")
-                                .foregroundColor(mode == .sync ? txtMain : txtSec)
+                        if !phoneStyleOnMiniLandscape {
+                            // B.4) Bottom labels “EVENTS VIEW” / “SYNC VIEW” ──────
+                            HStack {
+                                Text("EVENTS VIEW")
+                                    .foregroundColor(mode == .stop ? txtMain : txtSec)
+                                Spacer()
+                                Text("SYNC VIEW")
+                                    .foregroundColor(mode == .sync ? txtMain : txtSec)
+                            }
+                            .font(.custom("Roboto-Regular", size: isLandscape ?  28 : 24))
+                            .padding(.horizontal, 12)
+                            .padding(.bottom, 6)
                         }
-                        .font(.custom("Roboto-Regular", size: isLandscape ?  28 : 24))
-                        .padding(.horizontal, 12)
-                        .padding(.bottom, 6)
                     }
                     // ── (B.5) Failsafe indicators ─────────────────────────────────
                     HStack(spacing: 16) {
@@ -2153,7 +2921,7 @@ struct TimerCard: View {
                     )
 
                     // ── (C) Tap zones to switch mode ─────────────────────
-                    if !isLandscape {
+                    if !isLandscape || isPadLayout && !phoneStyleOnMiniLandscape {
                         HStack(spacing: 0) {
                             // Left half: tap → EVENTS (stop)
                             Color.clear
@@ -2177,15 +2945,85 @@ struct TimerCard: View {
                     }
                 }
                 .frame(
-                width: isLandscape
-                    ? geo.size.width               // full width in landscape (we already inset via horizontalInset)
-                    : (geo.size.width - 32),       // subtract 16pt left+right in portrait
-                height: isLandscape
-                    ? geo.size.height              // full height in landscape
-                    : 190                          // fixed 190 in portrait
+                    width: geo.size.width - (horizontalInset * 2),
+                    height: isLandscape ? geo.size.height : 190
                 )
-                .padding(.horizontal, isLandscape ? horizontalInset : 16)
+                .padding(.horizontal, horizontalInset)
+               
+
+                // ── Connectivity strip (LED-style) — match badge height; sits between big timer and stop-down timer
+                .overlay(alignment: .topTrailing) {
+                    // Use the SAME vertical math as the badge so they line up
+                    let badgeTopOffset: CGFloat = {
+                        let base = isLandscape ? fs * 0.90 : fs * 0.78
+                        let compactBump: CGFloat = isCompactWidth ? 8 : 12
+                        return base + compactBump + 14
+                    }()
+
+                    TimerStatusStrip(status: makeStatus())
+                        .padding(.trailing, 28)          // same as “DURATION” padding
+                        .padding(.top, badgeTopOffset + 18) // exactly the badge’s vertical track
+                        .allowsHitTesting(false)
+                }
+
+                                // ── Badge overlay (does not affect layout) ───────────────
+                                .overlay(alignment: .topLeading) {
+                                    if let label = cueBadge.label {
+                                        // Heuristic: place between big timer line and the 5 circles.
+                                        // Uses fs (big font size), width compactness, and orientation.
+                                        let badgeTopOffset: CGFloat = {
+                                            let base = isLandscape ? fs * 0.90 : fs * 0.78
+                                            let compactBump: CGFloat = isCompactWidth ? 8 : 12
+                                            return base + compactBump + 14   // +14 ≈ hint/spacing cushion
+                                        }()
+                                        HStack(spacing: 8) {
+                                            Image(systemName: cueBadge.broadcast
+                                                  ? "antenna.radiowaves.left.and.right"
+                                                  : "doc.text")
+                                            Text("'\(label)' loaded")
+                                                .font(.footnote.weight(.semibold))
+                                                .lineLimit(1)
+                                                .truncationMode(.tail)
+                                            Button {
+                                                                                                        withAnimation(.easeOut(duration: 0.2)) {
+                                                                                                            // clear events first, then clear badge
+                                                                                                            onClearEvents?()
+                                                                                                            cueBadge.clear()
+                                                                                                        }
+                                                                                                    } label: {
+                                                            Image(systemName: "xmark")
+                                                                .font(.caption2)
+                                                                .foregroundStyle(flashColor)   // ← match app flash color
+                                                        }
+                                        }
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 4) // ~85% height vs before
+                                                .background(.ultraThinMaterial,
+                                                            in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                        .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                                                )
+                                                // Pin to the same left inset as your timer/circles (12pt)
+                                                                .padding(.leading, 24)
+                                                                // Drop ~12pt lower than before
+                                                                .padding(.top, badgeTopOffset + 12)
+                                                                // Ensure it hugs the left; no accidental centering
+                                                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                                        .transition(.move(edge: .top).combined(with: .opacity))
+                                        .allowsHitTesting(true)
+                                    }
+                                }
                 
+                .animation(
+                    {
+                        if #available(iOS 17, *) { .snappy(duration: 0.26, extraBounce: 0.25) }
+                        else { .easeInOut(duration: 0.26) }
+                    }(),
+                    value: mode
+                )
+
 
             }
             .accessibilityElement(children: .combine)
@@ -2216,7 +3054,7 @@ struct TimerCard: View {
             }
         }
     }
-
+    
     // ── Start dot animation, then “NOTHING” toggling, then error ─────
     private func beginSyncingPhase() {
         syncError = false
@@ -2290,20 +3128,123 @@ enum EditableField { case ip, port, lobbyCode }
 //──────────────────────────────────────────────────────────────
 // MARK: – MainScreen  (everything in one struct)
 //──────────────────────────────────────────────────────────────
+private extension UIApplication {
+    func topMostController(_ base: UIViewController? = UIApplication.shared.connectedScenes
+        .compactMap { ($0 as? UIWindowScene)?.keyWindow?.rootViewController }.first) -> UIViewController? {
+        if let nav = base as? UINavigationController {
+            return topMostController(nav.visibleViewController)
+        }
+        if let tab = base as? UITabBarController, let sel = tab.selectedViewController {
+            return topMostController(sel)
+        }
+        if let presented = base?.presentedViewController {
+            return topMostController(presented)
+        }
+        return base
+    }
+}
+// MARK: - Container size environment (actual window size)
+private struct ContainerSizeKey: EnvironmentKey { static let defaultValue = CGSize.zero }
+extension EnvironmentValues {
+    var containerSize: CGSize {
+        get { self[ContainerSizeKey.self] }
+        set { self[ContainerSizeKey.self] = newValue }
+    }
+}
+
+
 struct MainScreen: View {
+    // Add next to your other computed vars
+    
+    @State private var showCueSheets = false
+    @Environment(\.containerSize) private var containerSize
+    @Environment(\.horizontalSizeClass) private var hSize
+        private var isPadDevice: Bool {
+            UIDevice.current.userInterfaceIdiom == .pad
+        }
+    // 12.9"/13" iPad hardware (native height ≥ 2732 px)
+        private var isLargePad129Family: Bool {
+            guard UIDevice.current.userInterfaceIdiom == .pad else { return false }
+            let maxNative = max(UIScreen.main.nativeBounds.width, UIScreen.main.nativeBounds.height)
+            return maxNative >= 2732
+        }
+    // Next to isLargePad129Family
+    private var isPad109Family: Bool {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { return false }
+        let maxNative = max(UIScreen.main.nativeBounds.width, UIScreen.main.nativeBounds.height)
+        return maxNative == 2360 // 10.9" iPad/Air family
+    }
+    private var isPad11Family: Bool {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { return false }
+        let nativeMax = max(UIScreen.main.nativeBounds.width, UIScreen.main.nativeBounds.height)
+        // 11" iPad Pro/air ≈ 2388; 10.9" ≈ 2360; exclude 12.9"/13" (2732+)
+        return nativeMax >= 2360 && nativeMax < 2732
+    }
+    // 8.3" iPad mini family
+    private var isPadMiniFamily: Bool {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { return false }
+        let maxNative = max(UIScreen.main.nativeBounds.width, UIScreen.main.nativeBounds.height)
+        return maxNative == 2266 // iPad mini (8.3")
+    }
+    // Build wires from the current in-memory events list
+        private func encodeCurrentEvents()
+    -> (stops: [StopEventWire], cues: [CueEventWire], restarts: [RestartEventWire]) {
+            let stops: [StopEventWire] = events.compactMap {
+                if case let .stop(s) = $0 { return StopEventWire(eventTime: s.eventTime, duration: s.duration) }
+                return nil
+            }
+            let cues: [CueEventWire] = events.compactMap {
+                if case let .cue(c) = $0 { return CueEventWire(cueTime: c.cueTime) }
+                return nil
+            }
+            let restarts: [RestartEventWire] = events.compactMap {
+                if case let .restart(r) = $0 { return RestartEventWire(restartTime: r.restartTime) }
+                return nil
+            }
+            return (stops, cues, restarts)
+        }
+    
+        // Build wires + label directly from a CueSheet (used by broadcast(sheet))
+        private func wires(from sheet: CueSheet)
+        -> (stops: [StopEventWire], cues: [CueEventWire], restarts: [RestartEventWire], label: String) {
+            let sorted = sheet.events.sorted { $0.at < $1.at }
+            let stops: [StopEventWire] = sorted.compactMap {
+                if $0.kind == .stop { return StopEventWire(eventTime: $0.at, duration: $0.holdSeconds ?? 0) }
+                return nil
+            }
+            let cues: [CueEventWire] = sorted.compactMap {
+                if $0.kind == .cue { return CueEventWire(cueTime: $0.at) }
+                return nil
+            }
+            let restarts: [RestartEventWire] = sorted.compactMap {
+                if $0.kind == .restart { return RestartEventWire(restartTime: $0.at) }
+                return nil
+            }
+            let name = sheet.fileName.isEmpty ? sheet.title : sheet.fileName
+            let label = name.lastIndex(of: ".").map { String(name[..<$0]) } ?? name
+            return (stops, cues, restarts, label)
+        }
+
+
+
     // ── Environment & Settings ────────────────────────────────
     @EnvironmentObject private var settings   : AppSettings
     @EnvironmentObject var syncSettings: SyncSettings
     @AppStorage("settingsPage") private var settingsPage: Int = 0
     let numberOfPages = 4
-    
     @State private var showSyncErrorAlert = false
     @State private var syncErrorMessage = ""
-
-    
+    // WC: 4 Hz tick + sink for commands
+        @State private var wcTick = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
+        @State private var wcCancellables = Set<AnyCancellable>()
+        
     // ── UI mode ────────────────────────────────────────────────
     @Binding var parentMode: ViewMode
     @State private var previousMode: ViewMode = .sync   // track old mode
+    
+    // Preset editor state
+    @State private var showPresetEditor = false
+    @State private var pendingPresetEditIndex: Int? = nil
     
     // ── Detect landscape vs portrait ───────────────────────────
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -2325,16 +3266,60 @@ struct MainScreen: View {
     @State private var pausedElapsed: TimeInterval = 0
     @State private var stopCleared: Bool = false
 
+    // ── Notes persistence & sync ───────────────────────────────
+        /// Your device’s global note (persists across the app)
+        @AppStorage("notes.global") private var notesLocal: String = ""
+        /// Parent’s note mirrored onto this device (cleared if none present)
+        @State private var notesParent: String = ""
+    
+    // ── pagination for left pane ───────────────────────────────
 
-    
-    // ── Sync / Lock ─────────────────────────────────────────────
-    private var lockActive: Bool { syncSettings.isLocked }
-    private var padLocked: Bool {
-        lockActive
-        || phase == .running
-        || phase == .countdown
+    @AppStorage("leftPanePagerOnLargePads") private var leftPanePagerOnLargePads: Bool = false
+    @AppStorage("leftPaneTab")             private var leftPaneTab: Int = 0 // remember last tab
+    @inline(__always)
+    private func settingsMorphAnim() -> Animation {
+        if #available(iOS 17, *) { return .snappy(duration: 0.26, extraBounce: 0.25) }
+        return .easeInOut(duration: 0.26)
     }
-    
+
+
+        /// Parent includes its note when broadcasting; child is read-only
+    private var parentNotePayload: String? {
+                (syncSettings.role == .parent &&
+                 !notesLocal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                ? notesLocal : nil
+            }
+    // ── Presets persistence (device-local JSON) ──────────────────────────
+        @AppStorage("presets.data") private var presetsBlob: Data = Data()
+        @State private var presetsDirtyNonce: Int = 0  // bump to refresh when edited
+    private var presets: [Preset] { loadPresets() } // read-only convenience
+    // Helpers to avoid mutating `self` in closures:
+    private func loadPresets() -> [Preset] {
+        guard !presetsBlob.isEmpty,
+              let arr = try? JSONDecoder().decode([Preset].self, from: presetsBlob)
+        else { return [] }
+        return arr
+    }
+    private func savePresets(_ newValue: [Preset]) {
+        let clipped = newValue.map { p in
+            var x = p
+            if x.name.count > 32 { x.name = String(x.name.prefix(32)) }
+            return x
+        }
+        if let data = try? JSONEncoder().encode(clipped) { presetsBlob = data }
+    }
+    // ── Sync / Lock ─────────────────────────────────────────────
+        private var lockActive: Bool { syncSettings.isLocked }
+        /// Child devices must be UI-locked while connected to a parent.
+        private var uiLockedByParent: Bool {
+            (syncSettings.role == .child) && syncSettings.isEnabled && syncSettings.isEstablished
+        }
+        private var padLocked: Bool {
+            lockActive
+            || uiLockedByParent           // ← add child lock
+            || phase == .running
+            || phase == .countdown
+        }
     
     // ── Stop‐event buffers + unified events + rawStops ───────────
     @State private var stopDigits: [Int] = []
@@ -2343,6 +3328,7 @@ struct MainScreen: View {
     @State private var stopStep: Int = 0       // 0 = start, 1 = duration
     @State private var tempStart: TimeInterval = 0
     @State private var events: [Event] = []
+    @EnvironmentObject private var cueBadge: CueBadgeState
     @State private var rawStops: [StopEvent] = []
     @State private var stopActive: Bool = false
     @State private var stopRemaining: TimeInterval = 0
@@ -2351,506 +3337,131 @@ struct MainScreen: View {
     @State private var inputText      = ""                   // live buffer
     @State private var isEnteringField = false
     @State private var showBadPortError = false
+    /// Monotonic anchor for frame-accurate dt while a STOP is active
+    @State private var lastTickUptime: TimeInterval? = nil
+    // Local page binding for embedding the CONNECT cards without changing the global pager
+     @State private var connectPageShadow: Int = 2
+    @State private var lastLoadedLabel: String? = nil
+    @State private var lastLoadedWasBroadcast: Bool = false
+    
+    func apply(_ sheet: CueSheet) {
 
-    private func confirm(_ text: String) {
-            // Only validate port on Enter
-            if editingTarget == .port {
-                if let p = UInt16(text), (49153...65534).contains(p) {
-                    syncSettings.peerPort = text
-                    showBadPortError = false
-                    editingTarget = nil
-                    isEnteringField = false
-                } else {
-                    showBadPortError = true
+    // Defer event mapping to the view that owns `events`
+    NotificationCenter.default.post(name: .didLoadCueSheet, object: sheet)
+    UINotificationFeedbackGenerator().notificationOccurred(.success)
+}
+    // Derive connected device display names for the Devices card.
+        // Replace internals later with your canonical peer list if you expose one.
+    private func connectedDeviceNamesForUI() -> [String] {
+            // Try to find `[String]` named "connectedDeviceNames"
+            let m = Mirror(reflecting: syncSettings)
+            if let names = m.children.first(where: { $0.label == "connectedDeviceNames" })?.value as? [String],
+               !names.isEmpty {
+                return names
+            }
+            // Try to find peers array named "connectedPeers" and pluck displayName/name via reflection
+            if let peersAny = m.children.first(where: { $0.label == "connectedPeers" })?.value as? [Any] {
+                let names: [String] = peersAny.compactMap { peer in
+                    let pm = Mirror(reflecting: peer)
+                    // prefer displayName, then name
+                    if let dn = pm.children.first(where: { $0.label == "displayName" })?.value as? String, !dn.isEmpty {
+                        return dn
+                    }
+                    if let nm = pm.children.first(where: { $0.label == "name" })?.value as? String, !nm.isEmpty {
+                        return nm
+                    }
+                    return nil
                 }
-                return
+                if !names.isEmpty { return names }
             }
-            // IP or Lobby‐Code
-            switch editingTarget {
-            case .ip:
-                syncSettings.peerIP = text
-            case .lobbyCode:
-                syncSettings.currentCode = text
-            default:
-                break
-            }
-            inputText = ""
-            editingTarget = nil
-            isEnteringField = false
+            // Nothing discoverable; return empty (caller will show "No devices connected")
+            return []
+        }
+    private func addCueFromPreset(at time: Double, treatAsAbsolute: Bool) {
+        // Resolve target time
+        let target = treatAsAbsolute ? time : max(0, displayMainTime() + time)
+        // Add & sort
+        events.append(.cue(CueEvent(cueTime: target)))
+        events.sort { $0.fireTime < $1.fireTime }
+
+        // Broadcast snapshot if parent (no pause)
+        if syncSettings.role == .parent && syncSettings.isEnabled {
+            let snap = encodeCurrentEvents()
+            var m = TimerMessage(
+                action:     .addEvent,
+                timestamp:  Date().timeIntervalSince1970,
+                phase:      (phase == .running ? "running" : "idle"),
+                remaining:  displayMainTime(),
+                stopEvents: snap.stops,
+                parentLockEnabled: syncSettings.parentLockEnabled,
+                cueEvents: snap.cues,
+                restartEvents: snap.restarts,
+                sheetLabel: cueBadge.label
+            )
+            m.notesParent = parentNotePayload
+            syncSettings.broadcastToChildren(m)
+        }
+        // No phase changes here — do NOT pause.
+        lightHaptic()
+    }
+    private var shouldPaginateLeftPane: Bool {
+        let smallPads = (isPad109Family || isPad11Family)
+        return smallPads || (isLargePad129Family && leftPanePagerOnLargePads)
+    }
+
+    // Broadcast to children when attachMode == .global — non-destructive (doesn't touch radios)
+        func broadcast(_ sheet: CueSheet) {
+            // Only the parent with sync enabled should broadcast
+            guard syncSettings.role == .parent, syncSettings.isEnabled else { return }
+    
+            // Convert sheet → wire format the child already understands (StopEventWire).
+            // If your sheet includes cues/restarts, you can extend your wire later; for now
+            // stops render the 5-circle strip reliably across devices.
+            let (stops, cues, restarts) = wireAllEvents(from: sheet)
+    
+            // Keep whatever phase/remaining you’re currently in; the child already rebuilds
+            // its rawStops/events from msg.stopEvents at the top of applyIncomingTimerMessage.
+            let phaseString: String = {
+                switch phase {
+                case .idle:      return "idle"
+                case .countdown: return "countdown"
+                case .running:   return "running"
+                case .paused:    return "paused"
+                }
+            }()
+    
+            let m = TimerMessage(
+                action:     .update,                           // piggyback the existing path
+                timestamp:  Date().timeIntervalSince1970,
+                phase:      phaseString,
+                remaining:  displayMainTime(),
+                stopEvents: stops,
+                            parentLockEnabled: syncSettings.parentLockEnabled,
+                            isStopActive: nil,
+                            stopRemainingActive: nil,
+                            cueEvents: cues,
+                            restartEvents: restarts,
+                            sheetLabel: sheetBadgeLabel(for: sheet)
+            )
+    
+            // IMPORTANT: this does NOT stop or toggle any radios.
+            syncSettings.broadcastToChildren(m)
         }
     
-    
-    
-    @State private var eventMode: EventMode = .stop
-    @Binding var showSettings: Bool
-    
-    @AppStorage("hasSeenWalkthrough") private var hasSeenWalkthrough: Bool = true
-    @AppStorage("walkthroughPage") private var walkthroughPage: Int = 0
-    
-    // ── Derived: true when countdown or stopwatch is active ──────
-    private var isCounting: Bool {
-        phase == .countdown || phase == .running
-    }
-    // only true when actively counting down or paused with some time left
-    private var willCountDown: Bool {
-        phase == .countdown
-        || (phase == .paused && countdownRemaining > 0)
-        // only treat “typed digits” as a countdown if it's not the special post-finish edit
-        || (phase == .idle && !countdownDigits.isEmpty && !justEditedAfterPause)
-    }
-    
-    
-    // ─────────────────────────────────────────────────────────────
-    // Only clear the *list* of events — do NOT touch stopDigits
-    private func clearAllEvents() {
-        events.removeAll()
-        stopCleared = false
-
-    }
-
-
-    
-    var body: some View {
-        
-        // 1) Detect “Max-sized” devices by width (≈414pt+)
-        let screenWidth = UIScreen.main.bounds.width
-        let screenHeight      = UIScreen.main.bounds.height
-        let isMax       = screenWidth >= 414 //max
-        let isMiniPhone       = screenWidth == 375 && screenHeight == 812 //mini
-        let isVerySmallPhone = screenWidth <= (376) && !isMiniPhone //SE
-        let isStandardPhone   = screenWidth == 390 && screenHeight == 844 //12/13/14
-        
-        let isSmallPhone = (screenWidth > 376 && screenWidth < 414) && !isStandardPhone //pro
-        
-        // — new detection for iPhone 13/14 mini & iPhone 12/13/14 —
-        
-        // 2) Decide your offsets
-        let timerOffset   = isMax ? 36 : 10    // ↓ TimerCard/SettingsPagerCard
-        let modeBarOffset = isMax ? -42 : -56    // ↓ mode bar
-        
-        ZStack {
-            
-            if settings.flashStyle == .tint && flashZero && isLandscape {
-                settings.flashColor
-                    .ignoresSafeArea()
-                    .transition(.opacity)
-                    .animation(
-                        .easeInOut(duration: Double(settings.flashDurationOption) / 1000),
-                        value: flashZero
-                    )
-            }
-            
-            if isLandscape {
-                GeometryReader { fullGeo in
-                    let hm: CGFloat = 8
-                    let w   = fullGeo.size.width  - (hm * 2)
-                    let h   = fullGeo.size.height * 0.22
-                    
-                    TimerCard(
-                        mode: $parentMode,
-                        flashZero: $flashZero,
-                        isRunning: phase == .running,
-                        flashStyle: settings.flashStyle,
-                        flashColor: settings.flashColor,
-                        syncDigits: countdownDigits,
-                        stopDigits: {
-                            switch eventMode {
-                            case .stop:    return stopDigits
-                            case .cue:     return cueDigits
-                            case .restart: return restartDigits
-                            }
-                        }(),
-                        phase: phase,
-                        mainTime: displayMainTime(),
-                        stopActive: stopActive,
-                        stopRemaining: stopRemaining,
-                        leftHint: "START POINT",
-                        rightHint: "DURATION",
-                        stopStep: stopStep,
-                        makeFlashed: makeFlashedOverlay,
-                        isCountdownActive: willCountDown,
-                        events: events
-                    )
-                    .frame(width: w, height: h)
-                    .position(x: fullGeo.size.width/2, y: fullGeo.size.height/2)
-                    .offset(y: 12)
-                }
-                .transition(.opacity.animation(.easeInOut(duration: 0.25)))
-            } else {
-                // ── PORTRAIT ──────────────────────────────────────
-                VStack(spacing: isVerySmallPhone ? 2 : (isSmallPhone ? 4 : 8)) {
-                    // Top card (Timer or Settings)
-                    Group {
-                        if parentMode == .settings {
-                            SettingsPagerCard(
-                                page: $settingsPage,
-                                editingTarget: $editingTarget,
-                                inputText: $inputText,
-                                isEnteringField: $isEnteringField,
-                                showBadPortError:$showBadPortError
-                            )
-                            .environmentObject(settings)
-                            .environmentObject(syncSettings)
-                            .transition(.settingsSlide)
-                        } else {
-                            TimerCard(
-                                mode: $parentMode,
-                                flashZero: $flashZero,
-                                isRunning: phase == .running,
-                                flashStyle: settings.flashStyle,
-                                flashColor: settings.flashColor,
-                                syncDigits: countdownDigits,
-                                stopDigits: eventMode == .stop ? stopDigits
-                                : eventMode == .cue  ? cueDigits
-                                : restartDigits,
-                                phase: phase,
-                                mainTime: displayMainTime(),
-                                stopActive: stopActive,
-                                stopRemaining: stopRemaining,
-                                leftHint: "START POINT",
-                                rightHint: "DURATION",
-                                stopStep: stopStep,
-                                makeFlashed: makeFlashedOverlay,
-                                isCountdownActive: willCountDown,
-                                events: events
-                            )
-                            .allowsHitTesting(!lockActive)
-                            .transition(.settingsSlide)
-                        }
-                    }
-                    .frame(height: isVerySmallPhone ? 220
-                           : isSmallPhone     ? 260
-                           : 296)
-                    .padding(.top,
-                             parentMode == .settings
-                             ? ( isVerySmallPhone ? 120
-                                 : (isSmallPhone ? 32
-                                    : 16) + 26)   // 38+18 on small, 52+20 on max
-                             : (isVerySmallPhone ? 102
-                                : isSmallPhone ? 54
-                                : 56)   // 44+10 on small, 60+20 on max
-                    )
-                    .frame(maxWidth: .infinity)
-                    .animation(.easeInOut(duration: 0.4), value: parentMode)
-                    
-                    // Mode bar (Sync / Events)
-                    if parentMode == .sync || parentMode == .stop {
-                        ZStack {
-                            if !settings.lowPowerMode {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(.ultraThinMaterial)
-                                    .frame(height: 80)
-                                    .shadow(color: .black.opacity(0.125), radius: 10, x: 0, y: 6)
-                            }
-                            if parentMode == .sync {
-                                SyncBar(
-                                    isCounting: isCounting,
-                                    isSyncEnabled: syncSettings.isEnabled,
-                                    onToggleSync: toggleSyncMode, onRoleConfirmed: { newRole in
-                                        syncSettings.role = newRole
-                                    }
-                                      )
-                                      .environmentObject(syncSettings)
-                            } else {
-                                EventsBar(
-                                    events: $events,
-                                    eventMode: $eventMode,
-                                    isCounting: isCounting,
-                                    onAddStop: commitStopEntry,
-                                    onAddCue:  commitCueEntry,
-                                    onAddRestart: commitRestartEntry
-                                )
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, isVerySmallPhone ? 44
-                                 : isSmallPhone ? 0
-                                 : isStandardPhone ? -36
-                                 : -46)
-                        .padding(.top, CGFloat(modeBarOffset))
-                    }
-                    
-                    Spacer(minLength: 0)
-                    
-                    // NumPad
-                    NumPadView(
-                        parentMode:   $parentMode,
-                        settingsPage: $settingsPage,
-                        isEntering:   $isEnteringField,
-                        onKey: { key in
-                            // ① If editing an IP/port field in Settings:
-                            if parentMode == .settings && isEnteringField {
-                                switch key {
-                                case .digit(let n):
-                                    inputText.append(String(n))
-                                case .dot:
-                                    inputText.append(".")
-                                case .backspace:
-                                    _ = inputText.popLast()
-                                case .enter:
-                                    confirm(inputText)
-                                default:
-                                    break
-                                }
-                                return
-                            }
-                            // ② Normal timer/chevron behavior:
-                            if parentMode != .settings {
-                                switch key {
-                                case .digit, .backspace:
-                                    if parentMode == .sync {
-                                        handleCountdownKey(key)
-                                    } else {
-                                        switch eventMode {
-                                        case .stop:    handleStopKey(key)
-                                        case .cue:     handleCueKey(key)
-                                        case .restart: handleRestartKey(key)
-                                        }
-                                    }
-                                case .settings:
-                                    previousMode = parentMode
-                                    parentMode   = .settings
-                                default:
-                                    break
-                                }
-                            } else {
-                                // In Settings but not editing: page flips
-                                switch key {
-                                case .chevronLeft:
-                                    settingsPage = (settingsPage + numberOfPages - 1) % numberOfPages
-                                case .chevronRight:
-                                    settingsPage = (settingsPage + 1) % numberOfPages
-                                default:
-                                    break
-                                }
-                            }
-                        },
-                        onSettings: {
-                            // Gear toggles in/out of Settings
-                            if parentMode == .settings {
-                                parentMode = previousMode
-                            } else {
-                                previousMode = parentMode
-                                parentMode   = .settings
-                            }
-                        },
-                        lockActive: padLocked
-                    )
-                    .offset(y: isVerySmallPhone ? -110
-                            : isSmallPhone     ? -60
-                            : isStandardPhone ? -38
-                            : -52)
-                    
-                    // Bottom buttons
-                    ZStack {
-                                SyncBottomButtons(
-                                    showResetButton:   parentMode == .sync,
-                                    showPageIndicator: parentMode == .settings,
-                                    currentPage:       settingsPage + 1,
-                                    totalPages:        numberOfPages,
-                                    isCounting:        isCounting,
-                                    startStop:         toggleStart,
-                                    reset:             resetAll
-                                )
-                            .disabled(lockActive || parentMode != .sync)
-                            .opacity(parentMode == .sync    ? 1.0 :
-                                     parentMode == .settings ? 0.3 : 0.0)
-                            // overlay just the page title over where RESET lives
-                            if parentMode == .settings {
-                                // compute the title for each settings‐page
-                                let pageTitle: String = {
-                                    switch settingsPage {
-                                    case 0: return "THEME"  // look & feel
-                                    case 1: return "SET"        // timer behavior
-                                    case 2: return "CONNECT"    // connection method
-                                    case 3: return "ABOUT"      // about
-                                    default: return ""
-                                    }
-                                }()
-                                HStack {
-                                    Text(pageTitle)
-                                        .font(.custom("Roboto-SemiBold", size: 28))
-                                        .foregroundColor(.secondary)
-                                    Spacer()
-                                }
-                                .padding(.vertical, 4)
-                                .padding(.horizontal, 36)
-                                .offset(y: 8)
-                            }
-                    
-                        EventBottomButtons(
-                            canAdd: {
-                                switch eventMode {
-                                case .stop:    return !stopDigits.isEmpty
-                                case .cue:     return !cueDigits.isEmpty
-                                case .restart: return !restartDigits.isEmpty
-                                }
-                            }(),
-                            eventMode: eventMode,
-                            add: {
-                                switch eventMode {
-                                case .stop:    commitStopEntry()
-                                case .cue:     commitCueEntry()
-                                case .restart: commitRestartEntry()
-                                }
-                            },
-                            reset: clearAllEvents
-                        )
-                        .disabled(lockActive)
-                        .opacity(parentMode == .stop ? 1 : 0)
-                    }
-                    .frame(height: 44)
-                    .offset(y: isVerySmallPhone ? -100
-                            : isSmallPhone ? -60
-                            : isStandardPhone ? -38
-                            : -48)
-                    .padding(.bottom, isVerySmallPhone ? 4
-                             : isSmallPhone ? 4
-                             : isStandardPhone ? 4
-                             : 8)
-                    
-                    // Walkthrough “?”
-                    .overlay(alignment: .center) {
-                        if parentMode == .settings {
-                            Button {
-                                hasSeenWalkthrough = false
-                                walkthroughPage    = 0
-                            } label: {
-                                Image(systemName: "questionmark.circle")
-                                    .font(.system(size: 24))
-                                    .opacity(0.75)
-                                    .foregroundColor(.gray)
-                                    .accessibilityLabel("Help")
-                                    .accessibilityHint("Restarts the in-app walkthrough")
-                            }
-                            .offset(y: -44)
-                        }
-                    }
-                    .transition(.settingsSlide)
-                    .animation(.easeInOut(duration: 0.4), value: parentMode)
-                }
-            }
+    /// Helper: build *all* event wires from a sheet
+        private func wireAllEvents(from sheet: CueSheet)
+        -> ([StopEventWire],[CueEventWire],[RestartEventWire]) {
+            let sorted = sheet.events.sorted { $0.at < $1.at }
+            let stops     = sorted.compactMap { $0.kind == .stop    ? StopEventWire(eventTime: $0.at, duration: $0.holdSeconds ?? 0) : nil }
+            let cues      = sorted.compactMap { $0.kind == .cue     ? CueEventWire(cueTime: $0.at) : nil }
+            let restarts  = sorted.compactMap { $0.kind == .restart ? RestartEventWire(restartTime: $0.at) : nil }
+            return (stops, cues, restarts)
         }
-
-        .alert(isPresented: $showSyncErrorAlert) {
-                    Alert(
-                        title: Text("Cannot Start Sync"),
-                        message: Text(syncErrorMessage),
-                        dismissButton: .default(Text("OK"))
-                    )
-                }
-                // wire up the child‐side handler
-                .onAppear {
-                    syncSettings.onReceiveTimer = { msg in
-                        applyIncomingTimerMessage(msg)
-                    }
-                }
-                .onDisappear {
-                    syncSettings.onReceiveTimer = nil
-                }
-        
-        // 1) When you switch *into* Events view, seed the STOP buffer:
-            .onChange(of: parentMode) { newMode in
-                if newMode == .stop {
-                    // ensure we’re in STOP mode
-                    eventMode   = .stop
-                    stopDigits  = timeToDigits(displayMainTime())
-                    stopStep    = 0
-                    stopCleared = false
-                }
-            }
-            // 2) When you switch *within* Events between Stop/Cue/Restart:
-            .onChange(of: eventMode) { newMode in
-                switch newMode {
-                case .stop:
-                    stopDigits  = timeToDigits(displayMainTime())
-                    stopStep    = 0
-                    stopCleared = false
-                case .cue:
-                    cueDigits   = timeToDigits(displayMainTime())
-                case .restart:
-                    restartDigits = timeToDigits(displayMainTime())
-                }
-            }
-        // ── When the parent stops syncing, immediately kill any live countdown ──
-                    .onChange(of: syncSettings.isEnabled) { isEnabled in
-                        if !isEnabled {
-                            // parent just hit “STOP” → tear down our countdown ticker
-                            ticker?.cancel()
-                            // reset to idle
-                            phase = .idle
-                            // zero‐out any in-flight time
-                            countdownDigits.removeAll()
-                            countdownDuration = 0
-                            countdownRemaining = 0
-                            elapsed = 0
-                            startDate = nil
-                        }
-                    }
-    }
-        
-
-    //──────────────────── Helper: TimeInterval → [Int] for HHMMSScc ─────
-    private func timeToDigits(_ time: TimeInterval) -> [Int] {
-        let totalCs = Int((time * 100).rounded())
-        let cs = totalCs % 100
-        let s = (totalCs / 100) % 60
-        let m = (totalCs / 6000) % 60
-        let h = totalCs / 360000
-        var arr = [
-            h / 10, h % 10,
-            m / 10, m % 10,
-            s / 10, s % 10,
-            cs / 10, cs % 10
-        ]
-        while arr.first == 0 && arr.count > 1 {
-            arr.removeFirst()
-        }
-        return arr
-    }
     
-    //──────────────────── formatted overlay ─────────────────────────────────
-    private func makeFlashedOverlay() -> AttributedString {
-        let raw = displayMainTime().csString
-        var a = AttributedString(raw)
-        for i in a.characters.indices {
-            let ch = a.characters[i]
-            let delim = (ch == ":" || ch == ".")
-            let doFlash: Bool
-            switch settings.flashStyle {
-            case .delimiters:
-                doFlash = delim && flashZero
-            case .numbers:
-                doFlash = !delim && flashZero
-            default:
-                doFlash = false
-            }
-            a[i...i].foregroundColor = doFlash ? settings.flashColor : .primary
+        private func sheetBadgeLabel(for sheet: CueSheet) -> String {
+            let name  = sheet.fileName.isEmpty ? sheet.title : sheet.fileName
+            return name.lastIndex(of: ".").map { String(name[..<$0]) } ?? name
         }
-        return a
-    }
-    
-    //──────────────────── main-time chooser ─────────────────────────────────
-    private func displayMainTime() -> TimeInterval {
-        switch phase {
-        case .idle:
-            if !countdownDigits.isEmpty {
-                return digitsToTime(countdownDigits)
-            }
-            return countdownRemaining
-        case .countdown:
-            return countdownRemaining
-        case .running:
-            return elapsed
-        case .paused:
-            if countdownRemaining > 0 {
-                return countdownRemaining
-            }
-            return elapsed
-        }
-    }
-    
-
     // MARK: – toggleSyncMode (drop-in)
     private func toggleSyncMode() {
         if syncSettings.isEnabled {
@@ -2861,8 +3472,12 @@ struct MainScreen: View {
                 else                           { syncSettings.stopChild() }
 
             case .bluetooth:
-                if syncSettings.role == .parent { syncSettings.stopParent() }
-                else                           { syncSettings.stopChild() }
+                // stop existing sync + cancel tap pairing session
+                 if syncSettings.role == .parent { syncSettings.stopParent() }
+                 else                           { syncSettings.stopChild() }
+                syncSettings.cancelTapPairing()
+                // Stop BLE advertise/scan
+                syncSettings.bleDriftManager.stop()
 
             case .bonjour:
                 syncSettings.bonjourManager.stopAdvertising()
@@ -2911,7 +3526,8 @@ struct MainScreen: View {
             case .bluetooth:
                 if syncSettings.role == .parent { syncSettings.startParent() }
                 else                           { syncSettings.startChild() }
-
+                // kick off Tap-to-Pair immediately after Bluetooth sync starts
+                                syncSettings.beginTapPairing()
             case .bonjour:
                 if syncSettings.role == .parent {
                     syncSettings.startParent()
@@ -2921,6 +3537,8 @@ struct MainScreen: View {
                 } else {
                     syncSettings.bonjourManager.advertisePresence()
                     syncSettings.bonjourManager.startBrowsing()
+                    // (BLEDriftManager will set defaults; this call actually spins it up)
+                    syncSettings.bleDriftManager.start()
                     syncSettings.statusMessage = "Bonjour: advertising & searching…"
                 }
             }
@@ -2929,6 +3547,2579 @@ struct MainScreen: View {
         }
     }
 
+    private func confirm(_ text: String) {
+            // Only validate port on Enter
+            if editingTarget == .port {
+                if let p = UInt16(text), (49153...65534).contains(p) {
+                    syncSettings.peerPort = text
+                    showBadPortError = false
+                    editingTarget = nil
+                    isEnteringField = false
+                } else {
+                    showBadPortError = true
+                }
+                return
+            }
+            // IP or Lobby‐Code
+            switch editingTarget {
+            case .ip:
+                syncSettings.peerIP = text
+            default:
+                break
+            }
+            inputText = ""
+            editingTarget = nil
+            isEnteringField = false
+        }
+    
+    
+   
+    @State private var hasUnsaved: Bool = false   // or compute if you already track dirty state
+
+    private func openCueSheets() {
+        showCueSheets = true
+    }
+
+    @State private var eventMode: EventMode = .stop
+    @Binding var showSettings: Bool
+    
+    @AppStorage("hasSeenWalkthrough") private var hasSeenWalkthrough: Bool = true
+    @AppStorage("walkthroughPage") private var walkthroughPage: Int = 0
+    
+    // ── Derived: true when countdown or stopwatch is active ──────
+    private var isCounting: Bool {
+        phase == .countdown || phase == .running
+    }
+    // only true when actively counting down or paused with some time left
+    private var willCountDown: Bool {
+        phase == .countdown
+        || (phase == .paused && countdownRemaining > 0)
+        // only treat “typed digits” as a countdown if it's not the special post-finish edit
+        || (phase == .idle && !countdownDigits.isEmpty && !justEditedAfterPause)
+    }
+    
+    
+    // ─────────────────────────────────────────────────────────────
+    // Only clear the *list* of events — do NOT touch stopDigits
+    private func clearAllEvents() {
+        events.removeAll()
+        stopCleared = false
+
+    }
+    // Choose a discrete scale so it *snaps* in mini/small/big
+    private func numpadScale(for size: CGSize) -> CGFloat {
+        switch iPadWindowMode(size) {
+        case .big:   return 1.0
+        case .small: return 0.88
+        case .mini:  return 0.76
+        }
+    }
+     // ─────────────────────────────────────────────────────────────
+     // PresetEditorSheet (modal like CueSheetsSheet)
+     // ─────────────────────────────────────────────────────────────
+     struct PresetEditorSheet: View {
+         @Environment(\.dismiss) private var dismiss
+         @State private var working: Preset
+         let isEditing: Bool
+         let availableSheets: [String]              // identifiers/titles you expose in CueSheetsSheet
+         let onSave: (Preset) -> Void
+         @State private var lastAutoName: String = ""
+         @State private var userEditedName: Bool = false
+    
+         init(editing preset: Preset?, sheets: [String], onSave: @escaping (Preset) -> Void) {
+             _working = State(initialValue: preset ?? Preset(name: "", kind: .countdown, seconds: 30, sheetIdentifier: nil, icon: "timer"))
+             self.isEditing = (preset != nil)
+             self.availableSheets = sheets
+             self.onSave = onSave
+             // note: lastAutoName/userEditedName initialized in .onAppear
+         }
+    
+         var body: some View {
+             NavigationStack {
+                 Form {
+                     Section("Preset Type") {
+                          Picker("", selection: Binding(
+                              get: {
+                                  (working.kind == .sheet) ? 2 : (working.kind == .countdown ? 0 : 1)
+                              },
+                              set: { idx in
+                                  switch idx {
+                                  case 0: working.kind = .countdown
+                                  case 1: working.kind = .cueRelative  // default to relative; toggle below can switch to absolute
+                                  default: working.kind = .sheet
+                                  }
+                              }
+                          )) {
+                              Text("Countdown").tag(0)
+                              Text("Cue").tag(1)
+                              Text("Event Sheet").tag(2)
+                          }
+                          .pickerStyle(.segmented)
+                          Text("Choose what this preset does when tapped. Cue presets add a flash marker at a time.")
+                              .font(.footnote).foregroundStyle(.secondary)
+                      }
+                     Section("Name") {
+                         TextField("Optional (32 chars)", text: $working.name)
+                                     .onChange(of: working.name) { new in
+                                       if new.count > 32 { working.name = String(new.prefix(32)) }
+                                       // Detect user override vs auto
+                                       if new != lastAutoName { userEditedName = true }
+                                     }
+                                   // Hint
+                                   Text("If left blank, the name auto-updates from the type and time.")
+                                     .font(.footnote)
+                                     .foregroundStyle(.secondary)
+                         Text("Shown on the preset chip. If blank, a sensible name is generated.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                     }
+                     if working.kind == .countdown || working.kind == .cueRelative || working.kind == .cueAbsolute {
+                         Section("Time") {
+                             TimePickerSeconds(value: Binding(
+                                 get: { working.seconds ?? 0 },
+                                 set: { working.seconds = $0 }
+                             ))
+                             Text("Choose the duration (countdown) or cue time.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                             if working.kind == .cueRelative || working.kind == .cueAbsolute {
+                                         Toggle(isOn: Binding(
+                                             get: { working.kind == .cueRelative },
+                                             set: { $0 ? (working.kind = .cueRelative) : (working.kind = .cueAbsolute) }
+                                         )) { Text("Relative offset from now") }
+                                         Text("Relative: cue triggers at current time + offset.\nAbsolute: cue triggers at an exact time on the clock.")
+                                             .font(.footnote).foregroundStyle(.secondary)
+                                     } else {
+                                         Text("Countdown duration to prefill into the main timer when tapped.")
+                                             .font(.footnote).foregroundStyle(.secondary)
+                                     }
+                         }
+                     }
+                     if working.kind == .sheet {
+                         Section("Cue Sheet") {
+                             if availableSheets.isEmpty {
+                                 Text("No cue sheets available. Add one in Cue Sheets.")
+                                     .foregroundStyle(.secondary)
+                             } else {
+                                 Picker("Select a saved sheet", selection: Binding(
+                                                 get: {
+                                                     // always non-nil while this UI is visible
+                                                     if let id = working.sheetIdentifier, availableSheets.contains(id) { return id }
+                                                     let first = availableSheets.first!
+                                                     DispatchQueue.main.async { working.sheetIdentifier = first }
+                                                     return first
+                                                 },
+                                                 set: { working.sheetIdentifier = $0 }
+                                             )) {
+                                     ForEach(availableSheets, id: \.self) { s in Text(s).tag(s) }
+                                 }
+                                 Text("Pick a saved cue sheet to load when this preset is tapped.")
+                                        .font(.footnote).foregroundStyle(.secondary)
+                             }
+                         }
+                     }
+                     
+                 }
+                 .navigationTitle(isEditing ? "Edit Preset" : "New Preset")
+                 .toolbar {
+                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                     ToolbarItem(placement: .confirmationAction) {
+                         Button("Save") {
+                             var p = working
+                             // Auto icon by type (requirement #3)
+                                     p.icon = {
+                                         switch p.kind {
+                                         case .countdown:   return "timer"
+                                         case .cueRelative: return "flag.fill"
+                                         case .cueAbsolute: return "flag"
+                                         case .sheet:       return "music.note.list"
+                                         }
+                                     }()
+                             // If the current name is still the auto-generated one (or empty),
+                                         // ensure we save with the latest auto name.
+                                         let auto = autoName(for: p)
+                                         if p.name.isEmpty || p.name == lastAutoName || userEditedName == false {
+                                           p.name = auto
+                                         }
+
+                             onSave(p); dismiss()
+                         }
+                         .disabled(!isValid(working))
+                     }
+                 }
+                 // Seed auto name and keep it updated as fields change
+                       .onAppear {
+                         lastAutoName = autoName(for: working)
+                         if working.name.isEmpty { working.name = lastAutoName }
+                         userEditedName = (working.name != lastAutoName)
+                       }
+                       .onChange(of: working.kind)        { _ in refreshAutoName() }
+                       .onChange(of: working.seconds)     { _ in refreshAutoName() }
+                       .onChange(of: working.sheetIdentifier) { _ in refreshAutoName() }
+             }
+         }
+         private func refreshAutoName() {
+             let next = autoName(for: working)
+             // Update only if user hasn't overridden the name
+             if working.name.isEmpty || working.name == lastAutoName || userEditedName == false {
+               working.name = next
+               userEditedName = false
+             }
+             lastAutoName = next
+             // Auto-set icon by type
+             working.icon = defaultIcon(for: working.kind)
+           }
+         private func isValid(_ p: Preset) -> Bool {
+             switch p.kind {
+             case .countdown, .cueRelative, .cueAbsolute: return (p.seconds ?? 0) > 0
+             case .sheet: return !(p.sheetIdentifier ?? "").isEmpty
+             }
+         }
+         private func format(_ s: Double) -> String {
+             let cs = Int(round(s * 100))
+             let sec = cs / 100
+             let cs2 = cs % 100
+             let m = sec / 60
+             let r = sec % 60
+             return String(format: "%d:%02d.%02d", m, r, cs2)
+         }
+         private func autoName(for p: Preset) -> String {
+             switch p.kind {
+             case .countdown:   return "Countdown \(format(p.seconds ?? 0))"
+             case .cueRelative: return "Cue +\(format(p.seconds ?? 0))"
+             case .cueAbsolute: return "Cue \(format(p.seconds ?? 0))"
+             case .sheet:
+               let label = p.sheetIdentifier ?? "Sheet"
+               return "Load \(label)"
+             }
+           }
+           private func defaultIcon(for kind: Preset.Kind) -> String {
+             switch kind {
+             case .countdown:   return "timer"
+             case .cueRelative: return "flag.fill"
+             case .cueAbsolute: return "flag"
+             case .sheet:       return "music.note.list"
+             }
+           }
+     }
+
+     // Simple seconds picker (MM:SS.CC) for countdown/cue
+     struct TimePickerSeconds: View {
+         @Binding var value: Double
+         var body: some View {
+             HStack {
+                 Stepper("Seconds: \(String(format: "%.2f", value))", value: $value, in: 0...3599.99, step: 0.25)
+             }
+         }
+     }
+    
+    var body: some View {
+        GeometryReader { geo in
+        // Use the *actual window* size
+            let winSize = geo.size
+            let screenWidth  = winSize.width
+            let screenHeight = winSize.height
+
+            // Phones keep their size-class logic
+            let isPhoneLandscape = (verticalSizeClass == .compact)
+            let isPad = UIDevice.current.userInterfaceIdiom == .pad
+            // iPad: decide by aspect, not size class
+            let isPadLandscapeByAspect = winSize.width > winSize.height
+
+        
+        // 1) Use the **actual window size** if provided (iPad/Split/Stage Manager),
+              
+        let isMax       = screenWidth >= 414 //max
+        let isMiniPhone       = (abs(screenWidth - 375) < 0.5 && abs(screenHeight - 812) < 0.5) // mini
+              let isVerySmallPhone  = (screenWidth <= 376) && !isMiniPhone                            // SE
+                let isStandardPhone   = (abs(screenWidth - 390) < 0.5 && abs(screenHeight - 844) < 0.5) // 12/13/14
+        
+        let isSmallPhone = (screenWidth > 376 && screenWidth < 414) && !isStandardPhone //pro
+        
+        // — new detection for iPhone 13/14 mini & iPhone 12/13/14 —
+        
+        // 2) Decide your offsets
+        let timerOffset   = isMax ? 36 : 10    // ↓ TimerCard/SettingsPagerCard
+        let modeBarOffset = isMax ? -42 : -56    // ↓ mode bar
+        
+            ZStack {
+                if settings.flashStyle == .tint && flashZero && (isPadDevice ? isPadLandscapeByAspect : isLandscape) {
+                    settings.flashColor
+                        .ignoresSafeArea()
+                        .transition(.opacity)
+                        .animation(.easeInOut(duration: Double(settings.flashDurationOption) / 1000), value: flashZero)
+                }
+                // ── LAYOUT CHOOSER ──────────────────────────────────────────────
+                // Strong, compile-safe portrait detection for iPad.
+                // 1) Primary: this window's aspect (Stage Manager / split aware)
+                // 2) Fallback: physical screen aspect (in case a nested GeometryReader lies)
+                let isPadPortraitLike =
+                    (winSize.height >= winSize.width) ||
+                    (UIScreen.main.bounds.height >= UIScreen.main.bounds.width)
+
+                Group {
+                    if isPad && isPadPortraitLike {
+                        // ✅ Any iPad that reads as portrait uses the unified portrait layout
+                        iPadUnifiedLayout()
+                    } else if isPad {
+                        // ✅ All other iPads use the 2-pane landscape layout
+                        iPadLandscapeLayout()
+                    } else if isPhoneLandscape {
+                        // (existing iPhone-landscape block unchanged)
+                        GeometryReader { fullGeo in
+                            let hm: CGFloat = 8
+                            let w = fullGeo.size.width  - (hm * 2)
+                            let h = fullGeo.size.height * 0.22
+                            // phone landscape timercard
+                            TimerCard(
+                                mode: $parentMode,
+                                flashZero: $flashZero,
+                                isRunning: phase == .running,
+                                flashStyle: settings.flashStyle,
+                                flashColor: settings.flashColor,
+                                syncDigits: countdownDigits,
+                                stopDigits: { switch eventMode { case .stop: return stopDigits; case .cue: return cueDigits; case .restart: return restartDigits } }(),
+                                phase: phase,
+                                mainTime: displayMainTime(),
+                                stopActive: stopActive,
+                                stopRemaining: stopRemaining,
+                                leftHint: "START POINT",
+                                rightHint: "DURATION",
+                                stopStep: stopStep,
+                                makeFlashed: makeFlashedOverlay,
+                                isCountdownActive: willCountDown,
+                                events: events,
+                                onClearEvents: { events.removeAll(); hasUnsaved = false }
+                            )
+                            .frame(width: w, height: h)
+                            .position(x: fullGeo.size.width/2, y: fullGeo.size.height/2)
+                            .offset(y: 12)
+                        }
+                        .environment(\.containerSize, .zero)
+                        .transition(.opacity.animation(.easeInOut(duration: 0.25)))
+                    } else {
+                        // your existing iPhone-portrait VStack stays as-is
+                        // (no changes needed here)
+                        VStack(spacing: isVerySmallPhone ? 2 : (isSmallPhone ? 4 : 8)) {
+                            // Top card (Timer or Settings)
+                            // Top card (Timer or Settings) — matched-geometry morph
+                            CardMorphSwitcher(
+                                mode: $parentMode,
+                                timer:
+                                    //OG phone portrait timercard
+                                    TimerCard(
+                                        mode: $parentMode,
+                                        flashZero: $flashZero,
+                                        isRunning: phase == .running,
+                                        flashStyle: settings.flashStyle,
+                                        flashColor: settings.flashColor,
+                                        syncDigits: countdownDigits,
+                                        stopDigits: eventMode == .stop ? stopDigits
+                                        : eventMode == .cue  ? cueDigits
+                                        : restartDigits,
+                                        phase: phase,
+                                        mainTime: displayMainTime(),
+                                        stopActive: stopActive,
+                                        stopRemaining: stopRemaining,
+                                        leftHint: "START POINT",
+                                        rightHint: "DURATION",
+                                        stopStep: stopStep,
+                                        makeFlashed: makeFlashedOverlay,
+                                        isCountdownActive: willCountDown,
+                                        events: events,
+                                        onClearEvents: {
+                                            events.removeAll()
+                                            hasUnsaved = false
+                                        }
+                                    )
+                                
+                                // Lock timer interactions while child is connected
+                                    .allowsHitTesting(!(lockActive || uiLockedByParent)),                                            settings:
+                                    SettingsPagerCard(
+                                        page: $settingsPage,
+                                        editingTarget: $editingTarget,
+                                        inputText: $inputText,
+                                        isEnteringField: $isEnteringField,
+                                        showBadPortError: $showBadPortError
+                                    )
+                                    .environmentObject(settings)
+                                    .environmentObject(syncSettings)
+                            )
+                            .animation(
+                                {
+                                    if #available(iOS 17, *) {
+                                        return parentMode == .settings
+                                        ? .snappy(duration: 0.26, extraBounce: 0.25)
+                                        : .snappy(duration: 0.24, extraBounce: 0.25)
+                                    } else {
+                                        return .easeInOut(duration: 0.26)
+                                    }
+                                }(),
+                                value: parentMode
+                            )
+                            
+                            // If events are cleared by any UI (e.g., your Clear button), also clear the file badge.
+                            .onChange(of: events) { newValue in
+                                if newValue.isEmpty {
+                                    cueBadge.clear()
+                                }
+                            }
+                            .frame(height: isVerySmallPhone ? 220
+                                   : isSmallPhone     ? 260
+                                   : 296)
+                            .padding(.top,
+                                     parentMode == .settings
+                                     ? ( isVerySmallPhone ? 120
+                                         : (isSmallPhone ? 32
+                                            : 16) + 26)   // 38+18 on small, 52+20 on max
+                                     : (isVerySmallPhone ? 102
+                                        : isSmallPhone ? 54
+                                        : 56)   // 44+10 on small, 60+20 on max
+                            )
+                            .frame(maxWidth: .infinity)
+                            .animation(.easeInOut(duration: 0.4), value: parentMode)
+                            
+                            // Mode bar (Sync / Events)
+                            // Mode bar (Sync / Events) — matched-geometry morph, layout-safe
+                            if parentMode == .sync || parentMode == .stop {
+                                ZStack {
+                                    if !settings.lowPowerMode {
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .fill(.ultraThinMaterial)
+                                            .frame(height: 80)
+                                            .shadow(color: .black.opacity(0.125), radius: 10, x: 0, y: 6)
+                                    }
+                                    //main sync bar
+                                    ModeBarMorphSwitcher(isSync: parentMode == .sync) {
+                                        // --- SYNC content ---
+                                        Group {
+                                            SyncBar(
+                                                isCounting: isCounting,
+                                                isSyncEnabled: syncSettings.isEnabled,
+                                                onOpenConnections: {
+                                                    // same as before: go show radios/peers page
+                                                    previousMode = parentMode
+                                                    parentMode   = .settings
+                                                    settingsPage = 2
+                                                },
+                                                onRoleConfirmed: { newRole in
+                                                    // keep your existing role-swap logic
+                                                    let wasEnabled = syncSettings.isEnabled
+                                                    if wasEnabled {
+                                                        if syncSettings.role == .parent { syncSettings.stopParent() }
+                                                        else                           { syncSettings.stopChild() }
+                                                        syncSettings.isEnabled = false
+                                                    }
+                                                    syncSettings.role = newRole
+                                                    if wasEnabled {
+                                                        switch syncSettings.connectionMethod {
+                                                        case .network, .bluetooth, .bonjour:
+                                                            if newRole == .parent { syncSettings.startParent() }
+                                                            else                  { syncSettings.startChild() }
+                                                        }
+                                                        syncSettings.isEnabled = true
+                                                    }
+                                                }
+                                            )
+                                            .environmentObject(syncSettings)
+                                            // Short-tap interactivity is governed by the toggle:
+                                            .allowsHitTesting(settings.allowSyncChangesInMainView)
+                                        }
+                                        // Long-press MUST live on a parent that is always hit-testable:
+                                        .contentShape(Rectangle())
+                                            .gesture(
+                                                LongPressGesture(minimumDuration: 0.6).onEnded { _ in
+                                                    previousMode = parentMode
+                                                    parentMode   = .settings
+                                                    settingsPage = 2
+                                                },
+                                                including: .subviews
+                                            )
+                                    } events: {
+                                        // (unchanged EventsBar)
+                                        EventsBar(
+                                            events: $events,
+                                            eventMode: $eventMode,
+                                            isPaused: phase == .paused,
+                                            unsavedChanges: hasUnsaved,
+                                            onOpenCueSheets: { openCueSheets() },
+                                            isCounting: isCounting,
+                                            onAddStop: commitStopEntry,
+                                            onAddCue:  commitCueEntry,
+                                            onAddRestart: commitRestartEntry
+                                        )
+                                    }
+
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.top, isVerySmallPhone ? 44
+                                         : isSmallPhone ? 0
+                                         : isStandardPhone ? -36
+                                         : -46)
+                                .padding(.top, CGFloat(modeBarOffset))
+                                // Present the cue sheet from the container, not inside the initializer
+                                
+                                
+                                
+                            }
+                            
+                            Spacer(minLength: 0)
+                            
+                            // NumPad
+                            NumPadView(
+                                parentMode:   $parentMode,
+                                settingsPage: $settingsPage,
+                                isEntering:   $isEnteringField,
+                                onKey: { key in
+                                    // ① If editing an IP/port field in Settings:
+                                    if parentMode == .settings && isEnteringField {
+                                        switch key {
+                                        case .digit(let n):
+                                            inputText.append(String(n))
+                                        case .dot:
+                                            inputText.append(".")
+                                        case .backspace:
+                                            _ = inputText.popLast()
+                                        case .enter:
+                                            confirm(inputText)
+                                        default:
+                                            break
+                                        }
+                                        return
+                                    }
+                                    // ② Normal timer/chevron behavior:
+                                    if parentMode != .settings {
+                                        switch key {
+                                        case .digit, .backspace:
+                                            if parentMode == .sync {
+                                                handleCountdownKey(key)
+                                            } else {
+                                                switch eventMode {
+                                                case .stop:    handleStopKey(key)
+                                                case .cue:     handleCueKey(key)
+                                                case .restart: handleRestartKey(key)
+                                                }
+                                            }
+                                        case .settings:
+                                            previousMode = parentMode
+                                            parentMode   = .settings
+                                        default:
+                                            break
+                                        }
+                                    } else {
+                                        // In Settings but not editing: page flips
+                                        switch key {
+                                        case .chevronLeft:
+                                            settingsPage = (settingsPage + numberOfPages - 1) % numberOfPages
+                                        case .chevronRight:
+                                            settingsPage = (settingsPage + 1) % numberOfPages
+                                        default:
+                                            break
+                                        }
+                                    }
+                                },
+                                onSettings: {
+                                    let anim: Animation = {
+                                        if #available(iOS 17, *) {
+                                            return parentMode == .settings
+                                            ? .snappy(duration: 0.26, extraBounce: 0.25)
+                                            : .snappy(duration: 0.24, extraBounce: 0.25)
+                                        } else {
+                                            return .easeInOut(duration: 0.26)
+                                        }
+                                    }()
+                                    
+                                    if parentMode == .settings {
+                                        withAnimation(anim) { parentMode = previousMode }
+                                    } else {
+                                        withAnimation(anim) {
+                                            previousMode = parentMode
+                                            parentMode   = .settings
+                                        }
+                                    }
+                                },
+                                lockActive: padLocked
+                            )
+                            .offset(y: isVerySmallPhone ? -110
+                                    : isSmallPhone     ? -60
+                                    : isStandardPhone ? -38
+                                    : -52)
+                            
+                            // Bottom buttons
+                            ZStack {
+                                SyncBottomButtons(
+                                    showResetButton:   parentMode == .sync,
+                                    showPageIndicator: parentMode == .settings,
+                                    currentPage:       settingsPage + 1,
+                                    totalPages:        numberOfPages,
+                                    isCounting:        isCounting,
+                                    startStop:         toggleStart,
+                                    reset:             resetAll
+                                )
+                                .disabled(lockActive || uiLockedByParent || parentMode != .sync)
+                                .opacity(
+                                    parentMode == .sync
+                                    ? (uiLockedByParent ? 0.35 : 1.0)
+                                    : (parentMode == .settings ? 0.3 : 0.0)
+                                )
+                                if parentMode == .settings {
+                                    let pageTitle: String = {
+                                        switch settingsPage {
+                                        case 0: return "THEME"
+                                        case 1: return "SET"
+                                        case 2: return "CONNECT"
+                                        case 3: return "ABOUT"
+                                        default: return ""
+                                        }
+                                    }()
+                                    HStack {
+                                        Text(pageTitle)
+                                            .font(.custom("Roboto-SemiBold", size: 28))
+                                            .foregroundColor(.secondary)
+                                        Spacer()
+                                    }
+                                    .padding(.vertical, 4)
+                                    .padding(.horizontal, 36)
+                                    .offset(y: 8)
+                                }
+                                EventBottomButtons(
+                                    canAdd: {
+                                        switch eventMode {
+                                        case .stop:    return !stopDigits.isEmpty
+                                        case .cue:     return !cueDigits.isEmpty
+                                        case .restart: return !restartDigits.isEmpty
+                                        }
+                                    }(),
+                                    eventMode: eventMode,
+                                    add: {
+                                        switch eventMode {
+                                        case .stop:    commitStopEntry()
+                                        case .cue:     commitCueEntry()
+                                        case .restart: commitRestartEntry()
+                                        }
+                                    },
+                                    reset: clearAllEvents
+                                )
+                                .disabled(lockActive || uiLockedByParent)
+                                .opacity(parentMode == .stop ? (uiLockedByParent ? 0.35 : 1.0) : 0)
+                            }
+                            .frame(height: 44)
+                            .offset(y: isVerySmallPhone ? -100
+                                    : isSmallPhone ? -60
+                                    : isStandardPhone ? -38
+                                    : -48)
+                            .padding(.bottom, isVerySmallPhone ? 4
+                                     : isSmallPhone ? 4
+                                     : isStandardPhone ? 4
+                                     : 8)
+                            
+                            // Walkthrough “?”
+                            .overlay(alignment: .center) {
+                                if parentMode == .settings {
+                                    Button {
+                                        hasSeenWalkthrough = false
+                                        walkthroughPage    = 0
+                                    } label: {
+                                        Image(systemName: "questionmark.circle")
+                                            .font(.system(size: 24))
+                                            .opacity(0.75)
+                                            .foregroundColor(.gray)
+                                            .accessibilityLabel("Help")
+                                            .accessibilityHint("Restarts the in-app walkthrough")
+                                    }
+                                    .offset(y: -44)
+                                }
+                            }
+                            .zIndex(1)
+                            .animation(.easeInOut(duration: 0.4), value: parentMode)
+                        }
+                    }
+                }
+            }
+            // ✅ Publish this window size to the whole subtree so your
+              //    iPad sublayouts and computed properties can read it.
+              .environment(\.containerSize, winSize)
+        }
+
+               .dynamicTypeSize(.medium ... .medium)
+                .alert(isPresented: $showSyncErrorAlert) {
+                    Alert(
+                        title: Text("Cannot Start Sync"),
+                        message: Text(syncErrorMessage),
+                        dismissButton: .default(Text("OK"))
+                    )
+                }
+                .toolbar(isPadDevice ? .hidden : .automatic, for: .navigationBar)
+                    .navigationBarHidden(isPadDevice)
+                   
+                
+            // 1) Watch commands → Parent-only control (phone enforces authority)
+                .onAppear {
+                    // Seed two starter presets if none exist (device-local).
+                                       if presets.isEmpty {
+                                           savePresets([
+                                               Preset(name: "Countdown 0:30", kind: .countdown,    seconds: 30, icon: "timer"),
+                                               Preset(name: "Cue +0:10",       kind: .cueRelative,  seconds: 10, icon: "flag.fill")
+                                           ])
+                                       }
+                    ConnectivityManager.shared.commands
+                        .receive(on: DispatchQueue.main)
+                        .sink { cmd in
+                            let isParent = (syncSettings.role == .parent)
+                            let unlocked = !(syncSettings.parentLockEnabled ?? false)
+                            guard isParent && unlocked else { return }
+                            switch cmd.command {
+                            case .start: if !isCounting { toggleStart() }
+                            case .stop:  if  isCounting { toggleStart() }
+                            case .reset: if !isCounting { resetAll() }
+                            }
+                        }
+                        .store(in: &wcCancellables)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .TimerStart)) { _ in
+                     if phase != .running { toggleStart() }
+                 }
+                 .onReceive(NotificationCenter.default.publisher(for: .TimerPause)) { _ in
+                     if phase == .running { toggleStart() }
+                 }
+                 .onReceive(NotificationCenter.default.publisher(for: .TimerReset)) { _ in
+                     if phase != .running { resetAll() }
+                 }
+                .onDisappear {
+                    wcCancellables.removeAll()
+                }
+            
+            // 2) Push TimerMessage snapshots at 4 Hz
+                .onReceive(wcTick) { _ in
+                    let phaseString: String = {
+                        switch phase {
+                        case .idle: return "idle"
+                        case .countdown: return "countdown"
+                        case .running: return "running"
+                        case .paused: return "paused"
+                        }
+                    }()
+                    
+                    let linkStr: String = {
+                        if !syncSettings.isEnabled { return "unreachable" }
+                        switch syncSettings.connectionMethod {
+                        case .bonjour:   return "bonjour"
+                        case .bluetooth: return "nearby"
+                        case .network:   return "network"
+                        }
+                    }()
+                    
+                    // Include live event snapshot so children stay in sync while running.
+                    let snapshot = encodeCurrentEvents()
+                    let tm = TimerMessage(
+                        action: .update,
+                        timestamp: Date().timeIntervalSince1970,
+                        phase: phaseString,
+                        remaining: displayMainTime(),
+                        stopEvents: snapshot.stops,
+                        anchorElapsed: elapsed,
+                        parentLockEnabled: syncSettings.parentLockEnabled,
+                        isStopActive: stopActive,
+                        stopRemainingActive: stopRemaining,
+                        cueEvents: snapshot.cues,
+                        restartEvents: snapshot.restarts
+                        // If you extended TimerMessage with role/link/controlsEnabled/etc, you can also pass them here:
+                        // , role: (syncSettings.role == .parent ? "parent" : "child")
+                        // , link: linkStr
+                        // , controlsEnabled: (syncSettings.role == .parent && syncSettings.isEnabled && syncSettings.isEstablished && !(syncSettings.parentLockEnabled ?? false))
+                        // , syncLamp: (syncSettings.isEnabled && syncSettings.isEstablished ? "green" : (syncSettings.isEnabled ? "amber" : "red"))
+                        // , flashNow: flashZero
+                    )
+                    
+                    ConnectivityManager.shared.send(tm)
+                    if syncSettings.role == .parent && syncSettings.isEnabled {
+                        syncSettings.broadcastToChildren(tm)   // ← keep children’s snapshot hot (stops + cues + restarts)
+                    }
+
+                }
+            // end watch commands
+            // wire up the child‐side handler
+                .onAppear {
+                    // NEW: latency-aware authoritative applier (child only)
+                    var lastRemoteTS: TimeInterval = 0
+                    syncSettings.onReceiveTimer = { msg in
+                        guard syncSettings.role == .child else { return }
+                        
+                        // Ignore stale frames (latest wins)
+                        guard msg.timestamp >= lastRemoteTS else { return }
+                        lastRemoteTS = msg.timestamp
+                        
+                        // --- Helpers ---
+                        @inline(__always) func ensureLoop() {
+                            if ticker == nil { startLoop() }
+                        }
+                        @inline(__always) func hardSyncTo(elapsed target: TimeInterval) {
+                            elapsed   = target
+                            startDate = Date().addingTimeInterval(-target)
+                        }
+                        
+                        // Network one-way delay (never negative)
+                        let now   = Date().timeIntervalSince1970
+                        let delta = max(0, now - msg.timestamp)
+                        
+                        // Update events → 5 circles
+                        let wireStops = msg.stopEvents.map { StopEvent(eventTime: $0.eventTime, duration: $0.duration) }
+                        rawStops = wireStops
+                        events   = wireStops.map(Event.stop)
+                        // Keep SyncSettings copy in sync (used elsewhere)
+                        syncSettings.setRawStops(wireStops)
+                        
+                        // Parent lock (UI lock propagation)
+                        if let lock = msg.parentLockEnabled {
+                            syncSettings.parentLockEnabled = lock
+                        }
+                        
+                        switch msg.phase {
+                        case "stop":
+                            // Parent sends: phase="stop", anchorElapsed, isStopActive=true, stopRemainingActive=duration
+                            let parentLeft = msg.stopRemainingActive ?? 0           // ← duration, not elapsed
+                            let left = max(0, parentLeft - delta)                   // subtract one-way flight time
+                            // Freeze main clock at parent's anchor (if provided)
+                            if let anchor = msg.anchorElapsed {
+                                pausedElapsed = anchor
+                                startDate = Date().addingTimeInterval(-anchor)
+                            } else {
+                                pausedElapsed = elapsed
+                            }
+                            stopActive    = true
+                            stopRemaining = left
+                            phase = .running
+                            // reset tick clock for accurate first-frame dt and start loop
+                            // 🔧 Force a fresh render loop so tickRunning() begins immediately
+                            ticker?.cancel(); ticker = nil
+                            lastTickUptime = ProcessInfo.processInfo.systemUptime
+                            startLoop()
+                        case "running":
+                            // Project parent's elapsed to "now"
+                            let parentNow = msg.remaining + delta   // (remaining carries ELAPSED when running)
+                            let err = parentNow - elapsed
+                            if abs(err) > 0.03 {
+                                // snap if we drifted >30 ms
+                                hardSyncTo(elapsed: parentNow)
+                            } else {
+                                // micro-nudge startDate to kill residual drift smoothly
+                                if let sd = startDate { startDate = sd.addingTimeInterval(-err) }
+                                else { hardSyncTo(elapsed: parentNow) }
+                            }
+                            // IMPORTANT: do not clear an in-progress local stop due to periodic “running” updates.
+                            // Keep stopActive as-is; the stop loop ends locally when stopRemaining hits zero.
+                            phase = .running
+                            ensureLoop()
+                            
+                        case "paused":
+                            ticker?.cancel()
+                            stopActive = false
+                            let exact = msg.remaining       // paused → do NOT add delta
+                            pausedElapsed = max(0, exact)
+                            elapsed = pausedElapsed
+                            phase = .paused
+                            
+                        case "countdown":
+                            stopActive = false
+                            let remainingNow = max(0, msg.remaining - delta)
+                            // If you track a dedicated countdownRemaining variable, set it here:
+                            countdownRemaining = remainingNow
+                            phase = .countdown
+                            ensureLoop()
+                            
+                        default:
+                            break
+                        }
+                    }
+                }
+                .onDisappear {
+                    syncSettings.onReceiveTimer = nil
+                }
+            
+            // 1) When you switch *into* Events view, seed the STOP buffer:
+                .onChange(of: parentMode) { newMode in
+                    if newMode == .stop {
+                        // ensure we’re in STOP mode
+                        eventMode   = .stop
+                        stopDigits  = timeToDigits(displayMainTime())
+                        stopStep    = 0
+                        stopCleared = false
+                    }
+                }
+            // 2) When you switch *within* Events between Stop/Cue/Restart:
+                .onChange(of: eventMode) { newMode in
+                    switch newMode {
+                    case .stop:
+                        stopDigits  = timeToDigits(displayMainTime())
+                        stopStep    = 0
+                        stopCleared = false
+                    case .cue:
+                        cueDigits   = timeToDigits(displayMainTime())
+                    case .restart:
+                        restartDigits = timeToDigits(displayMainTime())
+                    }
+                }
+            // ── When the parent stops syncing, immediately kill any live countdown ──
+                .onChange(of: syncSettings.isEnabled) { isEnabled in
+                    if !isEnabled {
+                        // parent just hit “STOP” → tear down our countdown ticker
+                        ticker?.cancel()
+                        // reset to idle
+                        phase = .idle
+                        // zero‐out any in-flight time
+                        countdownDigits.removeAll()
+                        countdownDuration = 0
+                        countdownRemaining = 0
+                        elapsed = 0
+                        startDate = nil
+                    }
+                }
+            // Map a loaded CueSheet into the live events list (drives EventsBar + 5 circles)
+                .onReceive(NotificationCenter.default.publisher(for: .didLoadCueSheet)) { note in
+                    guard let sheet = note.object as? CueSheet else { return }
+                    // Absolute time dominance: sort by `at` and map to your Event enum
+                    let mapped: [Event] = sheet.events
+                        .sorted { $0.at < $1.at }
+                        .map { se in
+                            switch se.kind {
+                            case .cue:
+                                return .cue(CueEvent(cueTime: se.at))
+                            case .stop:
+                                return .stop(StopEvent(eventTime: se.at, duration: se.holdSeconds ?? 0))
+                            case .restart:
+                                return .restart(RestartEvent(restartTime: se.at))
+                            default:
+                                // Unknown/new kinds → treat as a cue at the same absolute time
+                                return .cue(CueEvent(cueTime: se.at))
+                            }
+                        }
+                    events = mapped
+                    // Keep rawStops in sync so the stop loop/timer logic continues to work
+                    rawStops = mapped.compactMap {
+                        if case let .stop(s) = $0 { return s } else { return nil }
+                    }
+                }
+            // Stable SwiftUI sheet presenter (medium/large detents are defined inside CueSheetsSheet)
+                .sheet(isPresented: $showCueSheets) {
+                    CueSheetsSheet(
+                        isPresented: $showCueSheets,
+                        canBroadcast: { syncSettings.role == .parent && syncSettings.isEnabled },
+                        onLoad: { sheet in
+                            apply(sheet)
+                            let name  = sheet.fileName.isEmpty ? sheet.title : sheet.fileName
+                            let label = name.lastIndex(of: ".").map { String(name[..<$0]) } ?? name
+                            cueBadge.set(label, broadcast: false)
+                        },
+                        onBroadcast: { sheet in
+                            apply(sheet)        // local first
+                            broadcast(sheet)    // then send
+                            let name  = sheet.fileName.isEmpty ? sheet.title : sheet.fileName
+                            let label = name.lastIndex(of: ".").map { String(name[..<$0]) } ?? name
+                            cueBadge.set(label, broadcast: true)
+                        }
+                    )
+                }
+                .sheet(isPresented: $showPresetEditor) {
+                                    // Provide your available cue sheet identifiers/titles
+                                    let sheetNames = CueLibraryStore.shared.allSheetNamesOrIds()
+                    let current = loadPresets()
+                     let editing: Preset? = pendingPresetEditIndex.flatMap { idx in
+                         (idx >= 0 && idx < current.count) ? current[idx] : nil
+                     }
+                                   PresetEditorSheet(editing: editing, sheets: sheetNames) { saved in
+                                        var arr = loadPresets()
+                                        if let idx = pendingPresetEditIndex,
+                                           idx >= 0, idx < arr.count {
+                                            arr[idx] = saved
+                                        } else {
+                                            arr.append(saved)
+                                        }
+                                       savePresets(arr)
+                                    }
+                                }
+        // at the very end of MainScreen's body chain (on the outermost view)
+        .toolbar(isPadDevice ? .hidden : .automatic, for: .navigationBar)
+        .navigationBarHidden(isPadDevice)
+
+    }
+    
+    @ViewBuilder
+        private func ConnectedDevicesPaneInline() -> some View {
+            VStack(alignment: .leading, spacing: 12) {
+                // App logo (fills its bar height)
+                   
+                
+                // Devices header (match Notes header)
+                    Text("DEVICES")
+                    .padding(.horizontal, 20)
+                      .font(.custom("Roboto-SemiBold", size: 52))
+                      .lineLimit(1)
+                      .truncationMode(.tail)
+                      .foregroundColor(.secondary)        // header text
+    
+                // ─────────────────────────────────────────────────────
+                            // CONNECTED DEVICES CARD (count + names)
+                            // ─────────────────────────────────────────────────────
+           //                 VStack(alignment: .leading, spacing: 10) {
+           //                     // Count row
+             //                   let names = connectedDeviceNamesForUI()
+               //                 HStack(spacing: 8) {
+      //                              Image(systemName: names.isEmpty ? "circle.dashed" : "person.2.fill")
+       //                                 .imageScale(.large)
+       //                                 .foregroundColor(.secondary)
+      //                              if names.isEmpty {
+       //                                 Text("No devices connected")
+      //                                      .font(.custom("Roboto-Regular", size: 16))
+      //                                      .foregroundColor(.secondary)
+       //                             } else {
+       //                                 Text("\(names.count) connected")
+       //                                     .font(.custom("Roboto-SemiBold", size: 16))
+       //                                     .foregroundColor(.secondary)
+       //                             }
+        //                            Spacer()
+       //                         }
+       //                         // Names list
+       //                         if !names.isEmpty {
+        //                            VStack(alignment: .leading, spacing: 6) {
+        //                                ForEach(names, id: \.self) { n in
+       //                                     HStack(spacing: 8) {
+       //                                         Image(systemName: "iphone")
+       //                                             .imageScale(.small)
+         //                                           .foregroundColor(.secondary)
+         //                                       Text(n)
+        //                                            .font(.custom("Roboto-Regular", size: 15))
+        //                                    }
+         //                               }
+         //                           }
+        //                            .padding(.top, 2)
+         //                       }
+           //                 }
+           //                 .padding(.horizontal, 20)
+           //                 .padding(0)
+           //
+           //                 // A little separation before the full CONNECT cards
+            //                Divider().opacity(0.25)
+    
+                // ✅ Reuse the EXACT CONNECT page cards by embedding SettingsPagerCard pinned to page 2
+                //    (uses a local shadow page binding so we don't affect the global pager)
+               SettingsPagerCard(
+                    page: $connectPageShadow,            // ← pinned to CONNECT
+                    editingTarget: $editingTarget,
+                    inputText: $inputText,
+                    isEnteringField: $isEnteringField,
+                    showBadPortError: $showBadPortError
+                )
+                .environmentObject(settings)
+                .environmentObject(syncSettings)
+                .onAppear { connectPageShadow = 2 }      // keep it on CONNECT
+                .id("ConnectCardsEmbed")                 // avoid pager state bleed
+    
+                // No inline Notes here — the single source of truth is NotesCard in BIG mode.
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 0)
+        }
+    // ─────────────────────────────────────────────────────────────
+        // NotesCard (BIG mode left pane)
+        // ─────────────────────────────────────────────────────────────
+    struct NotesCard: View {
+                /// Your device's local note (same store whether Parent or Child)
+                @Binding var notesLocal: String
+                /// Mirrored parent's note (read-only on child; unused on parent)
+                @Binding var notesParent: String
+            let isChildLocked: Bool
+            let roleIsParent: Bool
+            @Environment(\.colorScheme) private var colorScheme
+            private enum NoteTab: Hashable { case mine, parent }
+        var bodyMinHeight: CGFloat = 160   // ← new, default keeps current behavior
+
+            @State private var tab: NoteTab = .mine   // child-only Mine/Parent picker
+    
+            private let limit = 10_000
+            // Header font: Roboto-SemiBold 64 (truncated)
+            private var headerView: some View {
+                HStack(spacing: 8) {
+                    Text("NOTES")
+                        .padding(.horizontal, 20)
+                        .font(.custom("Roboto-SemiBold", size: 52))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .foregroundColor(.secondary)
+
+                    if isChildLocked {
+                        Image(systemName: "lock.fill")
+                            .imageScale(.medium)
+                            .opacity(0.75)
+                        Text("Read-only")
+                            .font(.custom("Roboto-Regular", size: 16))
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    // Child-only Mine/Parent picker
+                                        if !roleIsParent {
+                                            Picker("", selection: $tab) {
+                                                Text("Mine").tag(NoteTab.mine)
+                                                Text("Parent").tag(NoteTab.parent)
+                                            }
+                                            .pickerStyle(.segmented)
+                                            .frame(maxWidth: 240)
+                                        }
+                }
+            }
+    
+        // Choose which buffer is visible/editable:
+                    //  - Parent: always edit your local note
+                    //  - Child : Mine = local note (editable if not child-locked), Parent = mirrored (read-only)
+                    private var binding: Binding<String> {
+                        if roleIsParent { return $notesLocal }
+                        return (tab == .mine) ? $notesLocal : $notesParent
+                    }
+    
+        private var isEditable: Bool {
+                        // Parent can always edit local; Child can edit local only when not child-locked
+                        if roleIsParent { return true }
+                        return (tab == .mine) && !isChildLocked
+                    }
+    
+            // Placeholder
+            private var placeholder: String { "Add show notes…  (Markdown, autosaves)" }
+             
+            var body: some View {
+                VStack(alignment: .leading, spacing: 12) {
+                    headerView
+                    ZStack(alignment: .topLeading) {
+                        // Live inline Markdown via "ghost editor" (buttery & bulletproof)
+                                            GhostMarkdownEditor(
+                                                text: binding,
+                                                isEditable: isEditable,
+                                                characterLimit: limit
+                                            )
+                                            .frame(minHeight: bodyMinHeight)   // ← use the knob here
+                                            .padding(12)  // ← inner padding for the typing area
+                                            .accessibilityLabel("Notes editor")
+                                            .accessibilityHint(isEditable ? "Editable notes" : "Read-only notes")
+                                           .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    
+                        // Placeholder
+                        if binding.wrappedValue.isEmpty {
+                            Text(placeholder)
+                                .font(.custom("Roboto-Regular", size: 16))
+                                .foregroundColor(.secondary)
+                                .padding(.top, 10)
+                                .padding(.leading, 6)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    
+                          .overlay(                                   // ← outline
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                              .stroke(Color.gray.opacity(0.65), lineWidth: 1)
+                              .padding(.horizontal, 20)
+                          )
+                          .padding(.bottom, 16)                  // ← breathing room below the outline
+                }
+                .padding(.top, 0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+        }
+     // ─────────────────────────────────────────────────────────────
+     // PresetsCard (BIG iPad left pane, below Notes)
+     // ─────────────────────────────────────────────────────────────
+     struct PresetsCard: View {
+         @Binding var list: [Preset]
+         // Timer context (for enable/disable + actions)
+         let isChildLinked: Bool       // (role==.child && isEnabled && isEstablished)
+         let isRunningOrCountdownOrStop: Bool
+         let isParent: Bool
+         // Hooks supplied from MainScreen:
+         let fillCountdownDigits: (Double) -> Void
+         let addCueRelative: (Double) -> Void
+         let addCueAbsolute: (Double) -> Void
+         let loadAndBroadcastSheet: (String) -> Void
+         let presentEditor: (_ editingIndex: Int?) -> Void
+         let currentElapsed: Double
+            let isRunning: Bool
+         let stopActive: Bool
+         
+         private let cardCorner: CGFloat = 12
+    
+         var body: some View {
+             VStack(alignment: .leading, spacing: 12) {
+                 HStack(spacing: 8) {
+                     Text("PRESETS")
+                         .padding(.horizontal, 20)
+                         .font(.custom("Roboto-SemiBold", size: 20))
+                         .foregroundColor(.secondary)
+                     Spacer()
+                 }
+    
+                 // Single-row, horizontally scrolling chips
+                  ScrollView(.horizontal, showsIndicators: false) {
+                      LazyHGrid(
+                              rows: [GridItem(.fixed(52), spacing: 8, alignment: .center)], // taller row for shadow
+                              spacing: 8
+                          ) {
+                          ForEach(Array(list.enumerated()), id: \.element.id) { (idx, p) in
+                             let disabled = tileDisabled(p)
+                             let isPastAbs = (p.kind == .cueAbsolute) &&
+                                             (p.seconds != nil) &&
+                                             isRunning &&
+                                             (p.seconds! <= currentElapsed)
+                             PresetTile(
+                               preset: p,
+                               isDisabled: disabled,
+                               isPastAbsolute: isPastAbs,
+                               tap: { handleTap(p) },
+                               edit: { presentEditor(idx) }
+                             )
+                           }
+                          // Dashed "Add preset" chip
+                          Button { presentEditor(nil) } label: {
+                              HStack(spacing: 8) {
+                                  Image(systemName: "plus").font(.system(size: 16, weight: .semibold))
+                                  Text("Add").font(.custom("Roboto-Regular", size: 16))
+                              }
+                              .padding(.horizontal, 12).frame(height: 36)
+                              .overlay(
+                                  RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                      .stroke(style: StrokeStyle(lineWidth: 1, dash: [6]))
+                                      .foregroundStyle(.secondary.opacity(0.35))
+                              )
+                          }
+                          .buttonStyle(.plain)
+                          .disabled(isChildLinked)
+                          .opacity(isChildLinked ? 0.5 : 1)
+                      }
+                      .padding(.vertical, 8)            // ← top padding for the chips row
+                      .padding(.horizontal, 20)    // ← match 20pt horizontal rhythm
+                  }
+             }
+             .padding(.top, 0)
+         }
+    
+         private func tileDisabled(_ p: Preset) -> Bool {
+             if isChildLinked { return true } // linked child: fully disabled
+             switch p.kind {
+                 case .cueRelative:
+                     // Relative cue: allowed while running; only block during STOP
+                     return stopActiveOnly()
+                 case .cueAbsolute:
+                     // Absolute cue: allowed while running, UNLESS time already passed
+                     if let t = p.seconds, isRunning, t <= currentElapsed { return true }
+                     return stopActiveOnly()
+                 default:
+                     // countdown & sheet presets disabled during running/countdown/stop
+                     return isRunningOrCountdownOrStop
+                 }
+                 func stopActiveOnly() -> Bool { return isRunningOrCountdownOrStop && stopActive }
+         }
+    
+         private func handleTap(_ p: Preset) {
+             guard !tileDisabled(p) else { return }
+             switch p.kind {
+             case .countdown:
+                 if let s = p.seconds { fillCountdownDigits(s) }
+             case .cueRelative:
+                 if let s = p.seconds { addCueRelative(s) }
+             case .cueAbsolute:
+                 if let s = p.seconds { addCueAbsolute(s) }
+             case .sheet:
+                 if let id = p.sheetIdentifier { loadAndBroadcastSheet(id) }
+             }
+         }
+     }
+    
+     // Small tile with icon + label + context menu for edit/delete
+    private struct PresetTile: View {
+      let preset: Preset
+      let isDisabled: Bool
+      let isPastAbsolute: Bool
+      let tap: () -> Void
+      let edit: () -> Void
+         @Environment(\.colorScheme) private var colorScheme
+    
+         var body: some View {
+             HStack(spacing: 10) {
+                 Image(systemName: preset.icon.isEmpty ? defaultIcon : preset.icon)
+                     .font(.system(size: 18, weight: .semibold))
+                     .frame(width: 24, height: 24)
+                 Text(title)
+                     .font(.custom("Roboto-Regular", size: 16))
+                     .lineLimit(1)
+                     .fixedSize(horizontal: true, vertical: false)
+             }
+             .frame(height: 46)
+                .padding(.horizontal, 12)                              // ← side padding for chip
+                .opacity((isDisabled || isPastAbsolute) ? 0.45 : 1)
+                .padding(.vertical, 2)   // space for the shadow blur
+                .padding(.horizontal, 0)
+                .background(                                           // ← glass background
+                  RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                )
+                .overlay(                                              // ← subtle stroke for definition
+                  RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.12 : 0.25), lineWidth: 0.5)
+                )
+                .shadow(color: .black.opacity(0.12), radius: 4, x: 0, y: 4)
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .onTapGesture { if !(isDisabled || isPastAbsolute) { tap() } }
+                .allowsHitTesting(!(isDisabled || isPastAbsolute))
+               .contextMenu { Button("Edit") { edit() }.disabled(isDisabled || isPastAbsolute) }
+         }
+    
+         private var defaultIcon: String {
+             switch preset.kind {
+             case .countdown:   return "timer"
+             case .cueRelative: return "flag.fill"
+             case .cueAbsolute: return "flag"
+             case .sheet:       return "music.note.list"
+             }
+         }
+         private var title: String {
+             if !preset.name.isEmpty { return preset.name }
+             switch preset.kind {
+             case .countdown:
+                 return "Countdown \(format(preset.seconds ?? 0))"
+             case .cueRelative:
+                 return "Cue +\(format(preset.seconds ?? 0))"
+             case .cueAbsolute:
+                 return "Cue \(format(preset.seconds ?? 0))"
+             case .sheet:
+                 return "Load sheet"
+             }
+         }
+         private func format(_ s: Double) -> String {
+             let cs = Int(round(s * 100))
+             let sec = cs / 100
+             let cs2 = cs % 100
+             let m = sec / 60
+             let r = sec % 60
+             return String(format: "%d:%02d.%02d", m, r, cs2)
+         }
+     }
+        // ─────────────────────────────────────────────────────────────
+        // MarkdownTextView: UITextView-backed live Markdown renderer
+        // - Renders Markdown inline as you type
+        // - Enforces a hard 10k character limit
+        // - Editable toggling (child-locked read-only)
+        // - Keeps caret visible as iOS manages scrolling within UITextView
+        // ─────────────────────────────────────────────────────────────
+    /// GhostMarkdownEditor:
+        /// - Background layer: live Markdown render (SwiftUI Text/AttributedString)
+        /// - Foreground layer: TextEditor with transparent text to keep caret & typing UX
+        /// - 10k hard cap, zero flicker, no TextKit resets
+        struct GhostMarkdownEditor: View {
+            @Binding var text: String
+            var isEditable: Bool
+            var characterLimit: Int = 10_000
+            @Environment(\.colorScheme) private var colorScheme
+    
+            // Typography
+            private let bodyFont = Font.custom("Roboto-Regular", size: 16)
+            private let boldFont = Font.custom("Roboto-SemiBold", size: 16)
+    
+            // Live Markdown render
+            private var rendered: AttributedString {
+                if text.isEmpty { return AttributedString("") }
+                if var asg = try? AttributedString(
+                    markdown: text,
+                    options: .init(
+                        interpretedSyntax: .full,
+                        failurePolicy: .returnPartiallyParsedIfPossible
+                    )
+                ) {
+                    
+                }
+                return AttributedString(text)   // fallback
+            }
+    
+            @State private var internalText: String = ""
+            @State private var isFocused: Bool = false
+    
+        var body: some View {
+                // Keep internal buffer synced but enforce hard cap pre-insert
+                ZStack(alignment: .topLeading) {
+                    // Render layer
+                    ScrollView(.vertical) {
+                        Text(rendered)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 2)
+                    }
+                    .scrollDisabled(true) // Scrolling handled by editor
+    
+                    // Editor layer (transparent glyphs; caret remains via .tint)
+                    TextEditor(text: $internalText)
+                        .font(bodyFont)
+                        .foregroundColor(.clear)        // hide glyphs
+                        .tint(.accentColor)             // keep caret visible
+                        .scrollContentBackground(.hidden)
+                        .background(Color.clear)
+                        .padding(.vertical, 6)          // align with render padding
+                        .padding(.horizontal, 2)
+                        .disabled(!isEditable)
+                        .opacity(isEditable ? 1 : 0.999) // keep layout stable even when disabled
+                        .onChange(of: internalText) { newVal in
+                            // Hard 10k cap
+                            if newVal.count > characterLimit {
+                                internalText = String(newVal.prefix(characterLimit))
+                            }
+                       // write-through
+                            if text != internalText { text = internalText }
+                        }
+                        .onChange(of: text) { newVal in
+                            // Pull external changes (AppStorage or sync) without loops
+                            if internalText != newVal {
+                                internalText = String(newVal.prefix(characterLimit))
+                            }
+                        }
+                        .onAppear {
+                            internalText = String(text.prefix(characterLimit))
+                        }
+                }
+                // Ensure the editor consumes taps for focus first
+                .contentShape(Rectangle())
+            }
+        }
+    
+    // ─────────────────────────────────────────────────────────────
+     // iPad Landscape Tiering
+    // ─────────────────────────────────────────────────────────────
+    // iPad Window Modes
+    enum IPadWindowMode { case mini, small, big }
+
+    @inline(__always)
+    private func iPadWindowMode(_ size: CGSize) -> IPadWindowMode {
+        // These thresholds line up with iPadOS “quarter / half / full-ish” widths
+        // across 11" and 12.9"/13" (Stage Manager tolerated).
+        let w = size.width
+        if w >= 782 { return .big }      // fullscreen / large SM width
+        if w >= 500 { return .small }    // left/right split
+        return .mini                     // corner / quadrant
+    }
+
+
+    // Pick a synthetic iPhone profile to get tighter inter-row spacing inside NumPadView
+    private func numpadPhoneProfileSize(forColumnHeight h: CGFloat, remaining: CGFloat) -> CGSize {
+        // iPhone “mini” & “small” baselines your NumPadView already adapts to
+        let mini  = CGSize(width: 320, height: 260)
+        let small = CGSize(width: 390, height: 844)
+        // If vertical room is tight, force “mini” profile; otherwise “small”
+        let useMini = (remaining < 350) || (h < 500)
+        return useMini ? mini : small
+    }
+
+    
+     private let devicesPaneW: CGFloat = 320
+     private let windowInset: CGFloat = 20
+    @ViewBuilder
+    private func iPadLandscapeLayout() -> some View {
+        GeometryReader { geo in
+                let size = geo.size
+                let mode = iPadWindowMode(size)
+        
+                let insetH: CGFloat = 20
+                let insetT: CGFloat = 20
+                let insetB: CGFloat = 20
+        
+            Group {
+                // 📌 Force iPad mini in LANDSCAPE to use our mini landscape builder (no duplication).
+                      if UIDevice.current.userInterfaceIdiom == .pad && (isPadMiniFamily && size.width > size.height) {
+                        iPadLandscapeMini(size: size, insetH: insetH, insetT: insetT, insetB: insetB)
+                      }
+                  // ✅ Portrait iPads always use the unified portrait layout.
+                 else if size.height >= size.width {
+                    iPadUnifiedLayout()
+                  }
+                  // Default: tiered landscape iPad layouts
+                  else {
+                    Group {
+                      switch mode {
+                      case .mini:  iPadLandscapeMini(size: size, insetH: insetH, insetT: insetT, insetB: insetB)
+                    case .small: iPadLandscapeSmall(size: size, insetH: insetH, insetT: insetT, insetB: insetB)
+                      case .big:   iPadLandscapeBig(size: size, insetH: insetH, insetT: insetT, insetB: insetB)
+                      }
+                    }
+                    .id(mode)
+                    .animation(nil, value: mode)
+                  }
+                }
+            }
+    }
+
+    @ViewBuilder
+    private func iPadLandscapeMini(size: CGSize, insetH: CGFloat, insetT: CGFloat, insetB: CGFloat) -> some View {
+        GeometryReader { fullGeo in
+            let hm: CGFloat = 8
+            let w  = fullGeo.size.width  - (hm * 2)
+            let h  = fullGeo.size.height * 0.22   // phone-landscape proportion
+//ipad mini timercard for when in landscape
+            TimerCard(
+                mode: $parentMode,
+                flashZero: $flashZero,
+                isRunning: phase == .running,
+                flashStyle: settings.flashStyle,
+                flashColor: settings.flashColor,
+                syncDigits: countdownDigits,
+                stopDigits: {
+                    switch eventMode {
+                    case .stop:    return stopDigits
+                    case .cue:     return cueDigits
+                    case .restart: return restartDigits
+                    }
+                }(),
+                phase: phase,
+                mainTime: displayMainTime(),
+                stopActive: stopActive,
+                stopRemaining: stopRemaining,
+                // phone style ⇒ no affordance text
+                leftHint: "",
+                rightHint: "",
+                stopStep: stopStep,
+                makeFlashed: makeFlashedOverlay,
+                isCountdownActive: willCountDown,
+                events: events,
+                onClearEvents: { events.removeAll(); hasUnsaved = false }
+            )
+            .frame(width: w, height: h)
+            .position(x: fullGeo.size.width / 2, y: fullGeo.size.height / 2) // (d) vertically centered
+            // defensively strip any parent-applied effects
+            .compositingGroup()
+            .offset(y: 200)
+            .shadow(color: .clear, radius: 0)
+            // (a)(c) tell TimerCard to be phone-simple: no background/shadow, no overlays/dividers, no “SYNC/ EVENTS VIEW”
+            .environment(\.phoneStyleOnMiniLandscape, true)
+            // (b) lift the badge row ~20pt upwards
+        }
+        .transition(.opacity.animation(.easeInOut(duration: 0.25)))
+    }
+
+    private func iPadLandscapeSmall(size: CGSize, insetH: CGFloat, insetT: CGFloat, insetB: CGFloat) -> some View {
+        let contentW = size.width  - insetH*2
+        let contentH = size.height - insetT - insetB
+
+        // Wider and centered
+        let columnW  = min(max(580, floor(contentW * 0.60)), contentW)
+        // Make the column fill the full usable height so the footer aligns with BIG mode
+               let columnH  = contentH
+        return VStack(spacing: 0) {
+            IPhonePortraitColumn(width: columnW, height: columnH, mode: .small)
+                .frame(width: columnW, height: columnH, alignment: .top)
+                .frame(maxWidth: .infinity, alignment: .center)   // center column
+        }
+        // Match BIG mode’s vertical offset so bottom buttons align exactly
+                .frame(width: contentW, height: contentH, alignment: .top)
+                .padding(.top, max(0, insetT + 64))
+                .padding(.horizontal, insetH)
+                .padding(.bottom, insetB)
+    }
+
+
+    
+    @ViewBuilder
+    private func iPadLandscapeBig(size: CGSize, insetH: CGFloat, insetT: CGFloat, insetB: CGFloat) -> some View {
+        @Environment(\.colorScheme) var colorScheme
+
+        @Namespace  var leftPaneNS
+        let contentW = size.width  - insetH*2
+        let contentH = size.height - insetT - insetB
+        let rightW   = floor(contentW * 0.4)
+        let leftW    = contentW - rightW - 16
+        // NEW: computed column height (take almost all vertical space with a floor)
+        let columnH  = min(max(5, floor(contentH * 0.96)), contentH)
+        let shouldPaginateLeftPane: Bool = {
+            if isLargePad129Family {
+                // 12.9"/13": user-controlled via Settings
+                return settings.leftPanePaginateOnLargePads
+            } else {
+                // 10.9"/11": always paginated
+                return true
+            }
+        }()
+
+        // 12.9/13" keeps the old +64 pad; 10.9" gets a -20 lift (offset, not padding)
+           let extraTopPad:  CGFloat = isLargePad129Family ? 64 : 0
+           let extraTopLift: CGFloat = isLargePad129Family ? 0  : -40
+        // Align the two panes by their TOP edges, add vertical divider between panes
+        HStack(alignment: .top, spacing: 16) {
+            VStack(spacing: 12) {
+                // ─────────────── Row 1: Launch logo (ALWAYS SHOWN, never paginated)
+                ZStack {
+                    Image(settings.appTheme == .dark ? "LaunchLogoDarkMode" : "LaunchLogo")
+                    
+                    .resizable()
+                    .scaledToFill()          // ← fill height
+                    .frame(maxWidth: 300, maxHeight: .infinity)
+                    .clipped()
+                    .accessibilityHidden(true)
+                }
+                .frame(height: 40)           // ← container height; tweak (64–84) to taste
+                .offset(y: -20)
+                .offset(
+                  x: ((isPadDevice && (isPad109Family || isPad11Family)) && (size.width > size.height))
+                     ? -192
+                     : -232
+                )
+
+
+                
+
+                // ─────────────── Row 2: Devices / Notes (the ONLY thing that paginates)
+                // ─────────────── Row 2: Devices / Notes (the ONLY thing that paginates)
+                Group {
+                    if shouldPaginateLeftPane {
+                        ZStack(alignment: .top) {
+                            if leftPaneTab == 0 {
+                                ConnectedDevicesPaneInline()
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                                    .matchedGeometryEffect(id: "leftPaneContent", in: leftPaneNS)
+                                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+                            } else {
+                                let notesMinBase: CGFloat = {
+                                    if isLargePad129Family { return 500 }                // 12.9"/13"
+                                    if isPad109Family || isPad11Family { return 320 }    // 10.9"/11"
+                                    return 500                                           // default/safety
+                                }()
+                                NotesCard(
+                                    notesLocal:   $notesLocal,
+                                    notesParent:  $notesParent,
+                                    isChildLocked: uiLockedByParent,
+                                    roleIsParent: (syncSettings.role == .parent),
+                                    bodyMinHeight: max(notesMinBase, columnH * 0.70)
+                                )
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                                .layoutPriority(1)
+                                .matchedGeometryEffect(id: "leftPaneContent", in: leftPaneNS)
+                                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+                            }
+                        }
+                        .animation(
+                            {
+                                if #available(iOS 17, *) {
+                                    return .snappy(duration: 0.26, extraBounce: 0.25)
+                                } else {
+                                    return .easeInOut(duration: 0.26)
+                                }
+                            }(),
+                            value: leftPaneTab
+                        )
+                    } else {
+                        VStack(spacing: 12) {
+                            ConnectedDevicesPaneInline()
+                                .frame(maxWidth: .infinity, alignment: .top)
+
+                            NotesCard(
+                                notesLocal:   $notesLocal,
+                                notesParent:  $notesParent,
+                                isChildLocked: uiLockedByParent,
+                                roleIsParent: (syncSettings.role == .parent)
+                            )
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+
+
+                // ─────────────── Row 2.5: Centered page nav (only when paginating)
+                if shouldPaginateLeftPane {
+                    LeftPaneNav(tab: $leftPaneTab, titles: ["Devices", "Notes"])
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity)
+                }
+
+                // ─────────────── Row 3: Presets (unaffected)
+                PresetsCard(
+                    list: Binding(
+                        get: { loadPresets() },
+                        set: { savePresets($0); presetsDirtyNonce &+= 1 }
+                    ),
+                    isChildLinked: (syncSettings.role == .child && syncSettings.isEnabled && syncSettings.isEstablished),
+                    isRunningOrCountdownOrStop: (phase == .running || phase == .countdown || stopActive),
+                    isParent: (syncSettings.role == .parent),
+                    fillCountdownDigits: { secs in
+                        countdownDigits = timeToDigits(secs)
+                        countdownDuration = secs
+                        countdownRemaining = secs
+                        parentMode = .sync
+                    },
+                    addCueRelative: { ofs in addCueFromPreset(at: ofs, treatAsAbsolute: false) },
+                    addCueAbsolute: { absSec in addCueFromPreset(at: absSec, treatAsAbsolute: true) },
+                    loadAndBroadcastSheet: { sheetID in
+                        openCueSheets()
+                        if let sheet = CueLibraryStore.shared.sheet(namedOrId: sheetID) {
+                            apply(sheet)
+                            if syncSettings.role == .parent && syncSettings.isEnabled { broadcast(sheet) }
+                            let name  = sheet.fileName.isEmpty ? sheet.title : sheet.fileName
+                            let label = name.lastIndex(of: ".").map { String(name[..<$0]) } ?? name
+                            cueBadge.set(label, broadcast: (syncSettings.role == .parent))
+                        }
+                    },
+                    presentEditor: { idx in pendingPresetEditIndex = idx; showPresetEditor = true },
+                    currentElapsed: displayMainTime(),
+                    isRunning: (phase == .running),
+                    stopActive: stopActive
+                )
+                .id(presetsDirtyNonce)
+            }
+            .frame(width: leftW, height: columnH, alignment: .top)
+
+        
+                    // VERTICAL DIVIDER BETWEEN PANES
+                    Rectangle().fill(.separator).frame(width: 1).opacity(0.5)
+            IPhonePortraitColumn(width: rightW, height: columnH, mode: .big)
+                .frame(width: rightW, height: columnH, alignment: .top)
+        }
+                .frame(width: contentW, height: contentH, alignment: .top)
+                    .padding(.top, max(0, insetT + extraTopPad))   // never negative
+                    .offset(y: extraTopLift)                       // apply the -20 only on 10.9"
+                    .padding(.horizontal, insetH)
+                    .padding(.bottom, insetB)
+    }
+
+
+
+     private func phonePortraitCardWidth() -> CGFloat {
+         // Match your iPhone portrait card’s effective width (content width minus gutters).
+         return 390
+     }
+    //our ipad small pane "iphone column" view
+    @ViewBuilder
+    private func IPhonePortraitColumn(
+      width: CGFloat,
+      height: CGFloat,
+      mode: IPadWindowMode? = nil   // ← add this (nil = not in iPad landscape tiers)
+    ) -> some View {
+        GeometryReader { g in
+            
+            
+        ZStack(alignment: .bottom) {
+            let isPad109 = isPadDevice && isPad109Family   // 10.9" only
+
+                // Single source of truth so TimerCard width == Mode Bar width
+                let colPad: CGFloat = 20
+            let innerW = max(360, width - colPad * 2)   // exact inner width (Timer/Bar/Numpad share this)
+
+            // Safe-area aware measurements
+            let safeTop  = g.safeAreaInsets.top
+            let safeBot  = g.safeAreaInsets.bottom
+
+            
+            // Visual constants (slightly tighter on 10.9")
+            let barH: CGFloat       = isPad109 ? 74 : 80
+            let buttonsH: CGFloat   = 44
+            let footerPad: CGFloat  = 0
+            let cardH: CGFloat      = max(240, min(height * (isPad109 ? 0.28 : 0.30), 500))
+
+            // Tier spacing: gap ABOVE the mode bar (tighter on 10.9")
+            let vSpacingAboveBar: CGFloat = {
+                switch mode {
+                case .big?:   return isPad109 ? 28 : 32
+                case .small?: return isPad109 ? 32 : 40
+                case .mini?:  return 0
+                case nil:     return 32
+                }
+            }()
+
+            // (existing)
+            let vSpacingBetween: CGFloat = 12
+            let usedTop = cardH + vSpacingAboveBar + barH + vSpacingBetween
+            let reservedFooter = buttonsH + footerPad + g.safeAreaInsets.bottom
+            let remaining = max(0, height - usedTop - reservedFooter)
+
+            // ► NUMPAD HEIGHT — key fix:
+            //    On 10.9" let it use the *actual* remaining space (no min-height clamp).
+            //    On others, keep your current min/max behavior.
+            let numpadMinH_DefaultBig:  CGFloat = 520
+            let numpadMaxH_DefaultBig:  CGFloat = 650
+            let numpadMinH_DefaultSm:   CGFloat = 400
+            let numpadMaxH_DefaultSm:   CGFloat = 600
+
+            let targetNumpad: CGFloat = {
+                if isPad109 {
+                    // Fill whatever remains, minus a tiny cushion so it never collides with the footer
+                    return max(0, remaining - 8)
+                } else {
+                    let minH = (mode == .big ? numpadMinH_DefaultBig : numpadMinH_DefaultSm)
+                    let maxH = (mode == .big ? numpadMaxH_DefaultBig : numpadMaxH_DefaultSm)
+                    return max(minH, min(maxH, remaining))
+                }
+            }()
+
+            // Tighter row height hint on 10.9" so keys render a touch shorter
+            let hHint: CGFloat = {
+                if isPad109 { return (mode == .big ? 18 : 24) }
+                return (mode == .big ? 20 : 30)
+            }()
+            let tightNumpadProfile = CGSize(width: innerW, height: hHint)
+
+
+            let isLandscape = g.size.width > g.size.height
+                let lift: CGFloat = (isPadDevice && isPad109Family && isLandscape) ? 120 : 0
+
+            // Smaller target & hard cap specifically for SMALL (others unchanged)
+            let maxFraction: CGFloat = {
+                switch mode {
+                case .small?: return 0.46   // ensure there’s room but not oversized
+                case .big?:   return 0.46
+                case .mini?:  return 0.26
+                default:      return 0.46
+                }
+            }()
+
+            let baselineNumpadHeight: CGFloat = 1500
+
+            let numpadPhoneProfileSize =
+                isPadDevice
+                ? numpadPhoneProfileSize(forColumnHeight: height, remaining: targetNumpad)
+                : CGSize(width: width, height: height)
+
+            
+
+            VStack(alignment: .leading, spacing: vSpacingBetween) {
+                // 1) TIMER — nudged up slightly
+                CardMorphSwitcher(
+                    mode: $parentMode,
+                    timer:
+                        // ipad timercard in landscape, using iphone portrait timercard as the head of a columned right pane, hence the name
+                        TimerCard(
+                            mode: $parentMode,
+                            flashZero: $flashZero,
+                            isRunning: phase == .running,
+                            flashStyle: settings.flashStyle,
+                            flashColor: settings.flashColor,
+                            syncDigits: countdownDigits,
+                            stopDigits: eventMode == .stop ? stopDigits
+                            : eventMode == .cue  ? cueDigits
+                            :                      restartDigits,
+                            phase: phase,
+                            mainTime: displayMainTime(),
+                            stopActive: stopActive,
+                            stopRemaining: stopRemaining,
+                            leftHint: "START POINT",
+                            rightHint: "DURATION",
+                            stopStep: stopStep,
+                            makeFlashed: makeFlashedOverlay,
+                            isCountdownActive: willCountDown,
+                            events: events,
+                            onClearEvents: { events.removeAll(); hasUnsaved = false }
+                        )
+                        .allowsHitTesting(!(lockActive || uiLockedByParent)),
+                    settings:
+                        SettingsPagerCard(
+                            page: $settingsPage,
+                            editingTarget: $editingTarget,
+                            inputText: $inputText,
+                            isEnteringField: $isEnteringField,
+                            showBadPortError: $showBadPortError
+                        )
+                        .environmentObject(settings)
+                        .environmentObject(syncSettings)
+                )
+                .frame(height: cardH)
+                .animation(
+                  {
+                    if #available(iOS 17, *) { .snappy(duration: 0.26, extraBounce: 0.25) }
+                    else { .easeInOut(duration: 0.26) }
+                  }(),
+                  value: parentMode
+                )
+                .onChange(of: events) { if $0.isEmpty { cueBadge.clear() } }
+                .zIndex(2) // card always above
+                // Make timer width match the mode bar by using the same horizontal padding:
+                      .padding(.horizontal, colPad)
+                
+                // 2) MODE BAR — pushed down ~20pt
+                if parentMode == .sync || parentMode == .stop {
+                    ZStack {
+                        if !settings.lowPowerMode {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(.ultraThinMaterial)
+                                .frame(height: barH)
+                                .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 6)
+                        }
+                        ModeBarMorphSwitcher(isSync: parentMode == .sync) {
+                            Group {
+                                SyncBar(
+                                    isCounting: isCounting,
+                                    isSyncEnabled: syncSettings.isEnabled,
+                                    onOpenConnections: {
+                                        previousMode = parentMode
+                                        parentMode   = .settings
+                                        settingsPage = 2
+                                    },
+                                    onRoleConfirmed: { newRole in
+                                        let wasEnabled = syncSettings.isEnabled
+                                        if wasEnabled {
+                                            if syncSettings.role == .parent { syncSettings.stopParent() }
+                                            else                           { syncSettings.stopChild() }
+                                            syncSettings.isEnabled = false
+                                        }
+                                        syncSettings.role = newRole
+                                        if wasEnabled {
+                                            switch syncSettings.connectionMethod {
+                                            case .network, .bluetooth, .bonjour:
+                                                if newRole == .parent { syncSettings.startParent() }
+                                                else                  { syncSettings.startChild() }
+                                            }
+                                            syncSettings.isEnabled = true
+                                        }
+                                    }
+                                )
+                                .environmentObject(syncSettings)
+                                .allowsHitTesting(settings.allowSyncChangesInMainView)
+                            }
+                            .contentShape(Rectangle())
+                            .gesture(
+                                LongPressGesture(minimumDuration: 0.6).onEnded { _ in
+                                    previousMode = parentMode
+                                    parentMode   = .settings
+                                    settingsPage = 2
+                                },
+                                including: .subviews
+                            )
+                        } events: {
+                            // (unchanged)
+                            EventsBar(
+                                events: $events,
+                                eventMode: $eventMode,
+                                isPaused: phase == .paused,
+                                unsavedChanges: hasUnsaved,
+                                onOpenCueSheets: { openCueSheets() },
+                                isCounting: isCounting,
+                                onAddStop: commitStopEntry,
+                                onAddCue:  commitCueEntry,
+                                onAddRestart: commitRestartEntry
+                            )
+                        }
+
+                    }
+                    .padding(.top, vSpacingAboveBar)
+                    .padding(.horizontal, colPad)
+                }
+                
+                // ─────────────────────────────────────────────────────────────
+                // 3) NUMPAD — auto-resizes, no clipping
+                // REPLACE your NumPad block with this:
+                // ─────────────────────────────────────────────────────────────
+                NumPadView(
+                    parentMode:   $parentMode,
+                    settingsPage: $settingsPage,
+                    isEntering:   $isEnteringField,
+                    onKey: { key in
+                        if parentMode == .settings && isEnteringField {
+                            switch key {
+                            case .digit(let n): inputText.append(String(n))
+                            case .dot:          inputText.append(".")
+                            case .backspace:    _ = inputText.popLast()
+                            case .enter:        confirm(inputText)
+                            default:            break
+                            }
+                            return
+                        }
+                        if parentMode != .settings {
+                            switch key {
+                            case .digit, .backspace:
+                                if parentMode == .sync {
+                                    handleCountdownKey(key)
+                                } else {
+                                    switch eventMode {
+                                    case .stop:    handleStopKey(key)
+                                    case .cue:     handleCueKey(key)
+                                    case .restart: handleRestartKey(key)
+                                    }
+                                }
+                            case .settings:
+                                previousMode = parentMode
+                                parentMode   = .settings
+                            default: break
+                            }
+                        } else {
+                            switch key {
+                            case .chevronLeft:  settingsPage = (settingsPage + numberOfPages - 1) % numberOfPages
+                            case .chevronRight: settingsPage = (settingsPage + 1) % numberOfPages
+                            default: break
+                            }
+                        }
+                    },
+                    onSettings: {
+                        let anim: Animation = {
+                            if #available(iOS 17, *) {
+                                return parentMode == .settings
+                                ? .snappy(duration: 0.26, extraBounce: 0.25)
+                                : .snappy(duration: 0.24, extraBounce: 0.25)
+                            } else { return .easeInOut(duration: 0.26) }
+                        }()
+                        if parentMode == .settings {
+                            withAnimation(anim) { parentMode = previousMode }
+                        } else {
+                            withAnimation(anim) { previousMode = parentMode; parentMode = .settings }
+                        }
+                    },
+                    lockActive: padLocked
+                )
+                .frame(width: innerW, height: targetNumpad, alignment: .top)   // exact width + visible multiple rows
+                .layoutPriority(1)
+                .padding(.top, parentMode == .settings ? 111 : 0)
+
+                .clipped()
+                
+                // Tight rows + correct width handed to NumPad
+                .environment(\.containerSize, tightNumpadProfile)
+                .padding(.horizontal, colPad)   // match Timer/Bar width exactly
+                .zIndex(1) // stays below the card
+            }
+            
+                          
+            
+                        // ─────────────────────────────────────────────────────────────
+                        // Column-local footer, pinned to the bottom of this pane
+                        // ─────────────────────────────────────────────────────────────
+                        ZStack {
+                            Color.clear.contentShape(Rectangle()) // full-width tappable slab
+            
+                            // Sync footer (only interactive in SYNC)
+                            SyncBottomButtons(
+                                showResetButton:   parentMode == .sync,
+                                showPageIndicator: parentMode == .settings,
+                                currentPage:       settingsPage + 1,
+                                totalPages:        numberOfPages,
+                                isCounting:        isCounting,
+                                startStop:         toggleStart,
+                                reset:             resetAll
+                        )
+                        .disabled(lockActive || uiLockedByParent || parentMode != .sync)
+                           .opacity(parentMode == .sync ? (uiLockedByParent ? 0.35 : 1.0)
+                                                         : (parentMode == .settings ? 0.3 : 0.0))
+                            .allowsHitTesting(parentMode == .sync)
+            
+                            // Events footer (only interactive in STOP/Events)
+                            EventBottomButtons(
+                                canAdd: {
+                                    switch eventMode {
+                                case .stop:    return !stopDigits.isEmpty
+                                    case .cue:     return !cueDigits.isEmpty
+                                    case .restart: return !restartDigits.isEmpty
+                                    }
+                                }(),
+                                eventMode: eventMode,
+                                add: {
+                                    switch eventMode {
+                                    case .stop:    commitStopEntry()
+                                    case .cue:     commitCueEntry()
+                                    case .restart: commitRestartEntry()
+                                    }
+                                },
+                                reset: clearAllEvents
+                            )
+                            .disabled(lockActive || uiLockedByParent)
+                            .opacity(parentMode == .stop ? (uiLockedByParent ? 0.35 : 1.0) : 0)
+                            .allowsHitTesting(parentMode == .stop)
+                        }
+                        .frame(height: buttonsH + footerPad)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+            // ↓ Ensure SMALL mode footer sits at the same vertical position as BIG
+                                    //    (positive y moves it DOWN; tune if your hardware shows a 1–2pt difference)
+                        .offset(y: (mode == .small ? (isPad109 ? 24 : 48) : 0))
+                        .offset(y: ((isPadDevice && (isPad109Family || isPad11Family)) && (g.size.width > g.size.height))
+                                    ? (mode == .small ? -100 : -140)
+                                    : 0)
+
+
+
+                                    // Keep the tappable area with the visual
+                                    .contentShape(Rectangle())
+                                    .allowsHitTesting(true)
+                        .zIndex(1000) // top within the column only
+                    }
+            }
+        }
+    
+
+
+    // ─────────────────────────────────────────────────────────────
+    // iPad unified layout: full-width TimerCard + full-width bars
+    // ─────────────────────────────────────────────────────────────
+    @ViewBuilder
+    private func iPadUnifiedLayout() -> some View {
+        @Environment(\.phoneStyleOnMiniLandscape)
+        var phoneStyleOnMiniLandscape
+
+        GeometryReader { geo in
+            
+            let numpadScale: CGFloat = 0.65   // tweak 0.80–0.90 to taste
+            let size = geo.size
+
+            let winW = geo.size.width
+            let winH = geo.size.height
+            let isLandscape = winW > winH
+            let topSafe = geo.safeAreaInsets.top
+            let isBigPortrait = (!isLandscape && winH >= 1360)   // 12.9/13 only, full-height
+            // Mini in PORTRAIT = short long-edge in points (mini ~1133–1135pt)
+                let isMiniPortraitPoints = (UIDevice.current.userInterfaceIdiom == .pad
+                                            && !isLandscape
+                                            && max(winW, winH) <= 1135)
+            let footerButtonsH: CGFloat = 44
+            let footerPad: CGFloat = 10
+            let reservedFooter = footerButtonsH + footerPad + geo.safeAreaInsets.bottom
+            // Top band height derived from the actual window size
+            let baseTopH: CGFloat = isLandscape
+                    ? max(360, min(winH * 0.50, 640))
+                    : (
+                        isMiniPortraitPoints
+                        ? max(220, min(winH * 0.32, 440))  // ⬅︎ Portrait mini only: noticeably smaller
+                        : max(300, min(winH * 0.42, 560))
+                      )
+             // 12.9" portrait: grow the top band so the next section (mode bar) starts lower
+             let isTallPadPortrait = (UIDevice.current.userInterfaceIdiom == .pad && !isLandscape && winH >= 1000)
+             let topH: CGFloat = baseTopH + (isTallPadPortrait ? 24 : 0)
+
+            // Mode bar height (visual only)
+            let barH: CGFloat = settings.lowPowerMode ? 72 : 88
+            // sections above NumPad: top card + mode bar + small gap
+            let usedTop = topH
+                       + ((parentMode == .sync || parentMode == .stop) ? (barH + 20) : 0)
+                       + 8
+
+            let remainingForNumPad = max(0, winH - usedTop - reservedFooter)
+
+            // Pick a synthetic iPhone profile only on iPad
+            let numpadPhoneProfile =
+                isPadDevice
+                ? numpadPhoneProfileSize(forColumnHeight: winH, remaining: remainingForNumPad)
+                : CGSize(width: winW, height: winH)
+
+            
+            // 12.9" portrait only (Stage Manager tolerant)
+            let nativeMax = max(UIScreen.main.nativeBounds.width, UIScreen.main.nativeBounds.height)
+            let is129Portrait = (UIDevice.current.userInterfaceIdiom == .pad && nativeMax >= 2732 && !isLandscape)
+            // lifts
+            let modeBarLift: CGFloat = is129Portrait ? 24 : 0
+            let bottomLift: CGFloat  = is129Portrait ? 120 : 0
+            let extraH = max(0, geo.size.height - 1194)
+            let baseY = 1080 + extraH * 0.70                   // your existing placement
+            let y = baseY + (isLargePad129Family ? 72 : 0)     // ↓ only on 12.9/13" (tune 56–96)
+
+
+
+            VStack(spacing: 20) {
+                // ── TOP CARD: TimerCard ⇄ SettingsPagerCard (same size/placement) ──
+                ZStack(alignment: .top) {
+                    Color.clear // keep background full-bleed
+
+                    CardMorphSwitcher(
+                        mode: $parentMode,
+                        timer:
+                            TimerCard(
+                                mode: $parentMode,
+                                flashZero: $flashZero,
+                                isRunning: phase == .running,
+                                flashStyle: settings.flashStyle,
+                                flashColor: settings.flashColor,
+                                syncDigits: countdownDigits,
+                                stopDigits: {
+                                    switch eventMode {
+                                    case .stop:    return stopDigits
+                                    case .cue:     return cueDigits
+                                    case .restart: return restartDigits
+                                    }
+                                }(),
+                                phase: phase,
+                                mainTime: displayMainTime(),
+                                stopActive: stopActive,
+                                stopRemaining: stopRemaining,
+                                leftHint: "START POINT",
+                                rightHint: "DURATION",
+                                stopStep: stopStep,
+                                makeFlashed: makeFlashedOverlay,
+                                isCountdownActive: willCountDown,
+                                events: events,
+                                onClearEvents: {
+                                    events.removeAll()
+                                    hasUnsaved = false
+                                }
+                            )
+                            .allowsHitTesting(!(lockActive || uiLockedByParent))
+                            .transition(.opacity)
+                            .padding(.horizontal, 20)
+                            .overlay(alignment: .topLeading) {
+                                if !isLandscape {
+                                    Color.clear
+                                        .frame(width: 1, height: 1)
+                                        .popover(isPresented: $showCueSheets, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+                                            NavigationStack {
+                                                ScrollView {
+                                                    CueSheetsSheet(
+                                                        isPresented: $showCueSheets,
+                                                        canBroadcast: { syncSettings.role == .parent && syncSettings.isEnabled },
+                                                        onLoad: { sheet in
+                                                            apply(sheet)
+                                                            let name  = sheet.fileName.isEmpty ? sheet.title : sheet.fileName
+                                                            let label = name.lastIndex(of: ".").map { String(name[..<$0]) } ?? name
+                                                            cueBadge.set(label, broadcast: false)
+                                                        },
+                                                        onBroadcast: { sheet in
+                                                            apply(sheet); broadcast(sheet)
+                                                            let name  = sheet.fileName.isEmpty ? sheet.title : sheet.fileName
+                                                            let label = name.lastIndex(of: ".").map { String(name[..<$0]) } ?? name
+                                                            cueBadge.set(label, broadcast: true)
+                                                        }
+                                                    )
+                                                    .padding(16)
+                                                }
+                                                .navigationTitle("Cue Sheets")
+                                            }
+                                            .frame(
+                                                width: min(700, geo.size.width  - 120),
+                                                height: min(700, geo.size.height - 200)
+                                            )
+                                        }
+                                }
+                            },
+                        settings:
+                            SettingsPagerCard(
+                                page: $settingsPage,
+                                editingTarget: $editingTarget,
+                                inputText: $inputText,
+                                isEnteringField: $isEnteringField,
+                                showBadPortError: $showBadPortError
+                            )
+                            .environmentObject(settings)
+                            .environmentObject(syncSettings)
+                            .offset(y: -20)
+                            .allowsHitTesting(true)
+                            .transition(.opacity)
+                    )
+
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    
+                    .environment(\.containerSize, geo.size)
+
+                    // Title overlay for Settings pages
+                    if parentMode == .settings {
+                        let pageTitle: String = {
+                            switch settingsPage {
+                            case 0: return "THEME"
+                            case 1: return "SET"
+                            case 2: return "CONNECT"
+                            case 3: return "ABOUT"
+                            default: return ""
+                            }
+                        }()
+
+                        // Float it at the top-left, same horizontal padding as the card
+                        Text(pageTitle)
+                            .font(.custom("Roboto-SemiBold", size: 28))
+                            .foregroundColor(.secondary)
+                            .offset(y: 1066)
+                            .padding(.horizontal, 20)
+                            .allowsHitTesting(false)  // pure label
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                }
+                .frame(width: winW, height: topH, alignment: isLandscape ? .center : .top)
+                .animation(
+                    {
+                        if #available(iOS 17, *) {
+                            return parentMode == .settings
+                            ? .snappy(duration: 0.26, extraBounce: 0.25)
+                            : .snappy(duration: 0.24, extraBounce: 0.25)
+                        } else {
+                            return .easeInOut(duration: 0.26)
+                        }
+                    }(),
+                    value: parentMode
+                )
+                Spacer(minLength: modeBarLift)  // 12.9" portrait only adds 24pt
+                // ── MODE BAR (always *below* the TimerCard) ─────────────────
+                if parentMode == .sync || parentMode == .stop {
+                    ZStack {
+                        if !settings.lowPowerMode && !phoneStyleOnMiniLandscape {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(.ultraThinMaterial)
+                                .frame(height: barH)
+                                .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 6)
+                        }
+                        ModeBarMorphSwitcher(isSync: parentMode == .sync) {
+                            Group {
+                                SyncBar(
+                                    isCounting: isCounting,
+                                    isSyncEnabled: syncSettings.isEnabled,
+                                    onOpenConnections: {
+                                        previousMode = parentMode
+                                        parentMode   = .settings
+                                        settingsPage = 2
+                                    },
+                                    onRoleConfirmed: { newRole in
+                                        let wasEnabled = syncSettings.isEnabled
+                                        if wasEnabled {
+                                            if syncSettings.role == .parent { syncSettings.stopParent() }
+                                            else                           { syncSettings.stopChild() }
+                                            syncSettings.isEnabled = false
+                                        }
+                                        syncSettings.role = newRole
+                                        if wasEnabled {
+                                            switch syncSettings.connectionMethod {
+                                            case .network, .bluetooth, .bonjour:
+                                                if newRole == .parent { syncSettings.startParent() }
+                                                else                  { syncSettings.startChild() }
+                                            }
+                                            syncSettings.isEnabled = true
+                                        }
+                                    }
+                                )
+                                .environmentObject(syncSettings)
+                                .allowsHitTesting(settings.allowSyncChangesInMainView)
+                            }
+                            .contentShape(Rectangle())
+                            .gesture(
+                                LongPressGesture(minimumDuration: 0.6).onEnded { _ in
+                                    previousMode = parentMode
+                                    parentMode   = .settings
+                                    settingsPage = 2
+                                },
+                                including: .subviews
+                            )
+                        } events: {
+                          
+                            EventsBar(
+                                events: $events,
+                                eventMode: $eventMode,
+                                isPaused: phase == .paused,
+                                unsavedChanges: hasUnsaved,
+                                onOpenCueSheets: { openCueSheets() },
+                                isCounting: isCounting,
+                                onAddStop: commitStopEntry,
+                                onAddCue:  commitCueEntry,
+                                onAddRestart: commitRestartEntry
+                            )
+                        }
+                        .padding(.horizontal, 16)
+                        .frame(maxWidth: .infinity)
+                    }
+                    .padding(.horizontal, 20)   // ← 20pt side padding (mode bar)
+                    .padding(.top, 20)   // +24pt on 12.9" portrait
+                }
+                // ── NUMPAD (below the mode bar) ───────────────────────────────
+                NumPadView(
+                    parentMode:   $parentMode,
+                    settingsPage: $settingsPage,
+                    isEntering:   $isEnteringField,
+                    onKey: { key in
+                        // ① If editing an IP/Port in Settings
+                        if parentMode == .settings && isEnteringField {
+                            switch key {
+                            case .digit(let n): inputText.append(String(n))
+                            case .dot:          inputText.append(".")
+                            case .backspace:    _ = inputText.popLast()
+                            case .enter:        confirm(inputText)
+                            default:            break
+                            }
+                            return
+                        }
+
+                        // ② Normal timer/events handling
+                        if parentMode != .settings {
+                            switch key {
+                            case .digit, .backspace:
+                                if parentMode == .sync {
+                                    handleCountdownKey(key)
+                                } else {
+                                    switch eventMode {
+                                    case .stop:    handleStopKey(key)
+                                    case .cue:     handleCueKey(key)
+                                    case .restart: handleRestartKey(key)
+                                    }
+                                }
+                            case .settings:
+                                previousMode = parentMode
+                                parentMode   = .settings
+                            default:
+                                break
+                            }
+                        } else {
+                            // ③ In Settings (not editing): page flips
+                            switch key {
+                            case .chevronLeft:
+                                settingsPage = (settingsPage + numberOfPages - 1) % numberOfPages
+                            case .chevronRight:
+                                settingsPage = (settingsPage + 1) % numberOfPages
+                            default:
+                                break
+                            }
+                        }
+                    },
+                    onSettings: {
+                        let anim: Animation = {
+                            if #available(iOS 17, *) {
+                                return parentMode == .settings
+                                ? .snappy(duration: 0.26, extraBounce: 0.25)
+                                : .snappy(duration: 0.24, extraBounce: 0.25)
+                            } else {
+                                return .easeInOut(duration: 0.26)
+                            }
+                        }()
+                        if parentMode == .settings {
+                            withAnimation(anim) { parentMode = previousMode }
+                        } else {
+                            withAnimation(anim) {
+                                previousMode = parentMode
+                                parentMode   = .settings
+                            }
+                        }
+                    },
+                    lockActive: padLocked
+                )
+                .padding(.horizontal, 20)               // keep the 20pt side padding
+                // Do NOT float into the card when in Settings mode
+                               .padding(.top, parentMode == .settings ? 0 : -20)
+                               .scaleEffect(numpadScale, anchor: .top) // uniformly shrink rows & keys
+                .clipped()                              // avoid any scaled overflow
+                .environment(\.containerSize, numpadPhoneProfile) // ⬅️ this line makes rows tighter on iPad
+                .zIndex(1)   // stays below the card
+                // Reserve space so content doesn't sit under the footer buttons.
+                                .padding(.bottom, footerButtonsH + footerPad)
+                
+                // Reserve space for the global footer; nothing local here anymore.
+                                Spacer(minLength: 0)
+                                    .frame(height: footerButtonsH + footerPad)
+            }
+            .frame(width: winW, height: winH, alignment: .top)
+            .environment(\.containerSize, geo.size)
+            // ⬆︎ Force a visible lift only on iPad mini portrait
+            .offset(y: (isPadDevice && isPadMiniFamily)
+                        ? -80 : 0)
+                      
+
+
+        }
+        .safeAreaInset(edge: .bottom) {
+            // Bottom buttons for iPad portrait (unified layout)
+            ZStack {
+                // SYNC footer
+                SyncBottomButtons(
+                    showResetButton:   parentMode == .sync,
+                    showPageIndicator: parentMode == .settings,
+                    currentPage:       settingsPage + 1,
+                    totalPages:        numberOfPages,
+                    isCounting:        isCounting,
+                    startStop:         toggleStart,
+                    reset:             resetAll
+                )
+                .disabled(lockActive || uiLockedByParent || parentMode != .sync)
+                .opacity(
+                    parentMode == .sync
+                    ? (uiLockedByParent ? 0.35 : 1.0)
+                    : (parentMode == .settings ? 0.3 : 0.0)
+                )
+                .allowsHitTesting(parentMode == .sync)
+
+                // EVENTS footer
+                EventBottomButtons(
+                    canAdd: {
+                        switch eventMode {
+                        case .stop:    return !stopDigits.isEmpty
+                        case .cue:     return !cueDigits.isEmpty
+                        case .restart: return !restartDigits.isEmpty
+                        }
+                    }(),
+                    eventMode: eventMode,
+                    add: {
+                        switch eventMode {
+                        case .stop:    commitStopEntry()
+                        case .cue:     commitCueEntry()
+                        case .restart: commitRestartEntry()
+                        }
+                    },
+                    reset: clearAllEvents
+                )
+                .disabled(lockActive || uiLockedByParent)
+                .opacity(parentMode == .stop ? (uiLockedByParent ? 0.35 : 1.0) : 0)
+                .allowsHitTesting(parentMode == .stop)
+            }
+            .frame(height: 44)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
+            .offset(y:
+                isLargePad129Family ? 1200 :
+                (isPad109Family || isPad11Family) ? 1080 :
+                (isPadMiniFamily ? 920 : 1200)
+            )
+        }
+
+    }
+
+
+
+
+    //──────────────────── Helper: TimeInterval → [Int] for HHMMSScc ─────
+    private func timeToDigits(_ time: TimeInterval) -> [Int] {
+        let totalCs = Int((time * 100).rounded())
+        let cs = totalCs % 100
+        let s = (totalCs / 100) % 60
+        let m = (totalCs / 6000) % 60
+        let h = totalCs / 360000
+        var arr = [
+            h / 10, h % 10,
+            m / 10, m % 10,
+            s / 10, s % 10,
+            cs / 10, cs % 10
+        ]
+        while arr.first == 0 && arr.count > 1 {
+            arr.removeFirst()
+        }
+        return arr
+    }
+    
+    //──────────────────── formatted overlay ─────────────────────────────────
+    private func makeFlashedOverlay() -> AttributedString {
+        let raw = displayMainTime()
+            .formattedAdaptiveCS(alwaysShowHours: settings.showHours)  // was: .csString
+        var a = AttributedString(raw)
+        for i in a.characters.indices {
+            let ch = a.characters[i]
+            let delim = (ch == ":" || ch == ".")
+            let doFlash: Bool
+            switch settings.flashStyle {
+            case .delimiters:
+                doFlash = delim && flashZero
+            case .numbers:
+                doFlash = !delim && flashZero
+            default:
+                doFlash = false
+            }
+            a[i...i].foregroundColor = doFlash ? settings.flashColor : .primary
+        }
+        return a
+    }
+
+    
+    //──────────────────── main-time chooser ─────────────────────────────────
+    private func displayMainTime() -> TimeInterval {
+        switch phase {
+        case .idle:
+            if !countdownDigits.isEmpty {
+                return digitsToTime(countdownDigits)
+            }
+            return countdownRemaining
+        case .countdown:
+            return countdownRemaining
+        case .running:
+            return elapsed
+        case .paused:
+            if countdownRemaining > 0 {
+                return countdownRemaining
+            }
+            return elapsed
+        }
+    }
+    
+
+    
 
     //──────────────────── timer engine ────────────────────────────────────
     private let dt: TimeInterval = 1.0 / 120.0
@@ -2947,6 +6138,7 @@ struct MainScreen: View {
                     break
                 }
             }
+        lastTickUptime = ProcessInfo.processInfo.systemUptime
     }
     
     private func tickCountdown() {
@@ -2965,18 +6157,18 @@ struct MainScreen: View {
             }
         }
         // Only broadcast when we’re actually showing the SYNC view
-            guard parentMode == .sync, syncSettings.role == .parent else { return }
+        guard syncSettings.role == .parent && syncSettings.isEnabled else { return }
         
             let msgPhase = (phase == .countdown) ? "countdown" : "running"
-            let msg = TimerMessage(
+            var msg = TimerMessage(
               action: .start,
               timestamp: Date().timeIntervalSince1970,
               phase: msgPhase,
               remaining: displayMainTime(),
-              stopEvents: rawStops.map {
-                StopEventWire(eventTime: $0.eventTime, duration: $0.duration)
-            }
+              stopEvents: rawStops.map { StopEventWire(eventTime: $0.eventTime, duration: $0.duration) },
+              parentLockEnabled: syncSettings.parentLockEnabled
         )
+        msg.notesParent = parentNotePayload
         print("[iOS] about to send TimerMessage")
         ConnectivityManager.shared.send(msg)
         if syncSettings.role == .parent && syncSettings.isEnabled {
@@ -2985,12 +6177,15 @@ struct MainScreen: View {
     }
     
     private func tickRunning() {
-        // 1) If we’re in a “stop” period, count that down first
+        // 0) frame-accurate dt
+        let nowUp = ProcessInfo.processInfo.systemUptime
+        let dt = max(0, nowUp - (lastTickUptime ?? nowUp))
+        lastTickUptime = nowUp
+
+        // 1) If we’re in a “stop”, count that down first
         if stopActive {
-            let dt = 1.0 / 120.0
             stopRemaining = max(0, stopRemaining - dt)
             if stopRemaining <= 0 {
-                // the stop just finished → resume at exactly the pausedElapsed
                 stopActive = false
                 elapsed = pausedElapsed
                 startDate = Date().addingTimeInterval(-pausedElapsed)
@@ -2998,42 +6193,34 @@ struct MainScreen: View {
             return
         }
 
-        // 2) Expire any events that were scheduled before our pausedElapsed
-        while let first = events.first, first.fireTime <= pausedElapsed {
-            events.removeFirst()
-        }
-
-        // 3) Advance the main clock
+        // 2) Advance the main clock (do this BEFORE event checks)
         elapsed = Date().timeIntervalSince(startDate ?? Date())
+        
+        // 4) Handle next due event
+            if let next = events.first, elapsed >= next.fireTime {
+                switch next {
+                case .stop(let s):
+                    pausedElapsed = elapsed
+                    stopActive = true
+                    stopRemaining = s.duration
+                    events.removeFirst()
 
-        // 4) If the next event is due, handle it
-        if let nextEvent = events.first, elapsed >= nextEvent.fireTime {
-            switch nextEvent {
-            case .stop(let s):
-                // record where we are, then enter a new stop
-                pausedElapsed = elapsed
-                stopActive = true
-                stopRemaining = s.duration
-                events.removeFirst()
-
-                // broadcast updated stop-events list
-                let remainingStopWires = events.compactMap { event -> StopEventWire? in
-                    if case .stop(let st) = event {
-                        return StopEventWire(eventTime: st.eventTime, duration: st.duration)
-                    } else {
-                        return nil
+                    // (optional but nice for the child) tell kids a stop started *now*
+                    var stopMsg = TimerMessage(
+                        action: .update,
+                        timestamp: Date().timeIntervalSince1970,
+                        phase: "stop",
+                        remaining: pausedElapsed,                 // parent’s elapsed at the moment stop began
+                        stopEvents: syncSettings.stopWires,
+                        anchorElapsed: pausedElapsed,
+                        parentLockEnabled: syncSettings.parentLockEnabled,
+                        isStopActive: true,
+                        stopRemainingActive: s.duration
+                    )
+                    stopMsg.notesParent = parentNotePayload
+                    if syncSettings.role == .parent && syncSettings.isEnabled {
+                        syncSettings.broadcastToChildren(stopMsg)
                     }
-                }
-                let stopMsg = TimerMessage(
-                    action: .update,
-                    timestamp: Date().timeIntervalSince1970,
-                    phase: "running",
-                    remaining: elapsed,
-                    stopEvents: remainingStopWires
-                )
-                if syncSettings.role == .parent && syncSettings.isEnabled {
-                    syncSettings.broadcastToChildren(stopMsg)
-                }
 
             case .cue(let c):
                 flashZero = true
@@ -3043,20 +6230,20 @@ struct MainScreen: View {
                 }
                 events.removeFirst()
 
-                let remainingStopWires = events.compactMap { event -> StopEventWire? in
-                    if case .stop(let st) = event {
-                        return StopEventWire(eventTime: st.eventTime, duration: st.duration)
-                    } else {
-                        return nil
-                    }
-                }
-                let cueMsg = TimerMessage(
-                    action: .update,
-                    timestamp: Date().timeIntervalSince1970,
-                    phase: "running",
-                    remaining: elapsed,
-                    stopEvents: remainingStopWires
-                )
+                    let snap = encodeCurrentEvents()
+                                    var cueMsg = TimerMessage(
+                                        action: .update,
+                                        timestamp: Date().timeIntervalSince1970,
+                                        phase: "running",
+                                        remaining: elapsed,
+                                        stopEvents: snap.stops,
+                                        parentLockEnabled: syncSettings.parentLockEnabled,
+                                        cueEvents: snap.cues,
+                                        restartEvents: snap.restarts,
+                                        sheetLabel: cueBadge.label,
+                                        flashNow: true
+                                    )
+                    cueMsg.notesParent = parentNotePayload
                 if syncSettings.role == .parent && syncSettings.isEnabled {
                     syncSettings.broadcastToChildren(cueMsg)
                 }
@@ -3097,19 +6284,27 @@ struct MainScreen: View {
                     return nil
                 }
             }
-            let updateMsg = TimerMessage(
+            var updateMsg = TimerMessage(
                 action: .update,
                 timestamp: Date().timeIntervalSince1970,
                 phase: "running",
                 remaining: elapsed,
-                stopEvents: remainingStopWires
+                stopEvents: remainingStopWires,
+                parentLockEnabled: syncSettings.parentLockEnabled
             )
+            updateMsg.notesParent = parentNotePayload
             if syncSettings.role == .parent && syncSettings.isEnabled {
                 syncSettings.broadcastToChildren(updateMsg)
             }
         }
     }
-
+    // Dismiss keyboard on drag/tap
+        private func endEditing() {
+            #if canImport(UIKit)
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                            to: nil, from: nil, for: nil)
+            #endif
+        }
 
     
     //──────────────────── num-pad helpers ─────────────────────────────────
@@ -3264,7 +6459,8 @@ struct MainScreen: View {
                     timestamp: Date().timeIntervalSince1970,
                     phase: (phase == .running ? "running" : "idle"),
                     remaining: pausedElapsed,
-                    stopEvents: stopWires
+                    stopEvents: stopWires,
+                    parentLockEnabled: syncSettings.parentLockEnabled
                 )
                 syncSettings.broadcastToChildren(m)
             }
@@ -3291,21 +6487,21 @@ struct MainScreen: View {
 
         // 3) Broadcast .addEvent if parent
         if syncSettings.role == .parent && syncSettings.isEnabled {
-            let stopWires = events.compactMap { event -> StopEventWire? in
-                if case .stop(let s) = event {
-                    return StopEventWire(eventTime: s.eventTime, duration: s.duration)
+                    let snap = encodeCurrentEvents()
+                    var m = TimerMessage(
+                        action:     .addEvent,
+                        timestamp:  Date().timeIntervalSince1970,
+                        phase:      (phase == .running ? "running" : "idle"),
+                        remaining:  pausedElapsed,
+                        stopEvents: snap.stops,
+                        parentLockEnabled: syncSettings.parentLockEnabled,
+                        cueEvents: snap.cues,
+                        restartEvents: snap.restarts,
+                        sheetLabel: cueBadge.label
+                    )
+            m.notesParent = parentNotePayload
+                    syncSettings.broadcastToChildren(m)
                 }
-                return nil
-            }
-            let m = TimerMessage(
-                action:     .addEvent,
-                timestamp:  Date().timeIntervalSince1970,
-                phase:      (phase == .running ? "running" : "idle"),
-                remaining:  pausedElapsed,
-                stopEvents: stopWires
-            )
-            syncSettings.broadcastToChildren(m)
-        }
 
         // 4) Reseed the cue-buffer so the card shows pausedElapsed
         cueDigits = timeToDigits(pausedElapsed)
@@ -3331,21 +6527,21 @@ struct MainScreen: View {
 
         // 3) Broadcast .addEvent if parent
         if syncSettings.role == .parent && syncSettings.isEnabled {
-            let stopWires = events.compactMap { event -> StopEventWire? in
-                if case .stop(let s) = event {
-                    return StopEventWire(eventTime: s.eventTime, duration: s.duration)
+                    let snap = encodeCurrentEvents()
+                    var m = TimerMessage(
+                        action:     .addEvent,
+                        timestamp:  Date().timeIntervalSince1970,
+                        phase:      (phase == .running ? "running" : "idle"),
+                        remaining:  pausedElapsed,
+                        stopEvents: snap.stops,
+                        parentLockEnabled: syncSettings.parentLockEnabled,
+                        cueEvents: snap.cues,
+                        restartEvents: snap.restarts,
+                        sheetLabel: cueBadge.label
+                    )
+            m.notesParent = parentNotePayload
+                    syncSettings.broadcastToChildren(m)
                 }
-                return nil
-            }
-            let m = TimerMessage(
-                action:     .addEvent,
-                timestamp:  Date().timeIntervalSince1970,
-                phase:      (phase == .running ? "running" : "idle"),
-                remaining:  pausedElapsed,
-                stopEvents: stopWires
-            )
-            syncSettings.broadcastToChildren(m)
-        }
 
         // 4) Reseed the restart-buffer so the card shows pausedElapsed
         restartDigits = timeToDigits(pausedElapsed)
@@ -3372,7 +6568,7 @@ struct MainScreen: View {
                 startDate = Date().addingTimeInterval(-elapsed)
                 startLoop()
                 if syncSettings.role == .parent && syncSettings.isEnabled {
-                    let m = TimerMessage(
+                    var m = TimerMessage(
                         action: .start,
                         timestamp: Date().timeIntervalSince1970,
                         phase: "running",
@@ -3382,6 +6578,7 @@ struct MainScreen: View {
                                           duration: $0.duration)
                         }
                     )
+                    m.notesParent = parentNotePayload
                     syncSettings.broadcastToChildren(m)
                 }
                 justEditedAfterPause = false
@@ -3404,7 +6601,7 @@ struct MainScreen: View {
             if countdownDuration > 0 {
                 phase = .countdown
                 if syncSettings.role == .parent && syncSettings.isEnabled {
-                    let m = TimerMessage(
+                    var m = TimerMessage(
                         action: .start,
                         timestamp: Date().timeIntervalSince1970,
                         phase: "countdown",
@@ -3414,13 +6611,14 @@ struct MainScreen: View {
                                           duration: $0.duration)
                         }
                     )
+                    m.notesParent = parentNotePayload
                     syncSettings.broadcastToChildren(m)
                 }
                 startLoop()
             } else {
                 phase = .running
                 if syncSettings.role == .parent && syncSettings.isEnabled {
-                    let m = TimerMessage(
+                    var m = TimerMessage(
                         action: .start,
                         timestamp: Date().timeIntervalSince1970,
                         phase: "running",
@@ -3430,6 +6628,7 @@ struct MainScreen: View {
                                           duration: $0.duration)
                         }
                     )
+                    m.notesParent = parentNotePayload
                     syncSettings.broadcastToChildren(m)
                 }
                 startDate = Date()
@@ -3438,54 +6637,55 @@ struct MainScreen: View {
             
         case .countdown:
             // stop our local countdown ticker
-                    ticker?.cancel()
-
-                    // broadcast a “pause” to the children so they also stop
-                    if syncSettings.role == .parent && syncSettings.isEnabled {
-                        let pauseMsg = TimerMessage(
-                            action: .pause,
-                            timestamp: Date().timeIntervalSince1970,
-                            phase: "paused",
-                            remaining: countdownRemaining,
-                            stopEvents: rawStops.map {
-                              StopEventWire(eventTime: $0.eventTime, duration: $0.duration)
-                            }
-                        )
-                        syncSettings.broadcastToChildren(pauseMsg)
-                    }
-
-                    // now do your normal pause/reset logic
+            ticker?.cancel()
+            
+            // broadcast a “pause” to the children so they also stop
+            if syncSettings.role == .parent && syncSettings.isEnabled {
+                var pauseMsg = TimerMessage(
+                    action: .pause,
+                    timestamp: Date().timeIntervalSince1970,
+                    phase: "paused",
+                    remaining: countdownRemaining,
+                    stopEvents: rawStops.map { StopEventWire(eventTime: $0.eventTime, duration: $0.duration) },
+                    parentLockEnabled: syncSettings.parentLockEnabled
+                )
+                pauseMsg.notesParent = parentNotePayload
+                syncSettings.broadcastToChildren(pauseMsg)
+            }
+            
+            // now do your normal pause/reset logic
             if settings.countdownResetMode == .manual {
-                  // true “pause” style
-                  phase = .paused
-                  // broadcast the pause so kids stop where they are
-                  sendPause(to: countdownRemaining)
-                } else {
-                  // failsafe off: reset to full duration
-                  let baseDigits = timeToDigits(countdownDuration)
-                  countdownDigits    = baseDigits
-                  countdownRemaining = digitsToTime(baseDigits)
-                  phase              = .idle
-                  // tell all children “you’re paused at the full-length value”
-                  sendPause(to: countdownRemaining)
-                }
+                // true “pause” style
+                phase = .paused
+                // broadcast the pause so kids stop where they are
+                sendPause(to: countdownRemaining)
+            } else {
+                // failsafe off: reset to full duration
+                let baseDigits = timeToDigits(countdownDuration)
+                countdownDigits    = baseDigits
+                countdownRemaining = digitsToTime(baseDigits)
+                phase              = .idle
+                // tell all children “you’re paused at the full-length value”
+                sendPause(to: countdownRemaining)
+            }
             
         case .running:
             ticker?.cancel()
-                    phase = .paused
-                    // you already broadcast here:
-                    if syncSettings.role == .parent && syncSettings.isEnabled {
-                        let m = TimerMessage(
-                            action: .pause,
-                            timestamp: Date().timeIntervalSince1970,
-                            phase: "paused",
-                            remaining: elapsed,
-                            stopEvents: rawStops.map {
-                              StopEventWire(eventTime: $0.eventTime, duration: $0.duration)
-                            }
-                        )
-                        syncSettings.broadcastToChildren(m)
+            phase = .paused
+            pausedElapsed = elapsed
+            // you already broadcast here:
+            if syncSettings.role == .parent && syncSettings.isEnabled {
+                let m = TimerMessage(
+                    action: .pause,
+                    timestamp: Date().timeIntervalSince1970,
+                    phase: "paused",
+                    remaining: elapsed,
+                    stopEvents: rawStops.map {
+                        StopEventWire(eventTime: $0.eventTime, duration: $0.duration)
                     }
+                )
+                syncSettings.broadcastToChildren(m)
+            }
             
         case .paused:
             if countdownRemaining > 0 {
@@ -3523,22 +6723,23 @@ struct MainScreen: View {
                 }
                 
             }
-            
+        
         }
         
     }
     // helper to fold your broadcast code
     private func sendPause(to remaining: TimeInterval) {
       guard syncSettings.role == .parent && syncSettings.isEnabled else { return }
-      let msg = TimerMessage(
+      var msg = TimerMessage(
         action: .pause,
         timestamp: Date().timeIntervalSince1970,
         phase: "paused",
         remaining: remaining,
         stopEvents: rawStops.map {
-          StopEventWire(eventTime: $0.eventTime, duration: $0.duration)
+            StopEventWire(eventTime: $0.eventTime, duration: $0.duration)
         }
       )
+        msg.notesParent = parentNotePayload
       syncSettings.broadcastToChildren(msg)
     }
     // MARK: – Reset everything (called by your “Reset” button)
@@ -3549,15 +6750,25 @@ struct MainScreen: View {
         
         // Broadcast reset to children if we’re the parent
         if syncSettings.role == .parent && syncSettings.isEnabled {
-            let m = TimerMessage(
+            let snap = encodeCurrentEvents() // (stops, cues, restarts)
+            var m = TimerMessage(
                 action: .reset,
                 timestamp: Date().timeIntervalSince1970,
                 phase: "idle",
                 remaining: 0,
-                stopEvents: []
+                stopEvents: snap.stops,
+                anchorElapsed: nil,
+                parentLockEnabled: syncSettings.parentLockEnabled,
+                isStopActive: false,
+                stopRemainingActive: nil,
+                cueEvents: snap.cues,
+                restartEvents: snap.restarts,
+                sheetLabel: cueBadge.label
             )
+            m.notesParent = parentNotePayload
             syncSettings.broadcastToChildren(m)
         }
+
         
         // Clear all local state
         countdownDigits.removeAll()
@@ -3565,9 +6776,9 @@ struct MainScreen: View {
         countdownRemaining = 0
         elapsed = 0
         startDate = nil
-        
-        rawStops.removeAll()
-        events.removeAll()
+        pausedElapsed = 0          // ← add this
+            lastTickUptime = nil       // ← and this, for a clean first dt
+        // DO NOT clear events; just exit any active stop
         stopActive = false
         stopRemaining = 0
         stopDigits.removeAll()
@@ -3581,59 +6792,123 @@ struct MainScreen: View {
     func applyIncomingTimerMessage(_ msg: TimerMessage) {
         guard syncSettings.role == .child else { return }
         
-        // Rebuild stop‐events
-        rawStops = msg.stopEvents.map {
-            StopEvent(eventTime: $0.eventTime, duration: $0.duration)
-        }
-        events = rawStops.map(Event.stop)
-        syncSettings.stopWires = msg.stopEvents
+        // Centisecond quantizer to keep visuals identical across devices
+                @inline(__always) func qcs(_ t: TimeInterval) -> TimeInterval {
+                    return Double(Int((t * 100).rounded())) / 100.0
+                }
+                // One-way latency from parent timestamp → “now”
+                let now = Date().timeIntervalSince1970
+                let delta = max(0, now - msg.timestamp) // never negative
         
-        switch msg.action {
+        // Rebuild *all* events from wires
+                rawStops = msg.stopEvents.map { StopEvent(eventTime: $0.eventTime, duration: $0.duration) }
+                let cueList: [Event] = (msg.cueEvents ?? []).map { .cue(CueEvent(cueTime: $0.cueTime)) }
+                let rstList: [Event] = (msg.restartEvents ?? []).map { .restart(RestartEvent(restartTime: $0.restartTime)) }
+                var combined: [Event] = rawStops.map(Event.stop) + cueList + rstList
+                combined.sort { $0.fireTime < $1.fireTime }
+                events = combined
+                syncSettings.stopWires = msg.stopEvents
+        
+        // Mirror parent's note here as well
+                notesParent = msg.notesParent ?? ""
+        
+                // Show the sheet badge on children when provided
+                if let lbl = msg.sheetLabel, !lbl.isEmpty {
+                    cueBadge.set(lbl, broadcast: true)
+                }
+        // Mirror parent's note (empty if none)
+                notesParent = msg.notesParent ?? ""
+        // If a sheet/badge label comes in, surface it immediately on the child
+                if let lbl = msg.sheetLabel, !lbl.isEmpty {
+                    cueBadge.set(lbl, broadcast: true)
+                }
+                switch msg.action {
         case .start:
             if msg.phase == "countdown" {
-                countdownRemaining = msg.remaining
+                countdownRemaining = max(0, qcs(msg.remaining - delta))
                 phase = .countdown
                 startLoop()
             } else {
-                elapsed = msg.remaining
+                // Parent was already running at msg.timestamp; advance by delta
+                                let adj = qcs(msg.remaining + delta)
+                                elapsed = adj
                 phase = .running
-                startDate = Date().addingTimeInterval(-elapsed)
+                startDate = Date().addingTimeInterval(-adj)
                 startLoop()
             }
             
         case .pause:
             ticker?.cancel()
             phase = .paused
-            countdownRemaining = msg.remaining
-            elapsed = msg.remaining
+            // Pause uses the exact parent-displayed time (no delta)
+                        countdownRemaining = qcs(msg.remaining)
+                        elapsed = qcs(msg.remaining)
             
         case .reset:
-            ticker?.cancel()
-            phase = .idle
-            countdownDigits.removeAll()
-            countdownDuration = 0
-            countdownRemaining = 0
-            elapsed = 0
-            rawStops.removeAll()
-            events.removeAll()
-            stopActive = false
-            stopRemaining = 0
+                    ticker?.cancel()
+                                phase = "idle" == "idle" ? .idle : .idle  // keep explicit for readability
+                                countdownDigits.removeAll()
+                                countdownDuration = 0
+                                countdownRemaining = 0
+                                elapsed = 0
+                                stopActive = false
+                                stopRemaining = 0
+                                // REBUILD events from the snapshot (do NOT clear)
+                                let stops = msg.stopEvents.map { Event.stop(StopEvent(eventTime: $0.eventTime, duration: $0.duration)) }
+                                let cues  = (msg.cueEvents ?? []).map { Event.cue(CueEvent(cueTime: $0.cueTime)) }
+                                let rsts  = (msg.restartEvents ?? []).map { Event.restart(RestartEvent(restartTime: $0.restartTime)) }
+                                events = (stops + cues + rsts).sorted { $0.fireTime < $1.fireTime }
+                                rawStops = stops.compactMap {
+                                    if case let .stop(s) = $0 { return s } else { return nil }
+                                }
             
         case .update:
             if msg.phase == "countdown" {
-                countdownRemaining = msg.remaining
+                countdownRemaining = max(0, qcs(msg.remaining - delta))
                 phase = .countdown
             } else {
-                elapsed = msg.remaining
+                elapsed = qcs(msg.remaining + delta)
                 phase = .running
             }
-            
+                    // If parent sent an immediate flash edge (cue), mirror it
+                                if msg.flashNow == true {
+                                    flashZero = true
+                                    let flashSec = Double(settings.flashDurationOption) / 1000.0
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + flashSec) { flashZero = false }
+                                }
+                    // ✅ Rebuild events if *either* cues or restarts are provided (not both required)
+                        if (msg.cueEvents != nil) || (msg.restartEvents != nil) {
+                            let stops = msg.stopEvents.map { Event.stop(StopEvent(eventTime: $0.eventTime, duration: $0.duration)) }
+                            let cueEv = (msg.cueEvents ?? []).map { Event.cue(CueEvent(cueTime: $0.cueTime)) }
+                            let rstEv = (msg.restartEvents ?? []).map { Event.restart(RestartEvent(restartTime: $0.restartTime)) }
+                            events = (stops + cueEv + rstEv).sorted { $0.fireTime < $1.fireTime }
+                            rawStops = stops.compactMap { if case let .stop(s) = $0 { s } else { nil } }
+                        }
+            // If the parent entered a stop, mirror it locally.
+                        if msg.isStopActive == true, let parentStopLeft = msg.stopRemainingActive {
+                            // Freeze main clock at parent’s pausedElapsed (as of message time)
+                            pausedElapsed = qcs(msg.remaining)   // the elapsed at the moment stop began
+                            stopActive = true
+                            // While the packet was in flight, the parent’s stop timer ticked by `delta`
+                            stopRemaining = max(0, qcs(parentStopLeft - delta))
+                            // Ensure the run loop is active so our child ticks the stop timer down
+                            startLoop()
+                        }
         case .addEvent:
-            // Optionally handle newly‐added events here
-            break
-        }
+                    // Replace the event set with the snapshot the parent sent
+                                let stops = msg.stopEvents.map { Event.stop(StopEvent(eventTime: $0.eventTime, duration: $0.duration)) }
+                                let cues  = (msg.cueEvents ?? []).map { Event.cue(CueEvent(cueTime: $0.cueTime)) }
+                                let rsts  = (msg.restartEvents ?? []).map { Event.restart(RestartEvent(restartTime: $0.restartTime)) }
+                                events = (stops + cues + rsts).sorted { $0.fireTime < $1.fireTime }
+                    rawStops = stops.compactMap {
+                        if case let .stop(s) = $0 { return s } else { return nil }
+                    }
+                }
     }
+    
+
 }
+
 extension Color {
     /// A human‐readable name for a handful of known colors.
     var accessibilityName: String {
@@ -3757,7 +7032,12 @@ struct AppearancePage: View {
           var label: String { rawValue }
         }
         @State private var selectedTab: Tab = .theme
-    
+    // 12.9"/13" iPad hardware (native height ≥ 2732 px)
+        private var isLargePad129Family: Bool {
+            guard UIDevice.current.userInterfaceIdiom == .pad else { return false }
+            let maxNative = max(UIScreen.main.nativeBounds.width, UIScreen.main.nativeBounds.height)
+            return maxNative >= 2732
+        }
     var body: some View {
         VStack(spacing: 16) {
                   // 1) Pill picker between Theme / UI
@@ -3789,20 +7069,52 @@ struct AppearancePage: View {
                                 }
                             } else {
                                 VStack(alignment: .leading, spacing: 12) {
+                                    // ── Hours display mode ─────────────────
+                                    Toggle("Always show hours (HH:MM:SS.CC)", isOn: $appSettings.showHours)
+                                      .toggleStyle(SwitchToggleStyle(tint: appSettings.flashColor))
+                                    Text("When off: show MM:SS.CC until the timer reaches 1 hour; then auto-switch to HH:MM:SS.CC while ≥ 1h.")
+                                      .font(.footnote)
+                                      .foregroundColor(.secondary)
+
                                     // ── Low-Power Mode ─────────────────
-                                    Toggle("Low-Power Mode (buggy)", isOn: $appSettings.lowPowerMode)
-                                        .toggleStyle(SwitchToggleStyle(tint: appSettings.flashColor))
-                                    Text("Strips out all images, materials, shadows, and custom colors to minimize display power; layout is buggy, no performance issues.")
-                                        .font(.footnote)
-                                        .foregroundColor(.secondary)
+                            //        Toggle("Low-Power Mode (buggy)", isOn: $appSettings.lowPowerMode)
+                              //          .toggleStyle(SwitchToggleStyle(tint: appSettings.flashColor))
+                                //    Text("Strips out all images, materials, shadows, and custom colors to minimize display power; layout is buggy, no performance issues.")
+                                  //      .font(.footnote)
+                                    //    .foregroundColor(.secondary)
+                                    
+                                   // ── Allow sync changes ─────────────────
 
-
+                                    Toggle(isOn: $appSettings.allowSyncChangesInMainView) {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Allow sync changes in main view")
+                                                .font(.custom("Roboto-SemiBold", size: 16))
+                                            Text("If on, tapping the Sync Bar in the main view changes your settings. If off, long-press to launch Settings.")
+                                                .font(.custom("Roboto-Regular", size: 12))
+                                                .foregroundColor(.secondary)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        }
+                                    }
+                                    
                                     // ── High-Contrast Sync Indicator ────
                                     Toggle("High-Contrast Sync Indicator", isOn: $appSettings.highContrastSyncIndicator)
                                         .toggleStyle(SwitchToggleStyle(tint: appSettings.flashColor))
-                                    Text("Replaces every sync-lamp circle with a bold ✓ or ✕ icon for maximum contrast.")
+                                    Text("Replaces every sync-lamp with high-contrast alts")
                                         .font(.footnote)
                                         .foregroundColor(.secondary)
+                                    
+                                    // ── Left Pane Pagination (12.9"/13" only) ─────────────
+                                    if isLargePad129Family {
+                                        Divider().padding(.vertical, 2)
+
+                                        Toggle("Paginate Devices / Notes", isOn: $appSettings.leftPanePaginateOnLargePads)
+                                            .toggleStyle(SwitchToggleStyle(tint: appSettings.flashColor))
+
+                                        Text("Shows Devices and Notes as pages with arrow navigation. Launch logo and Presets remain always visible.")
+                                            .font(.footnote)
+                                            .foregroundColor(.secondary)
+                                    }
+
                                 }
                             }
                         }
@@ -4078,6 +7390,7 @@ struct TimerBehaviorPage: View {
 struct SegmentedControlPicker<Option: SegmentedOption>: View {
     @Binding var selection: Option
     var shadowOpacity: Double = 0.08
+    var allowed: [Option]? = nil
     @Namespace private var slide
     @EnvironmentObject private var appSettings: AppSettings
 
@@ -4091,8 +7404,8 @@ struct SegmentedControlPicker<Option: SegmentedOption>: View {
     }
 
     private var segments: some View {
-        // wrap in Array() to satisfy RandomAccessCollection
-        ForEach(Array(Option.allCases), id: \.id) { option in
+        let options: [Option] = allowed ?? Array(Option.allCases)   // filter if provided
+        return ForEach(options, id: \.id) { option in
             Button {
                 withAnimation(.easeOut(duration: 0.4)) {
                     selection = option
@@ -4124,7 +7437,31 @@ struct SegmentedControlPicker<Option: SegmentedOption>: View {
     }
 }
 
-
+#if canImport(SwiftUI)
+@available(iOS 17.0, *)
+private struct LampPulse: ViewModifier {
+  let trigger: Bool
+  func body(content: Content) -> some View {
+    content
+      .keyframeAnimator(initialValue: CGFloat(1.0), trigger: trigger) { view, _ in
+        view
+      } keyframes: { _ in
+        KeyframeTrack(\.self) {
+          CubicKeyframe(1.0, duration: 0.0)
+          CubicKeyframe(1.12, duration: 0.12)
+          CubicKeyframe(1.0, duration: 0.18)
+        }
+      }
+  }
+}
+extension View {
+  @ViewBuilder
+  func ifAvailableiOS17Pulse(isConnected: Bool) -> some View {
+    if #available(iOS 17.0, *) { self.modifier(LampPulse(trigger: isConnected)) }
+    else { self }
+  }
+}
+#endif
 struct ConnectionPage: View {
     @EnvironmentObject private var syncSettings: SyncSettings
     @EnvironmentObject private var settings: AppSettings
@@ -4132,8 +7469,6 @@ struct ConnectionPage: View {
     @Binding var inputText: String
     @Binding var isEnteringField: Bool
     @Binding var showBadPortError: Bool
-    
-    @State private var portGenerated = false
     @State private var showDeviceIP = false
     @State private var placeholderTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
     @State private var ipBlink = false
@@ -4145,7 +7480,12 @@ struct ConnectionPage: View {
     @State private var showNoWifiAlert = false
     private let wifiMonitor = NWPathMonitor(requiredInterfaceType: .wifi)
     
-    
+    // Treat default/sentinel ports as "unset" for display-only
+        private func isUnsetPort(_ s: String) -> Bool {
+            guard let p = UInt16(s) else { return true }      // non-numeric = unset
+            if p == 0 || p == 50000 { return true }           // common defaults
+            return !(49153...65534).contains(p)               // outside ephemeral range → treat as unset
+        }
     private func generateEphemeralPort() -> UInt16 {
         UInt16.random(in: 49153...65534)
     }
@@ -4160,311 +7500,367 @@ struct ConnectionPage: View {
         UIScreen.main.bounds.height >= 930
     }
     
+    
+    
+    // MARK: – Derived Bluetooth status (small, compiler-friendly)
+        private var btStatusText: String {
+            // OFF wins; then Connected; else amber states
+                    if !syncSettings.isEnabled { return "Off" }
+                    if syncSettings.isEstablished { return "Connected" }
+                    return (syncSettings.role == .parent) ? "Advertising…" : "Searching…"
+        }
+    // MARK: – Derived LAN status (same logic/wording style as BLE)
+        private var lanStatusText: String {
+            if !syncSettings.isEnabled { return "Off" }
+            if syncSettings.isEstablished { return "Connected" }
+            // amber while SYNC is ON but link not established yet
+            return (syncSettings.role == .parent) ? "Listening…" : "Connecting…"
+        }
+    
+    @ViewBuilder
+        private func bluetoothStatusPanel(statusText: String,
+                                          isEstablished: Bool,
+                                          roleIsParent: Bool,
+                                          isEnabled: Bool,
+                                          signalBars: Int? = nil) -> some View {
+            VStack(alignment: .leading, spacing: 10) {
+                // Top line
+                HStack(spacing: 8) {
+                                    if !isEnabled {
+                                        Circle().fill(Color.gray).frame(width: 10, height: 10)
+                                    } else {
+                                        let state: SyncStatusLamp.LampState = isEstablished ? .connected : .streaming
+                                        SyncStatusLamp(state: state,
+                                                       size: 12,
+                                                       highContrast: settings.highContrastSyncIndicator)
+                                    }
+                    Text(statusText)
+                        .font(.custom("Roboto-Medium", size: 16))
+                    Spacer()
+                    Text("Nearby")
+                        .font(.custom("Roboto-Regular", size: 13))
+                        .foregroundColor(.secondary)
+                }
+                // Facts row (role + optional bars)
+                HStack(spacing: 12) {
+                    Label(roleIsParent ? "Parent" : "Child",
+                          systemImage: roleIsParent ? "arrow.up.circle" : "arrow.down.circle")
+                        .font(.custom("Roboto-Regular", size: 13))
+                        .foregroundColor(.secondary)
+                    if let bars = signalBars {
+                        Divider().frame(height: 12).opacity(0.3)
+                        HStack(spacing: 4) {
+                            ForEach(0..<3, id: \.self) { i in
+                                Rectangle()
+                                    .frame(width: 4, height: CGFloat(6 + i*3))
+                                    .opacity(i < bars ? 1 : 0.25)
+                            }
+                        }
+                        .accessibilityLabel("Signal bars \(bars) of 3")
+                    }
+                    Spacer()
+                }
+                // Micro-tip
+                Text(!isEnabled
+                                ? "SYNC is OFF. Tap SYNC to start."
+                                 : (isEstablished
+                                    ? "Connected. Connection status updates within a few seconds (bluetooth limitation)."
+                                    : (roleIsParent
+                                       ? "SYNC is ON. Advertising for nearby children."
+                                       : "SYNC is ON. Searching for a parent nearby.")))
+                .font(.custom("Roboto-Light", size: 12))
+                .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
+        }
+    
+    // MARK: – LAN status panel (same card style as Bluetooth, compact height)
+        @ViewBuilder
+        private func lanStatusPanel(statusText: String,
+                                    isEstablished: Bool,
+                                    roleIsParent: Bool,
+                                    isEnabled: Bool,
+                                    isWifiAvailable: Bool,
+                                    showDeviceIP: Bool,
+                                    onToggleIP: @escaping () -> Void,
+                                    onGeneratePort: @escaping () -> Void) -> some View {
+            VStack(alignment: .leading, spacing: 4) {
+                // Top line — identical style
+                HStack(spacing: 8) {
+                                    if !isEnabled {
+                                        Circle().fill(Color.gray).frame(width: 10, height: 10)
+                                    } else {
+                                        let state: SyncStatusLamp.LampState = isEstablished ? .connected : .streaming
+                                        SyncStatusLamp(state: state,
+                                                       size: 12,
+                                                       highContrast: settings.highContrastSyncIndicator)
+                                    }
+                    Text(statusText).font(.custom("Roboto-Medium", size: 16))
+                    Spacer()
+                Text("Wi-Fi").font(.custom("Roboto-Regular", size: 13)).foregroundColor(.secondary)
+                }
+                // Facts row — match BLE (Label + SF Symbol)
+                            HStack(spacing: 12) {
+                                Label(roleIsParent ? "Parent" : "Child",
+                                      systemImage: roleIsParent ? "arrow.up.circle" : "arrow.down.circle")
+                                    .font(.custom("Roboto-Regular", size: 13))
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                            }
+                            // Micro-tip only when useful (OFF or not connected) to save height
+                            if !isEnabled || !isEstablished {
+                                Text(!isEnabled
+                                     ? "SYNC is OFF. Tap SYNC to start."
+                                     : (roleIsParent
+                                        ? "Share your IP and Port with children."
+                                        : "Enter the parent’s IP and Port below."))
+                                .font(.custom("Roboto-Light", size: 12))
+                                .foregroundColor(.secondary)
+                            }
+                            Divider().opacity(0.12)
+                // PARENT (Host) — single row: Your IP • Your Port
+                            Text("If Parent")
+                                .font(.custom("Roboto-Medium", size: 12))
+                                .foregroundColor(.secondary)
+                            HStack(spacing: 8) {
+                                Text("HOST:")
+                                                    .font(.custom("Roboto-SemiBold", size: 16))
+                                Spacer()
+                                // IP button
+                                Button(action: onToggleIP) {
+                                    Text(showDeviceIP
+                                         ? (getLocalIPAddress() ?? "Unknown")
+                                         : (isWifiAvailable ? "Tap for IP" : "Not connected to Wi-Fi"))
+                                        .font(.custom("Roboto-Regular", size: 16))
+                                        .foregroundColor(isWifiAvailable ? (showDeviceIP ? .primary : .secondary) : .secondary)
+                                        .lineLimit(1).minimumScaleFactor(0.85)
+                                }
+                                .buttonStyle(.plain)
+                                Text("•").foregroundColor(.secondary).opacity(0.5)
+                                // Port button (persists by reading syncSettings.listenPort)
+                                Button(action: onGeneratePort) {
+                                                    Text(isUnsetPort(syncSettings.listenPort) ? "Tap for new port" : syncSettings.listenPort)
+                                                        .font(.custom("Roboto-Regular", size: 16))
+                                                        .foregroundColor(isUnsetPort(syncSettings.listenPort) ? .secondary : .primary)
+                                                }
+                                .buttonStyle(.plain)
+                            }
+                            Divider().opacity(0.08)
+                            // CHILD (Join) — single row: Parent IP • Parent Port
+                            Text("If Child")
+                                .font(.custom("Roboto-Medium", size: 12))
+                                .foregroundColor(.secondary)
+                            HStack(spacing: 8) {
+                                Text("JOIN:")
+                                    .font(.custom("Roboto-SemiBold", size: 16))
+                                Spacer()
+                                // Parent IP (tap to enter)
+                                let ipText: String = {
+                                    if editingTarget == .ip { return inputText.isEmpty ? "Enter IP" : inputText }
+                                    return syncSettings.peerIP.isEmpty ? "Enter IP" : syncSettings.peerIP
+                                }()
+                                Text(ipText)
+                                    .font(.custom("Roboto-Regular", size: 16))
+                                    .foregroundColor(
+                                        (editingTarget == .ip && inputText.isEmpty) ? .secondary
+                                        : (editingTarget == .ip ? .primary : (syncSettings.peerIP.isEmpty ? .secondary : .primary))
+                                    )
+                                    .lineLimit(1).minimumScaleFactor(0.85)
+                                    .onTapGesture {
+                                        syncSettings.peerIP = ""
+                                        inputText           = ""
+                                        editingTarget       = .ip
+                                        isEnteringField     = true
+                                    }
+                                Text("•").foregroundColor(.secondary).opacity(0.5)
+                                // Parent Port (tap to enter)
+                                let portText: String = {
+                                                    if editingTarget == .port {
+                                                        if showBadPortError { return "Invalid (49153–65534)" }
+                                                        return inputText.isEmpty ? "Enter Port" : inputText
+                                                    }
+                                                    return isUnsetPort(syncSettings.peerPort) ? "Enter Port" : syncSettings.peerPort
+                                                }()
+                                Text(portText)
+                                                    .font(.custom("Roboto-Regular", size: 16))
+                                                    .foregroundColor(
+                                                        (editingTarget == .port && showBadPortError) ? .secondary :
+                                                        (editingTarget == .port && inputText.isEmpty) ? .secondary :
+                                                        (editingTarget == .port ? .primary : (isUnsetPort(syncSettings.peerPort) ? .secondary : .primary))
+                                                    )
+                                    .lineLimit(1).minimumScaleFactor(0.85)
+                                    .onTapGesture {
+                                        syncSettings.peerPort = ""
+                                        inputText             = ""
+                                        editingTarget         = .port
+                                        isEnteringField       = true
+                                    }
+                            }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.08), lineWidth: 1))
+        }
+    // MARK: – toggleSyncMode (drop-in)
+    private func toggleSyncMode() {
+        if syncSettings.isEnabled {
+            // — TURN SYNC OFF —
+            switch syncSettings.connectionMethod {
+            case .network:
+                if syncSettings.role == .parent { syncSettings.stopParent() }
+                else                           { syncSettings.stopChild() }
+
+            case .bluetooth:
+                if syncSettings.role == .parent { syncSettings.stopParent() }
+                else                           { syncSettings.stopChild() }
+
+            case .bonjour:
+                syncSettings.bonjourManager.stopAdvertising()
+                syncSettings.bonjourManager.stopBrowsing()
+                if syncSettings.role == .parent { syncSettings.stopParent() }
+                else                             { syncSettings.stopChild() }
+            }
+
+            syncSettings.isEnabled     = false
+            syncSettings.statusMessage = "Sync stopped"
+
+        } else {
+            // — PRE-CHECK RADIOS —
+            switch syncSettings.connectionMethod {
+            case .network, .bonjour:
+                // Wi-Fi must be up
+                let monitor = NWPathMonitor(requiredInterfaceType: .wifi)
+                let sem = DispatchSemaphore(value: 0)
+                monitor.pathUpdateHandler = { _ in sem.signal() }
+                monitor.start(queue: .global(qos: .background))
+                sem.wait()                  // wait for first update
+                let path = monitor.currentPath
+                monitor.cancel()
+                guard path.status == .satisfied else {
+                    syncErrorMessage   = "Wi-Fi is off or not connected.\nPlease enable Wi-Fi to sync."
+                    showSyncErrorAlert = true
+                    return
+                }
+
+            case .bluetooth:
+                    // Only error if Bluetooth is explicitly powered OFF
+                    let btMgr = CBCentralManager(delegate: nil, queue: nil, options: nil)
+                    if btMgr.state == .poweredOff {
+                        syncErrorMessage   = "Bluetooth is off.\nPlease enable Bluetooth to sync."
+                        showSyncErrorAlert = true
+                        return
+                    }
+            }
+
+            // — TURN SYNC ON — (existing logic unchanged)
+            switch syncSettings.connectionMethod {
+            case .network:
+                if syncSettings.role == .parent { syncSettings.startParent() }
+                else                           { syncSettings.startChild() }
+
+            case .bluetooth:
+                if syncSettings.role == .parent { syncSettings.startParent() }
+                else                           { syncSettings.startChild() }
+                syncSettings.beginTapPairing()
+
+            case .bonjour:
+                if syncSettings.role == .parent {
+                    syncSettings.startParent()
+                    syncSettings.bonjourManager.startAdvertising()
+                    syncSettings.bonjourManager.startBrowsing()
+                    syncSettings.statusMessage = "Bonjour: advertising & listening"
+                } else {
+                    syncSettings.bonjourManager.advertisePresence()
+                    syncSettings.bonjourManager.startBrowsing()
+                    syncSettings.statusMessage = "Bonjour: advertising & searching…"
+                }
+            }
+
+            syncSettings.isEnabled = true
+        }
+    }
+
     /// Friendly description for each method
     private var connectionDescription: String {
         switch syncSettings.connectionMethod {
         case .network:
-            return "High-precision sync. Use your IP + random port for parent or input ports for child."
+            return ""
         case .bluetooth:
-            return "Lower-precision, peer-to-peer sync over Bluetooth using PDF417 codes."
+            return ""
         case .bonjour:
-            return "Zero-config, automatic discovery over your local network."
+            return ""
         }
     }
-    
     var body: some View {
         VStack(spacing: 0) {
             // ── Content area ───────────────────────────────────────────────
             VStack(alignment: .leading, spacing: -24) {
                 SegmentedControlPicker(selection: $syncSettings.connectionMethod,
-                                       shadowOpacity: 0.08)
+                                       shadowOpacity: 0.08,
+                                       allowed: [.network, .bluetooth])
                 .onChange(of: syncSettings.connectionMethod) { newMethod in
-                        // Warm up BLE stack immediately on first tap into Bluetooth mode
-                    // Warm up BLE on a background queue so the pill-picker stays instant
-                            if newMethod == .bluetooth {
-                                DispatchQueue.global(qos: .utility).async {
-                                    let bt = syncSettings.bleDriftManager
-                                    bt.start()
-                                    usleep(100_000)
-                                    bt.stop()
-                                }
-                            }                    // ① clear any in-flight numpad entry
+                    // ① clear any in-flight numpad entry
                         cancelEntry()
                 
                         // ② if we were mid-sync, shut everything down
-                        if syncSettings.isEnabled {
-                            switch syncSettings.connectionMethod {
-                            case .network, .bluetooth:
-                                if syncSettings.role == .parent { syncSettings.stopParent() }
-                                else                            { syncSettings.stopChild() }
-                
-                            case .bonjour:
-                                syncSettings.bonjourManager.stopAdvertising()
-                                syncSettings.bonjourManager.stopBrowsing()
-                                if syncSettings.role == .parent { syncSettings.stopParent() }
-                                else                            { syncSettings.stopChild() }
-                            }
-                            syncSettings.isEnabled = false
-                        }
+                    if syncSettings.isEnabled {
+                                                if syncSettings.role == .parent { syncSettings.stopParent() }
+                                                else                            { syncSettings.stopChild() }
+                                                syncSettings.isEnabled = false
+                                            }
                     }
                 .frame(maxWidth: .infinity)      // ← let it grow to fill the content area
                 .padding(.horizontal, -8)         // ← pull it 8pt in from each edge (instead of 12)
                 .padding(.vertical, -8)
                 .accessibilityLabel(syncSettings.connectionMethod.rawValue)
                 .accessibilityHint("Selects \(syncSettings.connectionMethod.rawValue) sync mode")
-                // hide description once we’re in a live Bonjour lobby
-                if !(syncSettings.connectionMethod == .bonjour && syncSettings.isEnabled) {
-                    Text(connectionDescription)
-                        .font(.custom("Roboto-Light", size: 14))
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 40)
-                } else {
-                    // live lobby header
-                    HStack {
-                        Text("Lobby Code: \(syncSettings.currentCode)")
-                            .font(.headline)
-                        Spacer()
-                        Button {
-                            syncSettings.parentLockEnabled.toggle()
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: syncSettings.parentLockEnabled ? "lock.fill" : "lock.open")
-                                Text(syncSettings.parentLockEnabled ? "" : "")
-                            }
-                        }
-                        .buttonStyle(.automatic)
-                        .foregroundColor(
-                            (settings.appTheme == .dark)
-                            ? .white
-                            : .black
-                        )
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 40)
-                }
+                Text(connectionDescription)
+                                    .font(.custom("Roboto-Light", size: 14))
+                                    .foregroundColor(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 28)
                 
                 switch syncSettings.connectionMethod {
                 case .network:
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Your Port:")
-                            Spacer()
-                            Button {
-                                let newPort = String(generateEphemeralPort())
-                                syncSettings.listenPort = newPort
-                                portGenerated = true
-                            } label: {
-                                Text(portGenerated
-                                     ? syncSettings.listenPort
-                                     : "Tap to generate")
-                                .font(.custom("Roboto-Regular", size: 16))
-                                .foregroundColor(portGenerated ? .primary : .secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Generate port")
-                            .accessibilityHint("Gives you a random ephemeral port for listening")
-                        }
-                        HStack {
-                              Text("Your IP:")
-                              Spacer()
-                              Button {
-                                if isWifiAvailable {
-                                  withAnimation { showDeviceIP.toggle() }
-                                } else {
-                                  showNoWifiAlert = true
-                                }
-                              } label: {
-                                Text(showDeviceIP
-                                     ? getLocalIPAddress() ?? "Unknown"
-                                     : (isWifiAvailable ? "Tap to reveal" : "No Wi-Fi"))
-                                  .font(.custom("Roboto-Regular", size: 16))
-                                  .foregroundColor(
-                                    isWifiAvailable
-                                      ? (showDeviceIP ? .primary : .secondary)
-                                      : .secondary
-                                  )
-                              }
-                              .buttonStyle(.plain)
-                              .accessibilityLabel("Reveal device IP")
-                              .accessibilityHint("Double-tap to show your local Wi-Fi IP address")
-                              .disabled(!isWifiAvailable)
-                              .alert("No Wi-Fi Connection",
-                                     isPresented: $showNoWifiAlert) {
-                                Button("OK") { }
-                              } message: {
-                                Text("Please join a Wi-Fi network before revealing your IP address.")
-                              }
-                            }
-                        // ── Parent IP row ─────────────────────────────────────
-                        HStack {
-                            Text("Parent IP:")
-                            Spacer()
-                            // decide what to show: either the user’s input or the stored IP
-                            let ipText: String = {
-                                if editingTarget == .ip {
-                                    return inputText.isEmpty ? "Tap to enter" : inputText
-                                } else {
-                                    return syncSettings.peerIP.isEmpty ? "Tap to enter" : syncSettings.peerIP
-                                }
-                            }()
-                            
-                            Text(ipText)
-                                .font(.custom("Roboto-Regular", size: 16))
-                                .foregroundColor(
-                                    // blink placeholder only while editing & empty
-                                    editingTarget == .ip && inputText.isEmpty
-                                    ? (ipBlink ? .primary : .clear)
-                                    : (editingTarget == .ip
-                                       ? .primary
-                                       : (syncSettings.peerIP.isEmpty ? .secondary : .primary))
-                                )
-                                .onTapGesture {
-                                    // enter edit-mode
-                                    syncSettings.peerIP = ""
-                                    inputText           = ""
-                                    editingTarget       = .ip
-                                    isEnteringField     = true
-                                }
-                        }
-                        .accessibilityLabel("Parent IP address")
-                        .accessibilityHint("Double-tap to enter the parent device’s IP")
-                        
-                        // ── Parent Port row ───────────────────────────────────
-                        HStack {
-                            Text("Parent Port:")
-                            Spacer()
-                            let portText: String = {
-                                if editingTarget == .port {
-                                    if showBadPortError {
-                                        return "Invalid port (49153-65534)"
+                                    lanStatusPanel(
+                                        statusText: lanStatusText,
+                                        isEstablished: syncSettings.isEstablished,
+                                        roleIsParent: (syncSettings.role == .parent),
+                                        isEnabled: syncSettings.isEnabled,
+                                        isWifiAvailable: isWifiAvailable,
+                                        showDeviceIP: showDeviceIP,
+                                        onToggleIP: {
+                                            if isWifiAvailable { withAnimation { showDeviceIP.toggle() } }
+                                            else { showNoWifiAlert = true }
+                                        },
+                                        onGeneratePort: {
+                                                                    syncSettings.listenPort = String(generateEphemeralPort())
+                                                                }
+                                    )
+                                    // preserve the existing Wi-Fi alert
+                                    .alert("No Wi-Fi Connection", isPresented: $showNoWifiAlert) {
+                                        Button("OK") { }
+                                    } message: {
+                                        Text("Please join a Wi-Fi network before revealing your IP address.")
                                     }
-                                    return inputText.isEmpty ? "Tap to enter" : inputText
-                                }
-                                return syncSettings.peerPort.isEmpty ? "Tap to enter" : syncSettings.peerPort
-                            }()
-                            
-                            Text(portText)
-                                .font(.custom("Roboto-Regular", size: 16))
-                                .foregroundColor(
-                                    // 1) error flash: black/gray
-                                    editingTarget == .port && showBadPortError
-                                        ? (portBlink ? .primary : .secondary)
-                                    // 2) placeholder‐flash pre‐digit
-                                    : (editingTarget == .port && inputText.isEmpty)
-                                        ? (portBlink ? .primary : .clear)
-                                    // 3) normal editing / committed
-                                    : (editingTarget == .port
-                                        ? .primary
-                                        : (syncSettings.peerPort.isEmpty ? .secondary : .primary))
-                                )
-                                .onTapGesture {
-                                    syncSettings.peerPort = ""
-                                    inputText             = ""
-                                    editingTarget         = .port
-                                    isEnteringField       = true
-                                }
-                        }
-                    }
-                    .padding(.horizontal, 8)
                     
                 case .bluetooth:
-                    BLEPairingView()
-                        .environmentObject(syncSettings)
+                    bluetoothStatusPanel(statusText: btStatusText,
+                                                             isEstablished: syncSettings.isEstablished,
+                                                             roleIsParent: (syncSettings.role == .parent),
+                                                         isEnabled: syncSettings.isEnabled,
+                                                             signalBars: nil) // pass bars if you track them
                     
                 case .bonjour:
-                    if !syncSettings.isEnabled {
-                            // detect narrow screens (< iPhone12 width)
-                            let isCompact = UIScreen.main.bounds.width < 390                                            // inline lobby‐code editor
-                                            HStack(spacing: isCompact ? 8 : 18) {
-                                                let displayCode = editingTarget == .lobbyCode
-                                                    ? (inputText.isEmpty ? "—" : inputText)
-                                                    : (syncSettings.currentCode.isEmpty ? "—" : syncSettings.currentCode)
-                    
-                                                Text("LOBBY")
-                                                    .font(.custom("Roboto-SemiBold", size: 24))
-                                                    .foregroundColor(
-                                                        (settings.appTheme == .dark)
-                                                        ? .white
-                                                        : .black
-                                                    )
-                                                    .lineLimit(1)
-                                                    .minimumScaleFactor(0.7)
-                                                    .allowsTightening(true)
-                                                Text(displayCode)
-                                                    .font(.custom("Roboto-Regular", size: 24))
-                                                    .foregroundColor(
-                                                        (settings.appTheme == .dark)
-                                                        ? .white
-                                                        : .black
-                                                    )
-                                                    .lineLimit(1)
-                                                    .minimumScaleFactor(0.7)
-                                                    .allowsTightening(true)
-                    
-                                                Spacer()
-                    
-                                                Button("NEW") {
-                                                    syncSettings.generateCode()
-                                                }
-                                                .font(.custom("Roboto-SemiBold", size: 24))
-                                                .foregroundColor(
-                                                    (settings.appTheme == .dark)
-                                                    ? .white
-                                                    : .black
-                                                )
-                                                .lineLimit(1)
-                                                .minimumScaleFactor(0.7)
-                                                .allowsTightening(true)
-                                                .buttonStyle(.plain)
-                    
-                                                Button("EDIT") {
-                                                    editingTarget   = .lobbyCode
-                                                    inputText       = ""
-                                                    isEnteringField = true
-                                                }
-                                                .font(.custom("Roboto-Regular", size: 24))
-                                                .foregroundColor(
-                                                    (settings.appTheme == .dark)
-                                                    ? .white
-                                                    : .black
-                                                )
-                                                .lineLimit(1)
-                                                .minimumScaleFactor(0.7)
-                                                .allowsTightening(true)
-                                                .buttonStyle(.plain)
-                                            }
-                                            .padding(.horizontal, 8)
-                        // ── explainer steps ────────────────────────────────
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("To start a lobby:")
-                                .font(.custom("Roboto-Regular", size: 14))
-                                .foregroundColor(.secondary)
-                             Text("1. Tap NEW to generate a code.")
-                                .font(.custom("Roboto-Light", size: 12))
-                                .foregroundColor(.secondary)
-                            Text("2. Share this code with others.")
-                                .font(.custom("Roboto-Light", size: 12))
-                                .foregroundColor(.secondary)
-                            Text("3. Tap SYNC to begin syncing.")
-                                .font(.custom("Roboto-Light", size: 12))
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.top, 28)
-                    } else {
-                    // show live lobby (fixed height)
-                        // show live lobby (fixed height)
-                                                VStack {
-                                                    LobbyView()
-                                                        .environmentObject(syncSettings)
-                                                }
-                        // full width, fixed 140-pt height
-                        .frame(maxWidth: .infinity, alignment: .top)
-                        .frame(height: 140)                                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                        .padding(.vertical, 4)
-                    }
+                                    // Deprecated in UI: keep empty branch to satisfy exhaustiveness.
+                                    EmptyView()
                 }
             }
             .contentShape(Rectangle())                     // make the whole area tappable
@@ -4475,57 +7871,45 @@ struct ConnectionPage: View {
             Spacer(minLength: 0)
             
                 // ── Sync / Stop + Lamp row (always pinned at bottom) ─────────
-                HStack(spacing: 8) {
-                    // ── Role toggle ──
-                    Button {
-                        let newRole: SyncSettings.Role = (syncSettings.role == .parent ? .child : .parent)
-                        syncSettings.role = newRole
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("CHILD")
-                                .font(.custom("Roboto-SemiBold", size: 24))
-                                .foregroundColor(syncSettings.role == .child ? .primary : .secondary)
-                            Text("/")
-                                .font(.custom("Roboto-SemiBold", size: 24))
-                                .foregroundColor(.secondary)
-                            Text("PARENT")
-                                .font(.custom("Roboto-SemiBold", size: 24))
-                                .foregroundColor(syncSettings.role == .parent ? .primary : .secondary)
-                        }
-                        .fixedSize()
-                    }
-                    .buttonStyle(.plain)
-                    
-                    Spacer()
-
-                    // ── Sync/Stop button ──
-                    Button {
-                        toggleSync()
-                    } label: {
-                        Text(syncSettings.isEnabled ? "STOP" : "SYNC")
+            HStack(spacing: 8) {
+                // ── Role toggle ──
+                Button {
+                    let newRole: SyncSettings.Role = (syncSettings.role == .parent ? .child : .parent)
+                    syncSettings.role = newRole
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("CHILD")
                             .font(.custom("Roboto-SemiBold", size: 24))
-                            .foregroundColor((settings.appTheme == .dark) ? .white : .black)
-                            .fixedSize()   // hug text width
+                            .foregroundColor(syncSettings.role == .child ? .primary : .secondary)
+                        Text("/")
+                            .font(.custom("Roboto-SemiBold", size: 24))
+                            .foregroundColor(.secondary)
+                        Text("PARENT")
+                            .font(.custom("Roboto-SemiBold", size: 24))
+                            .foregroundColor(syncSettings.role == .parent ? .primary : .secondary)
                     }
-                    .buttonStyle(.plain)
-
-                    // ── Lamp ──
-                    if settings.highContrastSyncIndicator {
-                        Image(systemName:
-                                (syncSettings.isEnabled && syncSettings.isEstablished)
-                              ? "checkmark.circle.fill"
-                              : "xmark.octagon.fill"
-                        )
-                        .foregroundColor(
-                            (syncSettings.isEnabled && syncSettings.isEstablished) ? .green : .red
-                        )
-                        .frame(width: 20, height: 20)
-                    } else {
-                        Circle()
-                            .fill((syncSettings.isEnabled && syncSettings.isEstablished) ? .green : .red)
-                            .frame(width: 20, height: 20)
-                    }
+                    .fixedSize()
                 }
+                .buttonStyle(.plain)
+                
+                Spacer()
+                
+                // ── Sync/Stop button ──
+                Button {
+                    toggleSyncMode()
+                } label: {
+                    Text(syncSettings.isEnabled ? "STOP" : "SYNC")
+                        .font(.custom("Roboto-SemiBold", size: 24))
+                        .foregroundColor((settings.appTheme == .dark) ? .white : .black)
+                        .fixedSize()   // hug text width
+                }
+                .buttonStyle(.plain)
+                
+                // ── Lamp ──
+                let state: SyncStatusLamp.LampState = syncSettings.isEstablished
+                ? .connected : (syncSettings.isEnabled ? .streaming : .off)
+                SyncStatusLamp(state: state, size: 20, highContrast: settings.highContrastSyncIndicator)
+            }
                 .frame(maxWidth: .infinity, alignment: .leading)   // <<< fill width, align left
                 .padding(.horizontal, 8)
                 .padding(.bottom, 12)
@@ -4559,34 +7943,22 @@ struct ConnectionPage: View {
             }
         }
         .onChange(of: inputText) { newValue in
-            // 1) Parent-port: once 5 digits are in, auto-submit
-            if editingTarget == .port {
-                        // clear any previous error
+                        // Parent-port: once 5 digits are in, auto-submit
+                        guard editingTarget == .port else { return }
                         showBadPortError = false
-                        // once 5 digits are entered, validate
                         if newValue.count == 5 {
                             if let port = UInt16(newValue),
-                               (49153...65534).contains(port)
-                            {
+                               (49153...65534).contains(port) {
                                 // valid → commit
-                                syncSettings.peerPort   = newValue
-                                editingTarget           = nil
-                                isEnteringField         = false
+                                syncSettings.peerPort = newValue
+                                editingTarget         = nil
+                                isEnteringField       = false
                             } else {
                                 // invalid → show error
                                 showBadPortError = true
                             }
-                            return
                         }
                     }
-                    // 2) Lobby code: existing 5-digit auto-commit
-                    guard editingTarget == .lobbyCode else { return }
-                    if newValue.count == 5 {
-                        syncSettings.currentCode = newValue
-                        editingTarget            = nil
-                        isEnteringField          = false
-                    }
-                }
         .alert("Cannot Start Sync",
                isPresented: $showSyncErrorAlert) {
           Button("OK", role: .cancel) { }
@@ -4603,18 +7975,13 @@ struct ConnectionPage: View {
             HStack {
                 Text("Your Port:")
                 Spacer()
-                Button {
-                    let newPort = String(generateEphemeralPort())
-                    syncSettings.listenPort = newPort
-                    portGenerated = true
-                } label: {
-                    Text(portGenerated
-                         ? syncSettings.listenPort
-                         : "Tap to generate")
-                    .font(.custom("Roboto-Regular", size: 16))
-                    .foregroundColor(portGenerated ? .primary : .secondary)
-                }
-                .buttonStyle(.plain)
+                Text(isUnsetPort(syncSettings.listenPort) ? "Tap to generate" : syncSettings.listenPort)
+                    .font(.custom("Roboto-Regular", size: 12))
+                    .foregroundColor(isUnsetPort(syncSettings.listenPort) ? .secondary : .primary)
+                    .lineLimit(1).minimumScaleFactor(0.85)
+                    .contentShape(Rectangle())
+                    .onTapGesture { syncSettings.listenPort = String(generateEphemeralPort()) }
+                    .accessibilityAddTraits(.isButton)
             }
             
             HStack {
@@ -4656,12 +8023,14 @@ struct ConnectionPage: View {
                 Text("Parent Port:")
                 Spacer()
                 Text(editingTarget == .port
-                     ? inputText
-                     : (syncSettings.peerPort.isEmpty ? "Tap to enter" : syncSettings.peerPort))
+                                 ? inputText
+                                 : (isUnsetPort(syncSettings.peerPort) ? "Tap to enter" : syncSettings.peerPort))
                 .font(.custom("Roboto-Regular", size: 16))
-                .foregroundColor(editingTarget == .port
-                                 ? .primary
-                                 : (syncSettings.peerPort.isEmpty ? .secondary : .primary))
+                .foregroundColor(
+                                    editingTarget == .port
+                                        ? (inputText.isEmpty ? .secondary : .primary)
+                                        : (isUnsetPort(syncSettings.peerPort) ? .secondary : .primary)
+                                )
                 .onTapGesture {
                     syncSettings.peerPort = ""
                     inputText             = ""
@@ -5070,7 +8439,7 @@ struct AboutPage: View {
                         .resizable()
                         .frame(width: 48, height: 48)
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .shadow(radius: 4, y: 2)
+                        .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 2)
                         .onLongPressGesture {
                             showHallOfFame = true
                         }
@@ -5575,7 +8944,7 @@ private struct HallOfFameCard: View {
     
     private let friends: [Backer] = [
         Backer(
-            name: "The New Uncertainty Collective",
+            name: "Your Ensemble Here",
             imageName: "nuc_avatar",
             tier: .gold,
             founderTier: .sustainer,
@@ -5584,7 +8953,7 @@ private struct HallOfFameCard: View {
             contributionShare: 0.10
         ),
         Backer(
-            name: "The New Uncertainty Collective",
+            name: "Your Ensemble Here",
             imageName: "nuc_avatar",
             tier: .platinum,
             founderTier: .founder,
@@ -5594,7 +8963,7 @@ private struct HallOfFameCard: View {
             
         ),
         Backer(
-            name: "Paul Yorke",
+            name: "Your Ensemble Here",
             imageName: "paul_avatar",
             tier: .silver,
             founderTier: .supporter,
@@ -5603,7 +8972,7 @@ private struct HallOfFameCard: View {
             contributionShare: 0.05
         ),
         Backer(
-            name: "Paul Yorke",
+            name: "Your Ensemble Here",
             imageName: "paul_avatar",
             tier: .bronze,
             founderTier: .founder,
@@ -5612,7 +8981,7 @@ private struct HallOfFameCard: View {
             contributionShare: 0.05
         ),
         Backer(
-            name: "The New Uncertainty Collective",
+            name: "Your Ensemble Here",
             imageName: "nuc_avatar",
             tier: .gold,
             founderTier: .founder,
@@ -5621,7 +8990,7 @@ private struct HallOfFameCard: View {
             contributionShare: 0.05
         ),
         Backer(
-            name: "The New Uncertainty Collective",
+            name: "Your Ensemble Here",
             imageName: "nuc_avatar",
             tier: .platinum,
             founderTier: .founder,
@@ -5630,7 +8999,7 @@ private struct HallOfFameCard: View {
             contributionShare: 0.05
         ),
         Backer(
-            name: "Paul Yorke",
+            name: "Your Ensemble Here",
             imageName: "paul_avatar",
             tier: .silver,
             founderTier: .founder,
@@ -5639,7 +9008,7 @@ private struct HallOfFameCard: View {
             contributionShare: 0.15
         ),
         Backer(
-            name: "Paul Yorke",
+            name: "Your Ensemble Here",
             imageName: "paul_avatar",
             tier: .bronze,
             founderTier: .founder,
@@ -6085,11 +9454,62 @@ struct FallingIconsOverlay: UIViewRepresentable {
     }
 }
 
-
+//──────────────────────────────────────────────────────────────
+// MARK: – LiquidGlassCircle (SDK-safe “liquid glass” button)
+//──────────────────────────────────────────────────────────────
+private struct LiquidGlassCircle: View {
+    let diameter: CGFloat
+    let tint: Color
+    var body: some View {
+        let shape = Circle()
+        ZStack {
+            // Core glass body (ultra-thin material)
+            shape
+                .fill(.ultraThinMaterial)
+            // Rim lighting
+            shape
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.22),
+                            Color.white.opacity(0.06)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+            // Subtle internal highlight
+            shape
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.10),
+                            Color.white.opacity(0.00)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .padding(diameter * 0.06)
+            // Tint wash (very light)
+            shape
+                .stroke(tint.opacity(0.35), lineWidth: 1)
+                .blur(radius: 0.2)
+        }
+        .frame(width: diameter, height: diameter)
+        .shadow(color: .black.opacity(0.10), radius: 8, x: 0, y: 4)
+        .clipShape(shape)
+        .contentShape(shape)
+    }
+}
 
 // Finally, your card wrapper:
 struct SettingsPagerCard: View {
+        
     @Binding var page: Int
+    @Namespace private var settingsNS
+
     @Binding var editingTarget: EditableField?
     @Binding var inputText: String
     @Binding var isEnteringField: Bool
@@ -6133,8 +9553,12 @@ struct SettingsPagerCard: View {
                     switch page {
                     case 0:
                         AppearancePage(presets: flashPresets)
+                            .matchedGeometryEffect(id: "settingsPageContent", in: settingsNS)
+                                                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
                     case 1:
                         TimerBehaviorPage()
+                            .matchedGeometryEffect(id: "settingsPageContent", in: settingsNS)
+                                                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
                     case 2:
                         ConnectionPage(
                             editingTarget: $editingTarget,
@@ -6142,12 +9566,18 @@ struct SettingsPagerCard: View {
                             isEnteringField: $isEnteringField,
                             showBadPortError: $showBadPortError
                         )
+                        .matchedGeometryEffect(id: "settingsPageContent", in: settingsNS)
+                                                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
                     case 3:
                         AboutPage()
+                            .matchedGeometryEffect(id: "settingsPageContent", in: settingsNS)
+                                                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
                     default:
                         EmptyView()
                     }
                 }
+                
+                    
                 .padding(.top, topInset)
                 // force every page into the same height
                 .frame(
@@ -6164,17 +9594,172 @@ struct SettingsPagerCard: View {
               editingTarget   = nil
               inputText       = ""
               isEnteringField = false
+                // NEW: Transport picker + Live status circle
+                            TransportRow()
+                                .padding(.horizontal, 16)
+                                .padding(.top, 8)
             }
+            // Same timing feel as your card/toolbar morphs; layout remains stable.
+                    .animation(
+                        {
+                            if #available(iOS 17, *) {
+                                return .snappy(duration: 0.26, extraBounce: 0.25)
+                            } else {
+                                return .easeInOut(duration: 0.26)
+                            }
+                        }(),
+                        value: page
+                    )
+        }
+    }
+// ─────────────────────────────────────────────────────────────
+// MARK: – TransportRow (LAN/BLE) + Liquid Glass status circle
+// ─────────────────────────────────────────────────────────────
+private struct TransportRow: View {
+    @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var sync: SyncSettings
+    @State private var showOverlay = false
+
+    private var isParent: Bool { sync.role == .parent }
+
+    // Mirror lamp: red (off), orange (streaming/not connected), green (connected)
+    private var lampColor: Color {
+        if !sync.isEnabled { return .red }
+        return sync.isEstablished ? .green : .orange
+    }
+
+    private var symbolName: String {
+        switch sync.connectionMethod {
+        case .network:   return "wifi.router.fill"
+        case .bluetooth: return "bolt.horizontal.fill"
+        default:         return "wifi.router.fill"   // hidden in UI anyway
         }
     }
 
+    var body: some View {
+        HStack(spacing: 12) {
+            // Segmented transport picker (LAN / Bluetooth only)
+            Picker("Transport", selection: $sync.connectionMethod) {
+                Text("Wi-Fi").tag(SyncSettings.SyncConnectionMethod.network)
+                Text("Nearby").tag(SyncSettings.SyncConnectionMethod.bluetooth)
+            }
+            .pickerStyle(.segmented)
+            .sensoryFeedback(.selection, trigger: sync.connectionMethod)
+
+            Spacer(minLength: 12)
+
+            // Liquid Glass status circle
+            VStack(spacing: 6) {
+                Button {
+                    if isParent { showOverlay = true }
+                } label: {
+                    ZStack {
+                                            LiquidGlassCircle(diameter: 60, tint: settings.flashColor)
+                                            Image(systemName: symbolName)
+                                                .font(.system(size: 24, weight: .semibold))
+                                                .foregroundColor(settings.flashColor)
+                                                .symbolRenderingMode(.hierarchical)
+                                                .shadow(radius: 0.5)
+                                            // Small status dot
+                                            Circle()
+                                                .fill(lampColor)
+                                                .frame(width: 10, height: 10)
+                                                .offset(x: 20, y: 20)
+                                        }
+                }
+                .buttonStyle(.plain)
+                .disabled(!isParent) // child cannot open overlay
+                .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.6),
+                                 trigger: sync.isEstablished)
+
+                // Child hint: show connected parent device name
+                if !isParent, sync.isEstablished {
+                    Text(sync.pairingDeviceName ?? "Connected")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .sheet(isPresented: $showOverlay) {
+            ParticipantsOverlay(show: $showOverlay)
+                .presentationDetents([.medium, .large])
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// MARK: – ParticipantsOverlay (Parent only)
+// ─────────────────────────────────────────────────────────────
+private struct ParticipantsOverlay: View {
+    @EnvironmentObject private var sync: SyncSettings
+    @EnvironmentObject private var settings: AppSettings
+    @Binding var show: Bool
+
+    private var parentPeers: [SyncSettings.Peer] {
+        sync.peers.sorted { $0.joinTs < $1.joinTs }
+    }
+
+    var body: some View {
+        NavigationView {
+            List {
+                Section("Parent") {
+                    HStack {
+                        Text(sync.localNickname)
+                        Spacer()
+                        Text("Host")
+                            .foregroundColor(.secondary)
+                            .font(.footnote)
+                    }
+                }
+                Section("Children") {
+                    if parentPeers.isEmpty {
+                        Text("No children connected")
+                            .foregroundColor(.secondary)
+                    } else {
+                        ForEach(parentPeers) { p in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(p.name)
+                                    Text("Joined: \(Date(timeIntervalSince1970: TimeInterval(p.joinTs)/1000).formatted(date: .omitted, time: .shortened))")
+                                        .foregroundColor(.secondary)
+                                        .font(.footnote)
+                                }
+                                Spacer()
+                                // RSSI as bars (0–3)
+                                HStack(spacing: 2) {
+                                    ForEach(0..<3) { i in
+                                        Rectangle()
+                                            .fill(i < p.signalStrength ? settings.flashColor : Color.gray.opacity(0.3))
+                                            .frame(width: 3, height: CGFloat(6 + i*4))
+                                            .cornerRadius(1)
+                                    }
+                                }
+                                Button("Disconnect") {
+                                    sync.disconnectPeer(p.id)
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Connected Devices")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Done") { show = false }
+                }
+            }
+        }
+    }
+}
 //──────────────────────────────────────────────────────────────
 // MARK: – ContentView
 //──────────────────────────────────────────────────────────────
 struct ContentView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var syncSettings: SyncSettings
-
+    
     @AppStorage("settingsPage") private var settingsPage = 0
     @State private var showSettings = false
     @State private var mainMode: ViewMode = .sync
@@ -6186,87 +9771,149 @@ struct ContentView: View {
     @State private var editingTarget: EditableField? = nil
     @State private var inputText: String = ""
     @State private var isEnteringField: Bool = false
-
-    var body: some View {
-        // Decide regular SYNC backdrop
-        let bgImageName: String = {
-            switch settings.appTheme {
-            case .light: return "MainBG1"
-            case .dark:  return "MainBG2"
-            }
-        }()
-
-        ZStack(alignment: .bottomLeading) {
-            // 1) Draw the backdrop image
-            AppBackdrop(imageName: bgImageName)
-            
-            // 2) If we're in light theme and the user has chosen a non‐clear color,
-            //    blend it over the backdrop immediately.
-            if settings.appTheme == .light,
-               settings.customThemeOverlayColor != .clear
-            {
-                Color(settings.customThemeOverlayColor)
-                    .compositingGroup()      // isolate this layer for blending
-                    .blendMode(.multiply)     // or .multiply, whichever you prefer
-                    .ignoresSafeArea()       // cover the full screen
-                    .transition(.opacity)
-                    .animation(.easeInOut(duration: 0.5), value: settings.customThemeOverlayColor)
-            }
-            
-            // 3) Main stack (TimerCard, NumPad, etc.)
-            VStack(spacing: 0) {
-                Spacer(minLength: 0)
-                MainScreen(
-                    parentMode: $mainMode,
-                    showSettings: $showSettings
-                )
-                Spacer(minLength: 12)
-            }
-            // 4) Force “dark appearance” whenever mainMode == .stop
-            .preferredColorScheme(
-                mainMode == .stop
-                ? .dark
-                : (settings.appTheme == .dark ? .dark : .light)
-            )
-        
-        }
-        // 1) Present WalkthroughView as a full-screen cover on first launch:
-               .fullScreenCover(isPresented: Binding(
-                   get: { !hasSeenWalkthrough },
-                   set: { _ in hasSeenWalkthrough = true }
-               )) {
-                   WalkthroughView()
-                       .environmentObject(settings)
-                       .environmentObject(syncSettings)
-               }
-               // 2) When the user taps “gear,” show your SettingsView in a sheet:
-               .sheet(isPresented: $showSettings) {
-                   SettingsPagerCard(page: $settingsPage,
-                                     editingTarget: $editingTarget,
-                                     inputText: $inputText,
-                                     isEnteringField: $isEnteringField,
-                                     showBadPortError: .constant(false)
-                   )
-                       .environmentObject(settings)
-                       .environmentObject(syncSettings)
-                       .preferredColorScheme(
-                           settings.appTheme == .dark ? .dark : .light
-                       )
-                   
-               }
-               .alert(isPresented: $showSyncErrorAlert) {
-                 Alert(
-                   title: Text("Cannot Start Sync"),
-                   message: Text(syncErrorMessage),
-                   dismissButton: .default(Text("OK"))
-                 )
-               }
-
-    }
-
     
-}
+    var body: some View {
+#if os(iOS)
+if UIDevice.current.userInterfaceIdiom == .pad {
+    GeometryReader { geo in
+        let isLandscape = geo.size.width > geo.size.height
+        let is129 = max(geo.size.width, geo.size.height) >= 1366  // 12.9" logical height
+        let topLift: CGFloat = isLandscape
+            ? (geo.safeAreaInsets.top + 982)
+            : (geo.safeAreaInsets.top + (is129 ? 520 : 340))       // bump only on 12.9" portrait
 
+        innerBody
+            .environment(\.containerSize, geo.size)
+            .frame(width: geo.size.width, height: geo.size.height)
+
+            // Keep background full-bleed on sides + bottom, but DO NOT ignore the top.
+            .ignoresSafeArea(.container, edges: [.horizontal, .bottom])
+
+            // Push only the CONTENT down in portrait (background stays full-bleed).
+            .safeAreaInset(edge: .top) {
+                Color.clear.frame(height: topLift)
+            }
+    }
+} else {
+    innerBody
+}
+#else
+innerBody
+#endif
+
+
+
+
+
+        
+        
+    }
+    
+    // Your original body content extracted so we can reuse it
+    private var innerBody: some View {
+        // Decide backdrop once
+               let bgImageName: String = (settings.appTheme == .light) ? "MainBG1" : "MainBG2"
+       
+        return ZStack { // background fills screen; foreground is centered/capped on iPad
+                  // 1) Full-bleed backdrop (never masks/crops foreground)
+                   AppBackdrop(imageName: bgImageName)
+                       .ignoresSafeArea()
+       
+                   // 2) Optional light overlay (also full-bleed)
+                   if settings.appTheme == .light, settings.customThemeOverlayColor != .clear {
+                       Color(settings.customThemeOverlayColor)
+                           .compositingGroup()
+                           .blendMode(.multiply)
+                           .ignoresSafeArea()
+                           .transition(.opacity)
+                           .animation(.easeInOut(duration: 0.5), value: settings.customThemeOverlayColor)
+                   }
+       
+                   // 3) Foreground content
+#if os(iOS)
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                GeometryReader { geo in
+                            // Pass the **window size** to children so they lay out for THIS window,
+                            // not the physical device screen.
+                       ScrollView(.vertical, showsIndicators: false) {
+                                MainScreen(parentMode: $mainMode, showSettings: $showSettings)
+                                    .environment(\.containerSize, geo.size)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .top)
+                                    .padding(.vertical, 16)
+                            }
+                            .padding(.horizontal, 0)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                    // keep foreground color scheme behavior
+                    .preferredColorScheme(
+                        mainMode == .stop
+                        ? .dark
+                        : (settings.appTheme == .dark ? .dark : .light)
+                    )
+                    // tiny bottom spacer so home-indicator never overlaps
+                    .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 8) }
+                }
+            } else {
+                    VStack(spacing: 0) {
+                           Spacer(minLength: 0)
+                           MainScreen(parentMode: $mainMode, showSettings: $showSettings)
+                           Spacer(minLength: 12)
+                       }
+                       .preferredColorScheme(
+                           mainMode == .stop
+                           ? .dark
+                           : (settings.appTheme == .dark ? .dark : .light)
+                       )
+                   }
+                   #else
+                   VStack(spacing: 0) {
+                       Spacer(minLength: 0)
+                       MainScreen(parentMode: $mainMode, showSettings: $showSettings)
+                       Spacer(minLength: 12)
+                   }
+                   .preferredColorScheme(
+                       mainMode == .stop
+                       ? .dark
+                       : (settings.appTheme == .dark ? .dark : .light)
+                   )
+                   #endif
+               }
+        // Modals & alerts unchanged
+        .fullScreenCover(isPresented: Binding(
+            get: { !hasSeenWalkthrough },
+            set: { _ in hasSeenWalkthrough = true }
+        )) {
+            WalkthroughView()
+                .environmentObject(settings)
+                .environmentObject(syncSettings)
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsPagerCard(page: $settingsPage,
+                              editingTarget: $editingTarget,
+                              inputText: $inputText,
+                              isEnteringField: $isEnteringField,
+                              showBadPortError: .constant(false))
+            .environmentObject(settings)
+            .environmentObject(syncSettings)
+            .preferredColorScheme(settings.appTheme == .dark ? .dark : .light)
+        }
+        .alert(isPresented: $showSyncErrorAlert) {
+            Alert(title: Text("Cannot Start Sync"),
+                  message: Text(syncErrorMessage),
+                  dismissButton: .default(Text("OK")))
+        }
+    }
+}
+// Persistent badge state for "X loaded" shown inside TimerCard
+final class CueBadgeState: ObservableObject {
+    @Published var label: String? = nil      // filename w/o extension
+    @Published var broadcast: Bool = false   // true if parent broadcasted
+    func set(_ name: String, broadcast: Bool) {
+        self.label = name
+        self.broadcast = broadcast
+    }
+    func clear() { label = nil; broadcast = false }
+}
 //──────────────────────────────────────────────────────────────
 // MARK: – @main
 //──────────────────────────────────────────────────────────────
@@ -6282,42 +9929,40 @@ private struct HidingHost: UIViewControllerRepresentable {
 
 @main
 struct SyncTimerApp: App {
+    @UIApplicationDelegateAdaptor(SyncTimerMenuDelegate.self) private var menuDelegate
     // hook up the UIKit delegate
     
     // your own state‐objects…
     @StateObject private var appSettings  = AppSettings()
+    @StateObject private var clockSync = ClockSyncService()
     @StateObject private var syncSettings = SyncSettings()
     @AppStorage("settingsPage") private var settingsPage = 0
     @State private var editingTarget: EditableField? = nil
     @State private var inputText       = ""
     @State private var isEnteringField = false
-        
+    // Monotonic tick anchor so the stop sub-timer decrements with real dt
+    @State private var lastTickUptime: Double? = nil
+    @StateObject private var cueBadge = CueBadgeState()
     init() {
-        print("✅ Original image loads:", UIImage(named: "AppLogo") != nil)
-        _ = UIImage(named: "LaunchLogo")
-        print("✅ Duplicate image loads:", UIImage(named: "LaunchLogo") != nil)
-
-        // ── Your existing startup work ───────────────────────────────
-        print("❓ LaunchScreen exists at:",
-              Bundle.main.url(forResource: "LaunchScreen", withExtension: "storyboardc")
-              ?? "🛑 NOT FOUND")
-        // Drop in App.init() and read the console.
-        print("→ launch key iOS actually sees:",
-              Bundle.main.object(forInfoDictionaryKey: "UILaunchStoryboardName") ?? "nil")
-
-        print("→ storyboard in bundle? ",
-              FileManager.default.fileExists(
-                    atPath: Bundle.main.bundlePath + "/LaunchScreen.storyboardc"))
 
         UIApplication.shared.isIdleTimerDisabled = true
         registerRoboto()
         
-        if WCSession.isSupported() {
-            let session = WCSession.default
-            session.delegate = ConnectivityManager.shared
-            session.activate()
-            print("[WC] WCSession.activate() called, state = \(session.activationState.rawValue)")
-        }
+#if canImport(WatchConnectivity)
+if WCSession.isSupported() {
+    let session = WCSession.default
+    if session.delegate == nil {
+        session.delegate = ConnectivityManager.shared
+    }
+    if session.activationState != .activated {
+        session.activate()
+    }
+    print("[WC] WCSession.activate() called, state = \(session.activationState.rawValue)")
+} else {
+    print("[WC] WCSession not supported on this device.")
+}
+#endif
+
         
         UIImpactFeedbackGenerator(style: .light).prepare()
         _ = Timer.publish(every: 1, on: .main, in: .common)
@@ -6337,27 +9982,100 @@ struct SyncTimerApp: App {
     }
     
     var body: some Scene {
+
         let bleManager     = syncSettings.bleDriftManager
         let bonjourManager = syncSettings.bonjourManager
         
-        WindowGroup {
-            ContentView()
-                .transition(.opacity.animation(.easeOut(duration: 0.3)))
-                .environmentObject(appSettings)
-                .environmentObject(syncSettings)
-                .preferredColorScheme(appSettings.appTheme == .dark ? .dark : .light)
-            
-        }
+        // ──────────────────────────────────────────────────────────────
+                // Main adaptive window (your current app window)
+                // ──────────────────────────────────────────────────────────────
+                WindowGroup {
+                    // wrap the if/else in a Group so modifiers apply to the whole thing
+                    Group {
+                        if UIDevice.current.userInterfaceIdiom == .pad {
+                                            ContentView().ignoresSafeArea(.all)   // <- full-bleed on iPad
+                                        } else {
+                                            ContentView()
+                                        }
+
+
+                    }
+                    .tint(Color("AccentColor"))
+
+                    .transition(.opacity.animation(.easeOut(duration: 0.3)))
+                                        // Hand the shared Kalman instance to SyncSettings once
+                    .onAppear {
+                        syncSettings.clockSyncService = clockSync
+                        AppActions.shared.connect(
+                            appSettings: appSettings,
+                            sync: syncSettings,
+                            start: { NotificationCenter.default.post(name: .init("TimerStart"), object: nil) },
+                            pause: { NotificationCenter.default.post(name: .init("TimerPause"), object: nil) },
+                            reset: { NotificationCenter.default.post(name: .init("TimerReset"), object: nil) }
+                        )
+                        UIMenuSystem.main.setNeedsRebuild()   // 👈 ensure first draw uses your menus
+                    }
+                    .onChange(of: appSettings.showHours) { _ in UIMenuSystem.main.setNeedsRebuild() }
+                    .onChange(of: appSettings.leftPanePaginateOnLargePads) { _ in UIMenuSystem.main.setNeedsRebuild() }
+                    .onChange(of: appSettings.countdownResetMode) { _ in UIMenuSystem.main.setNeedsRebuild() }
+                    .onChange(of: appSettings.resetConfirmationMode) { _ in UIMenuSystem.main.setNeedsRebuild() }
+                    .onChange(of: appSettings.stopConfirmationMode) { _ in UIMenuSystem.main.setNeedsRebuild() }
+                    .onChange(of: syncSettings.role) { _ in UIMenuSystem.main.setNeedsRebuild() }
+                    .onChange(of: syncSettings.connectionMethod) { _ in UIMenuSystem.main.setNeedsRebuild() }
+                    .onChange(of: syncSettings.isEnabled) { _ in UIMenuSystem.main.setNeedsRebuild() }
+
+                    .environmentObject(appSettings)
+                    .environmentObject(syncSettings)
+                    .environmentObject(clockSync)
+                    .environmentObject(cueBadge)
+                    .preferredColorScheme(appSettings.appTheme == .dark ? .dark : .light)
+                    .dynamicTypeSize(.small ... .large)
+            // “Open in SyncTimer” from Files/Share Sheet (XML only)
+                                .onOpenURL { url in
+                                    handleOpenURL(url)
+                                }
+
+                }
         
-        // Tear-down logic when connection method changes
-        .onChange(of: syncSettings.connectionMethod) { _ in
-            syncSettings.stopParent()
-            syncSettings.stopChild()
-            bleManager.stop()
-            bonjourManager.stopBrowsing()
-            bonjourManager.stopAdvertising()
+      
+       
+
+    
+}
+    // MARK: - Commands
+    private struct MiniWindowCommands: Commands {
+        @Environment(\.openWindow) private var openWindow
+        var body: some Commands {
+            CommandMenu("Window") {
+                Button("Open Mini Timer") {
+                    openWindow(id: "mini")
+                }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+            }
         }
-    
-    
+    }
 }
+// MARK: - Open-in handler
+private extension SyncTimerApp {
+    func handleOpenURL(_ url: URL) {
+        // Only accept local .xml files
+        guard url.isFileURL,
+              url.pathExtension.lowercased() == "xml" else {
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            print("↪️ Ignored non-XML or non-file URL: \(url)")
+            return
+        }
+        do {
+            // Import into on-device library (root). Folders/tags can be assigned later in the sheet.
+            _ = try CueLibraryStore.shared.importXML(from: url, intoFolderID: nil)  // nil = root
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            print("✅ Imported cue XML: \(url.lastPathComponent)")
+            // Optional: notify UI to surface the Library / “Imported” toast
+            NotificationCenter.default.post(name: .didImportCueSheet, object: nil)
+        } catch {
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            print("🛑 Failed to import cue XML: \(error.localizedDescription)")
+        }
+    }
 }
+
