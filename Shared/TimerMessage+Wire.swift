@@ -10,6 +10,36 @@ public struct TimerMessage: Codable, Equatable {
     public enum Action: String, Codable {
         case update, start, pause, reset, addEvent
     }
+    public struct TimerDisplayWire: Codable, Equatable {
+        public enum Kind: String, Codable { case none, message, image }
+        public var kind: Kind
+        public var text: String?
+        public var fmt: String?
+        public var assetID: UUID?
+        public var caption: String?
+        public var captionFmt: String?
+        public var contentMode: String?
+        public init(kind: Kind, text: String? = nil, fmt: String? = nil, assetID: UUID? = nil, caption: String? = nil, captionFmt: String? = nil, contentMode: String? = nil) {
+            self.kind = kind
+            self.text = text
+            self.fmt = fmt
+            self.assetID = assetID
+            self.caption = caption
+            self.captionFmt = captionFmt
+            self.contentMode = contentMode
+        }
+    }
+    public struct CueAssetManifestItem: Codable, Equatable {
+        public var id: UUID
+        public var mime: String
+        public var sha256: String
+        public var byteCount: Int
+    }
+    public struct CueAssetChunk: Codable, Equatable {
+        public var id: UUID
+        public var offset: Int
+        public var data: String
+    }
 
     public var action   : Action
     public var timestamp: TimeInterval
@@ -37,6 +67,10 @@ public struct TimerMessage: Codable, Equatable {
         public var syncLamp: String?
         /// one-shot edge for cue/zero-flash haptic (optional)
         public var flashNow: Bool?
+        public var display: TimerDisplayWire?
+        public var assetManifest: [CueAssetManifestItem]?
+        public var assetRequests: [UUID]?
+        public var assetChunks: [CueAssetChunk]?
     /// Optional, only set by the **parent**. Mirrored read-only on children.
         var notesParent: String?
     public init(action: Action,
@@ -55,7 +89,11 @@ public struct TimerMessage: Codable, Equatable {
                       link: String? = nil,
                       controlsEnabled: Bool? = nil,
                       syncLamp: String? = nil,
-                      flashNow: Bool? = nil) {
+                      flashNow: Bool? = nil,
+                      display: TimerDisplayWire? = nil,
+                      assetManifest: [CueAssetManifestItem]? = nil,
+                      assetRequests: [UUID]? = nil,
+                      assetChunks: [CueAssetChunk]? = nil) {
           self.action            = action
           self.timestamp         = timestamp
           self.phase             = phase
@@ -67,11 +105,15 @@ public struct TimerMessage: Codable, Equatable {
           self.stopRemainingActive = stopRemainingActive
         self.cueEvents = cueEvents
                 self.restartEvents = restartEvents
-                self.sheetLabel = sheetLabel
+        self.sheetLabel = sheetLabel
         self.role              = role
                   self.link              = link
                   self.controlsEnabled   = controlsEnabled
                   self.syncLamp          = syncLamp
                   self.flashNow          = flashNow
+        self.display           = display
+        self.assetManifest     = assetManifest
+        self.assetRequests     = assetRequests
+        self.assetChunks       = assetChunks
       }
 }

@@ -3328,6 +3328,7 @@ struct MainScreen: View {
     @State private var stopStep: Int = 0       // 0 = start, 1 = duration
     @State private var tempStart: TimeInterval = 0
     @State private var events: [Event] = []
+    @StateObject private var cueDisplay = CueDisplayController()
     @EnvironmentObject private var cueBadge: CueBadgeState
     @State private var rawStops: [StopEvent] = []
     @State private var stopActive: Bool = false
@@ -3346,10 +3347,35 @@ struct MainScreen: View {
     
     func apply(_ sheet: CueSheet) {
 
-    // Defer event mapping to the view that owns `events`
-    NotificationCenter.default.post(name: .didLoadCueSheet, object: sheet)
-    UINotificationFeedbackGenerator().notificationOccurred(.success)
-}
+        cueDisplay.reset()
+        cueDisplay.buildTimeline(from: sheet)
+        // Defer event mapping to the view that owns `events`
+        NotificationCenter.default.post(name: .didLoadCueSheet, object: sheet)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+    @ViewBuilder private func displayBannerView() -> some View {
+        switch cueDisplay.slot {
+        case .none:
+            EmptyView()
+        case .message(let payload):
+            Text(payload.text)
+                .font(.custom("Roboto-SemiBold", size: 16))
+                .lineLimit(1)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: Capsule())
+        case .image(let payload):
+            HStack(spacing: 6) {
+                Image(systemName: "photo")
+                Text(payload.caption?.text ?? "Image")
+                    .lineLimit(1)
+            }
+            .font(.custom("Roboto-SemiBold", size: 15))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: Capsule())
+        }
+    }
     // Derive connected device display names for the Devices card.
         // Replace internals later with your canonical peer list if you expose one.
     private func connectedDeviceNamesForUI() -> [String] {
@@ -3869,27 +3895,30 @@ struct MainScreen: View {
                             let w = fullGeo.size.width  - (hm * 2)
                             let h = fullGeo.size.height * 0.22
                             // phone landscape timercard
-                            TimerCard(
-                                mode: $parentMode,
-                                flashZero: $flashZero,
-                                isRunning: phase == .running,
-                                flashStyle: settings.flashStyle,
-                                flashColor: settings.flashColor,
-                                syncDigits: countdownDigits,
-                                stopDigits: { switch eventMode { case .stop: return stopDigits; case .cue: return cueDigits; case .restart: return restartDigits } }(),
-                                phase: phase,
-                                mainTime: displayMainTime(),
-                                stopActive: stopActive,
-                                stopRemaining: stopRemaining,
-                                leftHint: "START POINT",
-                                rightHint: "DURATION",
-                                stopStep: stopStep,
-                                makeFlashed: makeFlashedOverlay,
-                                isCountdownActive: willCountDown,
-                                events: events,
-                                onClearEvents: { events.removeAll(); hasUnsaved = false }
-                            )
-                            .frame(width: w, height: h)
+                            VStack(spacing: 8) {
+                                displayBannerView()
+                                TimerCard(
+                                    mode: $parentMode,
+                                    flashZero: $flashZero,
+                                    isRunning: phase == .running,
+                                    flashStyle: settings.flashStyle,
+                                    flashColor: settings.flashColor,
+                                    syncDigits: countdownDigits,
+                                    stopDigits: { switch eventMode { case .stop: return stopDigits; case .cue: return cueDigits; case .restart: return restartDigits } }(),
+                                    phase: phase,
+                                    mainTime: displayMainTime(),
+                                    stopActive: stopActive,
+                                    stopRemaining: stopRemaining,
+                                    leftHint: "START POINT",
+                                    rightHint: "DURATION",
+                                    stopStep: stopStep,
+                                    makeFlashed: makeFlashedOverlay,
+                                    isCountdownActive: willCountDown,
+                                    events: events,
+                                    onClearEvents: { events.removeAll(); hasUnsaved = false }
+                                )
+                                .frame(width: w, height: h)
+                            }
                             .position(x: fullGeo.size.width/2, y: fullGeo.size.height/2)
                             .offset(y: 12)
                         }
@@ -3905,31 +3934,34 @@ struct MainScreen: View {
                                 mode: $parentMode,
                                 timer:
                                     //OG phone portrait timercard
-                                    TimerCard(
-                                        mode: $parentMode,
-                                        flashZero: $flashZero,
-                                        isRunning: phase == .running,
-                                        flashStyle: settings.flashStyle,
-                                        flashColor: settings.flashColor,
-                                        syncDigits: countdownDigits,
-                                        stopDigits: eventMode == .stop ? stopDigits
-                                        : eventMode == .cue  ? cueDigits
-                                        : restartDigits,
-                                        phase: phase,
-                                        mainTime: displayMainTime(),
-                                        stopActive: stopActive,
-                                        stopRemaining: stopRemaining,
-                                        leftHint: "START POINT",
-                                        rightHint: "DURATION",
-                                        stopStep: stopStep,
-                                        makeFlashed: makeFlashedOverlay,
-                                        isCountdownActive: willCountDown,
-                                        events: events,
-                                        onClearEvents: {
-                                            events.removeAll()
-                                            hasUnsaved = false
-                                        }
-                                    )
+                                    VStack(spacing: 8) {
+                                        displayBannerView()
+                                        TimerCard(
+                                            mode: $parentMode,
+                                            flashZero: $flashZero,
+                                            isRunning: phase == .running,
+                                            flashStyle: settings.flashStyle,
+                                            flashColor: settings.flashColor,
+                                            syncDigits: countdownDigits,
+                                            stopDigits: eventMode == .stop ? stopDigits
+                                            : eventMode == .cue  ? cueDigits
+                                            : restartDigits,
+                                            phase: phase,
+                                            mainTime: displayMainTime(),
+                                            stopActive: stopActive,
+                                            stopRemaining: stopRemaining,
+                                            leftHint: "START POINT",
+                                            rightHint: "DURATION",
+                                            stopStep: stopStep,
+                                            makeFlashed: makeFlashedOverlay,
+                                            isCountdownActive: willCountDown,
+                                            events: events,
+                                            onClearEvents: {
+                                                events.removeAll()
+                                                hasUnsaved = false
+                                            }
+                                        )
+                                    }
                                 
                                 // Lock timer interactions while child is connected
                                     .allowsHitTesting(!(lockActive || uiLockedByParent)),                                            settings:
@@ -5055,34 +5087,37 @@ struct MainScreen: View {
             let w  = fullGeo.size.width  - (hm * 2)
             let h  = fullGeo.size.height * 0.22   // phone-landscape proportion
 //ipad mini timercard for when in landscape
-            TimerCard(
-                mode: $parentMode,
-                flashZero: $flashZero,
-                isRunning: phase == .running,
-                flashStyle: settings.flashStyle,
-                flashColor: settings.flashColor,
-                syncDigits: countdownDigits,
-                stopDigits: {
-                    switch eventMode {
-                    case .stop:    return stopDigits
-                    case .cue:     return cueDigits
-                    case .restart: return restartDigits
-                    }
-                }(),
-                phase: phase,
-                mainTime: displayMainTime(),
-                stopActive: stopActive,
-                stopRemaining: stopRemaining,
-                // phone style ⇒ no affordance text
-                leftHint: "",
-                rightHint: "",
-                stopStep: stopStep,
-                makeFlashed: makeFlashedOverlay,
-                isCountdownActive: willCountDown,
-                events: events,
-                onClearEvents: { events.removeAll(); hasUnsaved = false }
-            )
-            .frame(width: w, height: h)
+            VStack(spacing: 8) {
+                displayBannerView()
+                TimerCard(
+                    mode: $parentMode,
+                    flashZero: $flashZero,
+                    isRunning: phase == .running,
+                    flashStyle: settings.flashStyle,
+                    flashColor: settings.flashColor,
+                    syncDigits: countdownDigits,
+                    stopDigits: {
+                        switch eventMode {
+                        case .stop:    return stopDigits
+                        case .cue:     return cueDigits
+                        case .restart: return restartDigits
+                        }
+                    }(),
+                    phase: phase,
+                    mainTime: displayMainTime(),
+                    stopActive: stopActive,
+                    stopRemaining: stopRemaining,
+                    // phone style ⇒ no affordance text
+                    leftHint: "",
+                    rightHint: "",
+                    stopStep: stopStep,
+                    makeFlashed: makeFlashedOverlay,
+                    isCountdownActive: willCountDown,
+                    events: events,
+                    onClearEvents: { events.removeAll(); hasUnsaved = false }
+                )
+                .frame(width: w, height: h)
+            }
             .position(x: fullGeo.size.width / 2, y: fullGeo.size.height / 2) // (d) vertically centered
             // defensively strip any parent-applied effects
             .compositingGroup()
@@ -5384,28 +5419,31 @@ struct MainScreen: View {
                     mode: $parentMode,
                     timer:
                         // ipad timercard in landscape, using iphone portrait timercard as the head of a columned right pane, hence the name
-                        TimerCard(
-                            mode: $parentMode,
-                            flashZero: $flashZero,
-                            isRunning: phase == .running,
-                            flashStyle: settings.flashStyle,
-                            flashColor: settings.flashColor,
-                            syncDigits: countdownDigits,
-                            stopDigits: eventMode == .stop ? stopDigits
-                            : eventMode == .cue  ? cueDigits
-                            :                      restartDigits,
-                            phase: phase,
-                            mainTime: displayMainTime(),
-                            stopActive: stopActive,
-                            stopRemaining: stopRemaining,
-                            leftHint: "START POINT",
-                            rightHint: "DURATION",
-                            stopStep: stopStep,
-                            makeFlashed: makeFlashedOverlay,
-                            isCountdownActive: willCountDown,
-                            events: events,
-                            onClearEvents: { events.removeAll(); hasUnsaved = false }
-                        )
+                        VStack(spacing: 8) {
+                            displayBannerView()
+                            TimerCard(
+                                mode: $parentMode,
+                                flashZero: $flashZero,
+                                isRunning: phase == .running,
+                                flashStyle: settings.flashStyle,
+                                flashColor: settings.flashColor,
+                                syncDigits: countdownDigits,
+                                stopDigits: eventMode == .stop ? stopDigits
+                                : eventMode == .cue  ? cueDigits
+                                :                      restartDigits,
+                                phase: phase,
+                                mainTime: displayMainTime(),
+                                stopActive: stopActive,
+                                stopRemaining: stopRemaining,
+                                leftHint: "START POINT",
+                                rightHint: "DURATION",
+                                stopStep: stopStep,
+                                makeFlashed: makeFlashedOverlay,
+                                isCountdownActive: willCountDown,
+                                events: events,
+                                onClearEvents: { events.removeAll(); hasUnsaved = false }
+                            )
+                        }
                         .allowsHitTesting(!(lockActive || uiLockedByParent)),
                     settings:
                         SettingsPagerCard(
@@ -5713,35 +5751,38 @@ struct MainScreen: View {
                     CardMorphSwitcher(
                         mode: $parentMode,
                         timer:
-                            TimerCard(
-                                mode: $parentMode,
-                                flashZero: $flashZero,
-                                isRunning: phase == .running,
-                                flashStyle: settings.flashStyle,
-                                flashColor: settings.flashColor,
-                                syncDigits: countdownDigits,
-                                stopDigits: {
-                                    switch eventMode {
-                                    case .stop:    return stopDigits
-                                    case .cue:     return cueDigits
-                                    case .restart: return restartDigits
+                            VStack(spacing: 8) {
+                                displayBannerView()
+                                TimerCard(
+                                    mode: $parentMode,
+                                    flashZero: $flashZero,
+                                    isRunning: phase == .running,
+                                    flashStyle: settings.flashStyle,
+                                    flashColor: settings.flashColor,
+                                    syncDigits: countdownDigits,
+                                    stopDigits: {
+                                        switch eventMode {
+                                        case .stop:    return stopDigits
+                                        case .cue:     return cueDigits
+                                        case .restart: return restartDigits
+                                        }
+                                    }(),
+                                    phase: phase,
+                                    mainTime: displayMainTime(),
+                                    stopActive: stopActive,
+                                    stopRemaining: stopRemaining,
+                                    leftHint: "START POINT",
+                                    rightHint: "DURATION",
+                                    stopStep: stopStep,
+                                    makeFlashed: makeFlashedOverlay,
+                                    isCountdownActive: willCountDown,
+                                    events: events,
+                                    onClearEvents: {
+                                        events.removeAll()
+                                        hasUnsaved = false
                                     }
-                                }(),
-                                phase: phase,
-                                mainTime: displayMainTime(),
-                                stopActive: stopActive,
-                                stopRemaining: stopRemaining,
-                                leftHint: "START POINT",
-                                rightHint: "DURATION",
-                                stopStep: stopStep,
-                                makeFlashed: makeFlashedOverlay,
-                                isCountdownActive: willCountDown,
-                                events: events,
-                                onClearEvents: {
-                                    events.removeAll()
-                                    hasUnsaved = false
-                                }
-                            )
+                                )
+                            }
                             .allowsHitTesting(!(lockActive || uiLockedByParent))
                             .transition(.opacity)
                             .padding(.horizontal, 20)
@@ -6195,6 +6236,7 @@ struct MainScreen: View {
 
         // 2) Advance the main clock (do this BEFORE event checks)
         elapsed = Date().timeIntervalSince(startDate ?? Date())
+        cueDisplay.apply(elapsed: elapsed)
         
         // 4) Handle next due event
             if let next = events.first, elapsed >= next.fireTime {
@@ -6270,6 +6312,7 @@ struct MainScreen: View {
                     remaining: elapsed,
                     stopEvents: remainingStopWires
                 )
+                cueDisplay.reset()
                 if syncSettings.role == .parent && syncSettings.isEnabled {
                     syncSettings.broadcastToChildren(resetMsg)
                 }
@@ -10078,4 +10121,3 @@ private extension SyncTimerApp {
         }
     }
 }
-

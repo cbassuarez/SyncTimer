@@ -7,6 +7,8 @@
 
 import Foundation
 import UniformTypeIdentifiers
+import UIKit
+import CryptoKit
 
 @MainActor
 final class CueLibraryStore: ObservableObject {
@@ -35,10 +37,23 @@ extension UTType {
 }
 // MARK: - Uniquing helpers
 extension CueLibraryStore {
+    struct AssetMeta: Codable, Equatable {
+        var id: UUID
+        var mime: String
+        var ext: String
+        var sha256: String
+        var byteCount: Int
+        var created: Date
+    }
     // Paths
     private var baseURL: URL {
         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("CueSheets", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+    private var assetsURL: URL {
+        let url = baseURL.appendingPathComponent("Assets", isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
@@ -54,6 +69,7 @@ extension CueLibraryStore {
             index.sheets.removeValue(forKey: metaID)
             index.recents.removeAll { $0 == metaID }
             try persistIndex()
+            garbageCollectUnusedAssets()
             publish()
         }
     
@@ -124,10 +140,144 @@ extension CueLibraryStore {
             return false
         }
     
+    // MARK: - Assets
+    private func assetMetaURL(for id: UUID) -> URL { assetsURL.appendingPathComponent("\(id.uuidString).json") }
+    private func assetDataURL(for meta: AssetMeta) -> URL { assetsURL.appendingPathComponent("\(meta.id.uuidString).\(meta.ext)") }
+
+    func assetMeta(id: UUID) -> AssetMeta? {
+        let url = assetMetaURL(for: id)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(AssetMeta.self, from: data)
+    }
+
+    func assetData(id: UUID) -> Data? {
+        guard let meta = assetMeta(id: id) else { return nil }
+        return try? Data(contentsOf: assetDataURL(for: meta))
+    }
+
+    private func hasAlpha(_ image: UIImage) -> Bool {
+        guard let cg = image.cgImage else { return false }
+        switch cg.alphaInfo {
+        case .first, .last, .premultipliedFirst, .premultipliedLast, .alphaOnly:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func redraw(_ image: UIImage, maxEdge: CGFloat = 2048) -> UIImage? {
+        var targetSize = image.size
+        let longest = max(targetSize.width, targetSize.height)
+        if longest > maxEdge, longest > 0 {
+            let scale = maxEdge / longest
+            targetSize = CGSize(width: targetSize.width * scale, height: targetSize.height * scale)
+        }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+    }
+
+    @discardableResult
+    func ingestImage(data: Data, preferLossy: Bool = true) throws -> UUID {
+        guard let ui = UIImage(data: data) else {
+            throw NSError(domain: "CueLibraryStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid image data"])
+        }
+        guard let sanitized = redraw(ui) else {
+            throw NSError(domain: "CueLibraryStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "Unable to redraw image"])
+        }
+        let alpha = hasAlpha(sanitized)
+        var mime = "image/png"
+        var ext = "png"
+        var encoded = sanitized.pngData() ?? data
+        if preferLossy, !alpha, let jpg = sanitized.jpegData(compressionQuality: 0.88) {
+            mime = "image/jpeg"
+            ext = "jpg"
+            encoded = jpg
+        }
+        let sha = SHA256.hash(data: encoded).compactMap { String(format: "%02x", $0) }.joined()
+        let id = UUID()
+        let meta = AssetMeta(id: id, mime: mime, ext: ext, sha256: sha, byteCount: encoded.count, created: Date())
+        try encoded.write(to: assetDataURL(for: meta), options: .atomic)
+        let metaData = try JSONEncoder().encode(meta)
+        try metaData.write(to: assetMetaURL(for: id), options: .atomic)
+        return id
+    }
+
+    func exportAssetBlob(id: UUID) -> CueXML.AssetBlob? {
+        guard let meta = assetMeta(id: id), let data = try? Data(contentsOf: assetDataURL(for: meta)) else { return nil }
+        let sha = SHA256.hash(data: data).compactMap { String(format: "%02x", $0) }.joined()
+        return CueXML.AssetBlob(id: meta.id, mime: meta.mime, sha256: sha, data: data)
+    }
+
+    func garbageCollectUnusedAssets() {
+        let used = referencedAssetIDs()
+        guard let metas = try? FileManager.default.contentsOfDirectory(at: assetsURL, includingPropertiesForKeys: nil) else { return }
+        for url in metas where url.pathExtension.lowercased() == "json" {
+            guard let data = try? Data(contentsOf: url),
+                  let meta = try? JSONDecoder().decode(AssetMeta.self, from: data) else { continue }
+            if !used.contains(meta.id) {
+                _ = try? FileManager.default.removeItem(at: assetDataURL(for: meta))
+                _ = try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
+
+    private func referencedAssetIDs() -> Set<UUID> {
+        var ids: Set<UUID> = []
+        for meta in index.sheets.values {
+            let url = fileURL(for: meta)
+            guard let data = try? Data(contentsOf: url),
+                  let sheet = try? CueXML.read(data) else { continue }
+            for e in sheet.events {
+                if case .image(let payload)? = e.payload {
+                    ids.insert(payload.assetID)
+                }
+            }
+        }
+        return ids
+    }
+
+    private func ingestEmbeddedAssets(for sheet: inout CueSheet, blobs: [CueXML.AssetBlob]) {
+        guard !blobs.isEmpty else { return }
+        var remap: [UUID: UUID] = [:]
+        for blob in blobs {
+            var targetID = blob.id
+            if let existing = assetMeta(id: blob.id) {
+                if existing.sha256 != blob.sha256 {
+                    targetID = UUID()
+                }
+            }
+            let ext: String
+            if blob.mime.contains("jpeg") { ext = "jpg" }
+            else if blob.mime.contains("png") { ext = "png" }
+            else { ext = URL(fileURLWithPath: blob.mime).pathExtension.isEmpty ? "bin" : URL(fileURLWithPath: blob.mime).pathExtension }
+            let meta = AssetMeta(id: targetID, mime: blob.mime, ext: ext, sha256: blob.sha256, byteCount: blob.data.count, created: Date())
+            try? blob.data.write(to: assetDataURL(for: meta), options: .atomic)
+            if let encoded = try? JSONEncoder().encode(meta) {
+                try? encoded.write(to: assetMetaURL(for: meta.id), options: .atomic)
+            }
+            if targetID != blob.id {
+                remap[blob.id] = targetID
+            }
+        }
+        guard !remap.isEmpty else { return }
+        for idx in sheet.events.indices {
+            if case .image(let payload)? = sheet.events[idx].payload,
+               let newID = remap[payload.assetID] {
+                sheet.events[idx].payload = .image(.init(assetID: newID, contentMode: payload.contentMode, caption: payload.caption))
+            }
+        }
+    }
+
         
     // MARK: CRUD
     func save(_ sheet: CueSheet, intoFolderID folderID: UUID? = nil, tags: [String]) throws {
         var s = sheet
+        s = s.normalized()
         // Titles
         if s.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             s.title = "Untitled"
@@ -167,7 +317,8 @@ extension CueLibraryStore {
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
 
         let data = try Data(contentsOf: url)
-        var s = try CueXML.read(data)
+        var (s, assets) = try CueXML.readWithAssets(data)
+        ingestEmbeddedAssets(for: &s, blobs: assets)
         s.title = renameTo ?? s.title
         s.fileName = sanitized((renameTo ?? s.title) + ".xml")
 
@@ -178,7 +329,8 @@ extension CueLibraryStore {
 
     func load(meta: CueLibraryIndex.SheetMeta) throws -> CueSheet {
         let data = try Data(contentsOf: fileURL(for: meta))
-        var s = try CueXML.read(data)
+        var (s, assets) = try CueXML.readWithAssets(data)
+        ingestEmbeddedAssets(for: &s, blobs: assets)
         s.created = meta.created
         s.modified = meta.modified
         s.fileName = meta.fileName; s.id = meta.id; s.tags = meta.tags; s.lastOpened = Date()
@@ -191,7 +343,21 @@ extension CueLibraryStore {
 
     func exportXML(_ metas: [CueLibraryIndex.SheetMeta]) throws -> [URL] {
         // returns file URLs for the caller to feed into FileExporter; zipping multi-select happens in UI layer
-        return try metas.map { meta in fileURL(for: meta) }
+        return try metas.map { meta in
+            let url = fileURL(for: meta)
+            let data = try Data(contentsOf: url)
+            var (sheet, _) = try CueXML.readWithAssets(data)
+            var blobs: [CueXML.AssetBlob] = []
+            for e in sheet.events {
+                if case .image(let payload)? = e.payload, let blob = exportAssetBlob(id: payload.assetID) {
+                    blobs.append(blob)
+                }
+            }
+            let xml = CueXML.write(sheet, assets: blobs)
+            let temp = FileManager.default.temporaryDirectory.appendingPathComponent(meta.fileName)
+            try xml.write(to: temp, options: .atomic)
+            return temp
+        }
     }
 
     // MARK: Index persist
