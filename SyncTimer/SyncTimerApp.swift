@@ -1750,6 +1750,7 @@ struct SyncBar: View {
     @EnvironmentObject private var syncSettings: SyncSettings
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @State private var suppressNextOpenSettingsTap = false
 
     /// True when either a countdown or the stopwatch is active.
     var isCounting: Bool
@@ -1792,7 +1793,6 @@ struct SyncBar: View {
             }
             .frame(maxWidth: .infinity)
             .lineLimit(1)
-            .fixedSize()
             .layoutPriority(1)
             .accessibilityLabel("Switch role")
             .accessibilityHint("Long-press to toggle between child and parent")
@@ -1800,8 +1800,11 @@ struct SyncBar: View {
             .gesture(roleGesture.onEnded { value in
                 switch value {
                 case .first(true):
-                    guard settings.allowSyncChangesInMainView else { return }
-                    guard !isCounting else { return }
+                    guard !isCounting else {
+                        suppressNextOpenSettingsTap = true
+                        return
+                    }
+                    suppressNextOpenSettingsTap = true
                     let newRole: SyncSettings.Role = (syncSettings.role == .parent ? .child : .parent)
                     onRoleConfirmed(newRole)
                 case .second:
@@ -1812,42 +1815,48 @@ struct SyncBar: View {
             })
 
             // ── Sync/Stop button ─────────────────────────
-                        Spacer(minLength: 0)
-                        // ── Sync/Stop + lamp, always 8 pt apart ─────────
+            Spacer(minLength: 0)
+            // ── Sync/Stop + lamp, always 8 pt apart ─────────
             HStack(spacing: 8) {
-                            // Label mirrors Settings; tap is inert, long-press opens connections
-                            Text(isSyncEnabled ? "STOP" : "SYNC")
-                                .font(.custom("Roboto-SemiBold", size: 24))
-                                .foregroundColor(activeColor)
-                                .fixedSize()
+                // Label mirrors Settings; tap is inert, long-press opens connections
+                Text(isSyncEnabled ? "STOP" : "SYNC")
+                    .font(.custom("Roboto-SemiBold", size: 24))
+                    .foregroundColor(activeColor)
+                    .fixedSize()
                 let lampState: SyncStatusLamp.LampState =
                     syncSettings.isEstablished ? .connected :
                     (syncSettings.isEnabled ? .streaming : .off)
 
-                        SyncStatusLamp(
-                            state: lampState,
-                            size: 18,
-                            highContrast: settings.highContrastSyncIndicator
-                        )
+                SyncStatusLamp(
+                    state: lampState,
+                    size: 18,
+                    highContrast: settings.highContrastSyncIndicator
+                )
 
-                        }
-                        .contentShape(Rectangle())
-                        .gesture(syncGesture.onEnded { value in
-                            switch value {
-                            case .first(true):
-                                guard settings.allowSyncChangesInMainView else { return }
-                                onToggleSyncMode()
-                            case .second:
-                                onOpenSyncSettings()
-                            default:
-                                break
-                            }
-                        })
+            }
+            .contentShape(Rectangle())
+            .gesture(syncGesture.onEnded { value in
+                switch value {
+                case .first(true):
+                    suppressNextOpenSettingsTap = true
+                    onToggleSyncMode()
+                case .second:
+                    onOpenSyncSettings()
+                default:
+                    break
+                }
+            })
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 2)
         .contentShape(Rectangle())
-        .onTapGesture(perform: onOpenSyncSettings)
+        .onTapGesture {
+            guard suppressNextOpenSettingsTap == false else {
+                suppressNextOpenSettingsTap = false
+                return
+            }
+            onOpenSyncSettings()
+        }
     }
 
 }
