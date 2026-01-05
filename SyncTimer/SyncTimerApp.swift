@@ -2522,124 +2522,124 @@ struct TimerCard: View {
                 let cardBody = ZStack {
                     // ── (A) Card background with drop shadow ─────────────────
                     if !isLandscape || isPadLayout {
-                      Group {
-                          if settings.lowPowerMode {
-                                                    // Low-Power: flat fill only (no blur/material)
-                                                    RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-                                                      .fill(isDark ? Color.black : Color.white)
-                                                      
-
-                                                  } else {
-                          // Normal: material + subtle “glass” cues (safe on all iOS 16/17)
-                          let corner: CGFloat = cardCornerRadius
-                          let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
-
-                          shape
-                            .fill(.ultraThinMaterial)
-                            .glassEffect()
-                                                      
-                            // light “glass” rim stroke (looks premium, cheap to render)
-                            .overlay(
-                              shape
-                                .strokeBorder(
-                                  LinearGradient(
-                                    colors: [
-                                      Color.white.opacity(colorScheme == .light ? 0.18 : 0.08),
-                                      Color.white.opacity(0.03)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                  ),
-                                  lineWidth: 1
-                                )
-                            )
-                            // soft internal highlight for light mode only
-                            .overlay(
-                              shape
-                                .fill(
-                                  LinearGradient(
-                                    colors: [
-                                      Color.white.opacity(colorScheme == .light ? 0.10 : 0.0),
-                                      Color.white.opacity(0.00)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                  )
-                                )
-                            )
-                            .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 6)
-                                                        // ⬇️ PINNED overlays on the shape's own bounds
-                                                        .overlay(alignment: .bottomLeading) {
-                                                            if (!isLandscape || isPadLayout && !phoneStyleOnMiniLandscape) && mode == .stop {
-                                                                GeometryReader { p in
-                                                                    let tintH = floor(p.size.height * 0.4)
-                                                                    VStack(spacing: 0) {
-                                                                        Spacer()                                // ↓ pin to bottom
-                                                                        HStack(spacing: 0) {
-                                                                            LinearGradient(colors: [Color.gray.opacity(0.125), .clear],
-                                                                                           startPoint: .bottom, endPoint: .top)
-                                                                                .frame(width: floor(p.size.width * 0.5), height: tintH)
-                                                                                .mask(LinearGradient(colors: [.black, .clear],
-                                                                                                     startPoint: .trailing, endPoint: .leading))
-                                                                                .clipShape(RoundedCorners(radius: corner, corners: [.bottomLeft]))
-                                                                            Spacer()                            // ← keep on left half
-                                                                        }
-                                                                    }
-                                                                }
-                                                                .allowsHitTesting(false)
-                                                            }
-                                                        }
-                                                        .overlay(alignment: .bottomTrailing) {
-                                                            if (!isLandscape || isPadLayout && !phoneStyleOnMiniLandscape) && mode == .sync {
-                                                                GeometryReader { p in
-                                                                    let tintH = floor(p.size.height * 0.4)
-                                                                    VStack(spacing: 0) {
-                                                                        Spacer()                                // ↓ pin to bottom
-                                                                        HStack(spacing: 0) {
-                                                                            Spacer()                            // → keep on right half
-                                                                            LinearGradient(colors: [Color.gray.opacity(0.125), .clear],
-                                                                                           startPoint: .bottom, endPoint: .top)
-                                                                                .frame(width: floor(p.size.width * 0.5), height: tintH)
-                                                                                .mask(LinearGradient(colors: [.black, .clear],
-                                                                                                     startPoint: .leading, endPoint: .trailing))
-                                                                                .clipShape(RoundedCorners(radius: corner, corners: [.bottomRight]))
-                                                                        }
-                                                                    }
-                                                                }
-                                                                .allowsHitTesting(false)
-                                                            }
-                                                        }
-                                                        .overlay(alignment: .bottom) {
-                                                            if !isLandscape || isPadLayout && !phoneStyleOnMiniLandscape {
-                                                                GeometryReader { p in
-                                                                    let lineH = floor(p.size.height * 0.4)
-                                                                    let px    = 1.5 / UIScreen.main.scale
-
-                                                                    VStack(spacing: 0) {
-                                                                        Spacer() // ↓ pins the divider to the bottom of the GeometryReader
-                                                                        Rectangle()
-                                                                            .fill(
-                                                                                LinearGradient(colors: [Color.gray.opacity(0.18), .clear],
-                                                                                               startPoint: .bottom, endPoint: .top)
-                                                                            )
-                                                                            .frame(width: px, height: lineH)  // true hairline
-                                                                            .offset(y: -px * 0.5)             // half-pixel snap
-                                                                            .frame(maxWidth: .infinity, alignment: .center)
-                                                                    }
-                                                                }
-                                                                .allowsHitTesting(false)
-                                                            }
-                                                        }
-
+                        Group {
+                            if settings.lowPowerMode {
+                                // Low-Power: flat fill only (no blur/material)
+                                RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+                                    .fill(isDark ? Color.black : Color.white)
+                                
+                                
+                            } else {
+                                // Normal: material + subtle “glass” cues (safe on all iOS 16/17)
+                                let corner: CGFloat = cardCornerRadius
+                                let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
+                                
+                                shape
+                                    .fill(.ultraThinMaterial)
+                                    .glassEffect()
+                                
+                                // light “glass” rim stroke (looks premium, cheap to render)
+                                    .overlay(
+                                        shape
+                                            .strokeBorder(
+                                                LinearGradient(
+                                                    colors: [
+                                                        Color.white.opacity(colorScheme == .light ? 0.18 : 0.08),
+                                                        Color.white.opacity(0.03)
+                                                    ],
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                ),
+                                                lineWidth: 1
+                                            )
+                                    )
+                                // soft internal highlight for light mode only
+                                    .overlay(
+                                        shape
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: [
+                                                        Color.white.opacity(colorScheme == .light ? 0.10 : 0.0),
+                                                        Color.white.opacity(0.00)
+                                                    ],
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                )
+                                            )
+                                    )
+                                    .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 6)
+                                // ⬇️ PINNED overlays on the shape's own bounds
+                                    .overlay(alignment: .bottomLeading) {
+                                        if (!isLandscape || isPadLayout && !phoneStyleOnMiniLandscape) && mode == .stop {
+                                            GeometryReader { p in
+                                                let tintH = floor(p.size.height * 0.4)
+                                                VStack(spacing: 0) {
+                                                    Spacer()                                // ↓ pin to bottom
+                                                    HStack(spacing: 0) {
+                                                        LinearGradient(colors: [Color.gray.opacity(0.125), .clear],
+                                                                       startPoint: .bottom, endPoint: .top)
+                                                        .frame(width: floor(p.size.width * 0.5), height: tintH)
+                                                        .mask(LinearGradient(colors: [.black, .clear],
+                                                                             startPoint: .trailing, endPoint: .leading))
+                                                        .clipShape(RoundedCorners(radius: corner, corners: [.bottomLeft]))
+                                                        Spacer()                            // ← keep on left half
+                                                    }
+                                                }
+                                            }
+                                            .allowsHitTesting(false)
+                                        }
+                                    }
+                                    .overlay(alignment: .bottomTrailing) {
+                                        if (!isLandscape || isPadLayout && !phoneStyleOnMiniLandscape) && mode == .sync {
+                                            GeometryReader { p in
+                                                let tintH = floor(p.size.height * 0.4)
+                                                VStack(spacing: 0) {
+                                                    Spacer()                                // ↓ pin to bottom
+                                                    HStack(spacing: 0) {
+                                                        Spacer()                            // → keep on right half
+                                                        LinearGradient(colors: [Color.gray.opacity(0.125), .clear],
+                                                                       startPoint: .bottom, endPoint: .top)
+                                                        .frame(width: floor(p.size.width * 0.5), height: tintH)
+                                                        .mask(LinearGradient(colors: [.black, .clear],
+                                                                             startPoint: .leading, endPoint: .trailing))
+                                                        .clipShape(RoundedCorners(radius: corner, corners: [.bottomRight]))
+                                                    }
+                                                }
+                                            }
+                                            .allowsHitTesting(false)
+                                        }
+                                    }
+                                    .overlay(alignment: .bottom) {
+                                        if !isLandscape || isPadLayout && !phoneStyleOnMiniLandscape {
+                                            GeometryReader { p in
+                                                let lineH = floor(p.size.height * 0.4)
+                                                let px    = 1.5 / UIScreen.main.scale
+                                                
+                                                VStack(spacing: 0) {
+                                                    Spacer() // ↓ pins the divider to the bottom of the GeometryReader
+                                                    Rectangle()
+                                                        .fill(
+                                                            LinearGradient(colors: [Color.gray.opacity(0.18), .clear],
+                                                                           startPoint: .bottom, endPoint: .top)
+                                                        )
+                                                        .frame(width: px, height: lineH)  // true hairline
+                                                        .offset(y: -px * 0.5)             // half-pixel snap
+                                                        .frame(maxWidth: .infinity, alignment: .center)
+                                                }
+                                            }
+                                            .allowsHitTesting(false)
+                                        }
+                                    }
+                                
+                            }
                         }
-                      }
-                      .ignoresSafeArea(edges: .horizontal)
-                   
-                    
-
+                        .ignoresSafeArea(edges: .horizontal)
+                        
+                        
+                        
                         if settings.flashStyle == .tint && flashZero {
-                        
-                        
+                            
+                            
                             flashColor
                                 .ignoresSafeArea()
                                 .transition(.opacity)
@@ -2649,7 +2649,7 @@ struct TimerCard: View {
                                 .opacity(0.5)
                         }
                     }
-
+                    
                     // ── (B) Full vertical stack ────────────────────────────
                     VStack(spacing: 0) {
                         // B.1) Top hints “START POINT” / “DURATION” ────────────
@@ -2792,7 +2792,7 @@ struct TimerCard: View {
                         .padding(.horizontal, 12)
                         Spacer(minLength: 4)
                             .accessibilityElement(children: .combine)
-
+                        
                         if let payload = messagePayload, showCollapsedMessage, placement == .gap {
                             CollapsedMessageBanner(payload: payload, onDismiss: dismissMessage, onExpand: expandMessage)
                                 .padding(.horizontal, 12)
@@ -2985,7 +2985,7 @@ struct TimerCard: View {
                         x: geo.size.width / 2,
                         y: geo.size.height - (isLandscape ? 24 : 16)
                     )
-
+                    
                     // ── (C) Tap zones to switch mode ─────────────────────
                     if !isLandscape || isPadLayout && !phoneStyleOnMiniLandscape {
                         HStack(spacing: 0) {
@@ -3009,6 +3009,7 @@ struct TimerCard: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         
                     }
+                }
                 let baseCard = cardBody
                     .frame(
                         width: cardWidth,
