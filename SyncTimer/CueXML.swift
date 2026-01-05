@@ -48,6 +48,7 @@ enum CueXML {
         xml += "  </meta>\n"
         xml += "  <events>\n"
         for e in normalized.events {
+            var kind = e.kind
             let hold = (e.holdSeconds != nil) ? " holdSeconds=\"\(e.holdSeconds!)\"" : ""
             let label = (e.label != nil) ? " label=\"\(esc(e.label!))\"" : ""
             var extra = ""
@@ -63,6 +64,11 @@ enum CueXML {
                     if let caption = payload.caption, !caption.spans.isEmpty {
                         extra += " captionFmt=\"\(encodeSpans(caption.spans))\""
                     }
+                } else {
+#if DEBUG
+                    assertionFailure("Image event missing payload/assetID; writing as cue")
+#endif
+                    kind = .cue
                 }
             case .cue:
                 if let mode = e.rehearsalMarkMode, mode != .off {
@@ -70,7 +76,7 @@ enum CueXML {
                 }
             default: break
             }
-            xml += "    <event type=\"\(e.kind.rawValue)\" at=\"\(e.at)\"\(hold)\(label)\(extra)/>\n"
+            xml += "    <event type=\"\(kind.rawValue)\" at=\"\(e.at)\"\(hold)\(label)\(extra)/>\n"
         }
         xml += "  </events>\n"
         if version >= 2, !assets.isEmpty {
