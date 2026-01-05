@@ -3106,14 +3106,15 @@ struct TimerCard: View {
                                                             .stroke(Color.primary.opacity(0.12), lineWidth: 1)
                                                     )
                                                     // Pin to the same left inset as your timer/circles (12pt)
-                                                                    .padding(.leading, 24)
+                                                                    .padding(.leading, 12)
+                                                                    .offset(y: -4)
+
                                                                     // Drop ~12pt lower than before
                                                                     .padding(.top, badgeTopOffset + 12)
                                                                     // Ensure it hugs the left; no accidental centering
                                                                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                                            .transition(.move(edge: .top).combined(with: .opacity))
-                                            .allowsHitTesting(true)
+                                                                    .transition(.opacity)                                            .allowsHitTesting(true)
                                         }
                                     }
 
