@@ -907,7 +907,7 @@ private func glassCardBackground(isEditing: Bool) -> some View {
 private struct CueSheetNotesCard: View {
     @Binding var notes: String?
     let modified: Date
-    @Binding var focus: DetailsSection.Field?
+    let focus: FocusState<DetailsSection.Field?>.Binding
     private enum Mode { case edit, preview }
     @State private var mode: Mode = .edit
     @State private var isExpanded: Bool = false
@@ -956,11 +956,11 @@ private struct CueSheetNotesCard: View {
         }
         .onChange(of: notesFocused) { newValue in
             if newValue {
-                focus = .notes
+                focus.wrappedValue = .notes
                 withAnimation(.easeInOut(duration: 0.18)) { isExpanded = true }
                 mode = .edit
-            } else if focus == .notes {
-                focus = nil
+            } else if focus.wrappedValue == .notes {
+                focus.wrappedValue = nil
                 if !binding.wrappedValue.isEmpty {
                     withAnimation(.easeInOut(duration: 0.18)) {
                         isExpanded = false
