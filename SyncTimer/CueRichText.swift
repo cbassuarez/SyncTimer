@@ -15,9 +15,10 @@ func attributedText(from payload: CueSheet.MessagePayload) -> AttributedString {
         let lower = max(0, span.location)
         let upper = min(payload.text.count, span.location + span.length)
         guard lower < upper else { continue }
-        guard let start = attributed.index(attributed.startIndex, offsetBy: lower, limitedBy: attributed.endIndex),
-              let end = attributed.index(attributed.startIndex, offsetBy: upper, limitedBy: attributed.endIndex),
-              start < end else { continue }
+        guard lower < upper, upper <= attributed.characters.count else { continue }
+                let start = attributed.index(attributed.startIndex, offsetByCharacters: lower)
+                let end = attributed.index(start, offsetByCharacters: upper - lower)
+                guard start < end else { continue }
         let range = start..<end
 
         if span.styles.contains(.bold) {
