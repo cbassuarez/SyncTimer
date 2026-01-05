@@ -3106,6 +3106,10 @@ struct TimerCard: View {
                         .zIndex(2)
                     }
                 }
+                .frame(
+                    width: cardWidth,
+                    height: cardHeight
+                )
                 .overlay(alignment: .topLeading) {
                     if showOverlayBanner {
                         ScoreCueBanner(
@@ -3123,10 +3127,6 @@ struct TimerCard: View {
                         .zIndex(3)
                     }
                 }
-                .frame(
-                    width: cardWidth,
-                    height: cardHeight
-                )
                 .padding(.horizontal, horizontalInset)
             }
             .accessibilityElement(children: .combine)
@@ -3320,18 +3320,18 @@ struct TimerCard: View {
         var isSource: Bool = true
 
         var body: some View {
-            let corner: CGFloat = isBadge ? 6 : 8
+            let corner: CGFloat = isBadge ? 3 : 4
             let base = Text(text)
                 .font(.system(size: isBadge ? 12 : 14, weight: .heavy, design: .rounded))
                 .padding(.horizontal, isBadge ? 8 : 10)
                 .padding(.vertical, isBadge ? 4 : 6)
                 .background(
                     RoundedRectangle(cornerRadius: corner, style: .continuous)
-                                           .fill(Color.primary.opacity(0.22))
+                        .fill(Color.primary.opacity(0.32))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: corner, style: .continuous)
-                                            .stroke(Color.primary.opacity(0.5), lineWidth: 2)
+                        .stroke(Color.primary.opacity(0.78), lineWidth: 3)
                 )
                 .accessibilityLabel("Rehearsal mark \(text)")
 
