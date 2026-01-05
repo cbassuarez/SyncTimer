@@ -168,26 +168,40 @@ private struct PageZero_BLEPermission: View {
             }
         }
         // Listen for changes in the real CBCentralManager state
-        .onReceive(centralDelegate.$state) { newState in
-            switch newState {
-            case .poweredOn:
-                // The user tapped “Allow” → automatically advance after 0.3 s
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    mode = 1
-                }
-            case .unauthorized, .poweredOff:
-                // The user tapped “Don’t Allow” → reveal our buttons underneath
+        .onReceive(centralDelegate.$state) { _ in
+            let auth: CBManagerAuthorization
+            if #available(iOS 13.0, *) {
+                auth = CBCentralManager.authorization
+            } else {
+                auth = .allowedAlways
+            }
+
+            switch auth {
+            case .allowedAlways:
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { mode = 1 }
+            case .denied, .restricted:
                 didDeny = true
-            default:
+            case .notDetermined:
+                break
+            @unknown default:
                 break
             }
         }
+
     }
 }
 // ─────────────────────────────────────────────────────────────────
 // 3) WalkthroughView (showing Page 0 plus Pages 1–4 unchanged)
 // ─────────────────────────────────────────────────────────────────
 struct WalkthroughView: View {
+    private var blePermissionGranted: Bool {
+        if #available(iOS 13.0, *) {
+            return CBCentralManager.authorization == .allowedAlways
+        } else {
+            return true
+        }
+    }
+
     @AppStorage("hasSeenWalkthrough") private var hasSeenWalkthrough: Bool = false
     @AppStorage("walkthroughPage")     private var currentPage: Int     = 0
     @State private var justFinished: Bool = false
@@ -385,10 +399,9 @@ struct WalkthroughView: View {
                 }
             }
 
-            // Attach .onAppear to that single Group
             .onAppear {
-                // if BLE already on, skip page 0 immediately
-                if centralDelegate.state == .poweredOn && currentPage == 0 {
+                // If BT permission is already granted, skip the permission page.
+                if blePermissionGranted && currentPage == 0 {
                     didAutoSkipBLE = true
                     currentPage = 1
                 }

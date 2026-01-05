@@ -367,7 +367,7 @@ final class AppSettings: ObservableObject {
         var leftPanePaginateOnLargePads: Bool = false
     // AppSettings.swift
     @AppStorage("allowSyncChangesInMainView")
-    public var allowSyncChangesInMainView: Bool = false
+    public var allowSyncChangesInMainView: Bool = true
 
     // The rest of your settings (unchanged)
     @AppStorage("showHours") var showHours: Bool = true
@@ -1773,6 +1773,7 @@ struct SyncBar: View {
         let isDark        = (colorScheme == .dark)
         let activeColor   = isDark ? Color.white : Color.black
         let inactiveColor = Color.gray
+        let allowMainViewChanges = settings.allowSyncChangesInMainView
         let roleGesture = LongPressGesture(minimumDuration: 0.5)
             .exclusively(before: TapGesture())
         let syncGesture = LongPressGesture(minimumDuration: 0.5)
@@ -1791,7 +1792,7 @@ struct SyncBar: View {
                     .font(.custom("Roboto-SemiBold", size: 24))
                     .foregroundColor(syncSettings.role == .parent ? activeColor : inactiveColor)
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .lineLimit(1)
             .layoutPriority(1)
             .accessibilityLabel("Switch role")
@@ -1808,7 +1809,13 @@ struct SyncBar: View {
                     let newRole: SyncSettings.Role = (syncSettings.role == .parent ? .child : .parent)
                     onRoleConfirmed(newRole)
                 case .second:
+                    if allowMainViewChanges {
+                    guard !isCounting else { return }
+                    let newRole: SyncSettings.Role = (syncSettings.role == .parent ? .child : .parent)
+                    onRoleConfirmed(newRole)
+                } else {
                     onOpenSyncSettings()
+                }
                 default:
                     break
                 }
@@ -1841,7 +1848,11 @@ struct SyncBar: View {
                     suppressNextOpenSettingsTap = true
                     onToggleSyncMode()
                 case .second:
+                    if allowMainViewChanges {
+                    onToggleSyncMode()
+                } else {
                     onOpenSyncSettings()
+                }
                 default:
                     break
                 }
@@ -1851,6 +1862,7 @@ struct SyncBar: View {
         .padding(.vertical, 2)
         .contentShape(Rectangle())
         .onTapGesture {
+            guard allowMainViewChanges == false else { return }
             guard suppressNextOpenSettingsTap == false else {
                 suppressNextOpenSettingsTap = false
                 return
@@ -7328,13 +7340,14 @@ struct AppearancePage: View {
                                     Toggle(isOn: $appSettings.allowSyncChangesInMainView) {
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text("Allow sync changes in main view")
-                                                .font(.custom("Roboto-SemiBold", size: 16))
+                                                .font(.custom("Roboto-Regular", size: 16))
                                             Text("If on, tapping the Sync Bar in the main view changes your settings. If off, long-press to launch Settings.")
                                                 .font(.custom("Roboto-Regular", size: 12))
                                                 .foregroundColor(.secondary)
                                                 .fixedSize(horizontal: false, vertical: true)
                                         }
                                     }
+                                    .toggleStyle(SwitchToggleStyle(tint: appSettings.flashColor))
                                     
                                     // ── High-Contrast Sync Indicator ────
                                     Toggle("High-Contrast Sync Indicator", isOn: $appSettings.highContrastSyncIndicator)
@@ -7571,23 +7584,23 @@ struct TimerBehaviorPage: View {
               .foregroundColor(.secondary)
               .padding(.leading, 0)
               .lineLimit(1)
-          
-          Menu {
-              ForEach(ResetConfirmationMode.allCases) { style in
-                  Button(style.rawValue) { appSettings.resetConfirmationMode = style }
-              }
-          } label: {
-              settingRow(title: "Reset Lock",
-                         value: appSettings.resetConfirmationMode.rawValue,
-                         icon: "arrow.counterclockwise.circle")
-              .tint(appSettings.flashColor)
-          }
+          ///RESET LOCK - NOT NEEDED NOW THAT RESET IS GATED 
+   //       Menu {
+   //           ForEach(ResetConfirmationMode.allCases) { style in
+   //               Button(style.rawValue) { appSettings.resetConfirmationMode = style }
+    //          }
+     //     } label: {
+      //        settingRow(title: "Reset Lock",
+       //                  value: appSettings.resetConfirmationMode.rawValue,
+        //                 icon: "arrow.counterclockwise.circle")
+         //     .tint(appSettings.flashColor)
+   //       }
           // subtitle for Reset Lock
-          Text("Requires confirmation before resetting the timer.")
-              .font(.custom("Roboto-Light", size: 12))
-              .foregroundColor(.secondary)
-              .padding(.leading, 0)
-              .lineLimit(1)
+   //       Text("Requires confirmation before resetting the timer.")
+    //          .font(.custom("Roboto-Light", size: 12))
+     //         .foregroundColor(.secondary)
+      //        .padding(.leading, 0)
+       //       .lineLimit(1)
       
         
 

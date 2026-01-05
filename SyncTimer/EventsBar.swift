@@ -180,6 +180,16 @@ struct EventsBar: View {
                         let carouselWidth = max(totalWidth - buttonWidth - addWidth, 0)
             let barHeight     = geo.size.height         // e.g. 60
 
+            
+            let modeTint: Color = {
+                switch eventMode {
+                case .stop:     return .red
+                case .cue:      return .blue
+                case .restart:  return .green
+                }
+            }()
+
+            
             HStack(spacing: 0) {
                 // ─── CYCLE (“STOP” / “CUE” / “RESTART”) button ─────────────────
                 Button(action: {
@@ -208,14 +218,8 @@ struct EventsBar: View {
                                             }
                                         }
                 }
-                .background({
-                    switch eventMode {
-                    case .stop:     return Color.red
-                    case .cue:      return Color.blue
-                    case .restart:  return Color.green
-                    }
-                }())
-                .cornerRadius(8)
+                .modifier(EventsBarCycleGlassPlate(tint: modeTint, cornerRadius: 8))
+
                 .offset(x: 18)            // ← shift the button 12px to the right
                 .offset(y: 0)
                 .disabled(isCounting)
@@ -272,6 +276,28 @@ struct EventsBar: View {
                         }
         }
         .frame(height: 60)  // fix overall bar height at 60
+    }
+}
+
+
+private struct EventsBarCycleGlassPlate: ViewModifier {
+    let tint: Color
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+
+        if #available(iOS 26.0, *) {
+            content
+                .clipShape(shape)
+                .glassEffect(.regular.tint(tint), in: shape)
+                .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
+        } else {
+            content
+                .background(tint, in: shape)
+                .clipShape(shape)
+                .overlay(shape.stroke(Color.white.opacity(0.10), lineWidth: 1))
+        }
     }
 }
 
