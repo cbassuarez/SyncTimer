@@ -1454,6 +1454,22 @@ struct CueEvent: Identifiable, Equatable {
     }
 }
 
+struct MessageEvent: Identifiable, Equatable {
+    let id = UUID()
+    var messageTime: TimeInterval
+    static func == (lhs: MessageEvent, rhs: MessageEvent) -> Bool {
+        return lhs.id == rhs.id
+    }
+}
+
+struct ImageEvent: Identifiable, Equatable {
+    let id = UUID()
+    var imageTime: TimeInterval
+    static func == (lhs: ImageEvent, rhs: ImageEvent) -> Bool {
+        return lhs.id == rhs.id
+    }
+}
+
 struct RestartEvent: Identifiable, Equatable {
     let id = UUID()
     var restartTime: TimeInterval   // when to “reset” (fire) in seconds
@@ -1467,12 +1483,16 @@ struct RestartEvent: Identifiable, Equatable {
 enum Event: Identifiable, Equatable {
     case stop(StopEvent)
     case cue(CueEvent)
+    case message(MessageEvent)
+    case image(ImageEvent)
     case restart(RestartEvent)
 
     var id: UUID {
         switch self {
         case .stop(let s):   return s.id
         case .cue(let c):    return c.id
+        case .message(let m): return m.id
+        case .image(let i):  return i.id
         case .restart(let r):  return r.id
         }
     }
@@ -1481,6 +1501,8 @@ enum Event: Identifiable, Equatable {
         switch self {
         case .stop(let s):   return s.eventTime
         case .cue(let c):    return c.cueTime
+        case .message(let m): return m.messageTime
+        case .image(let i):  return i.imageTime
         case .restart(let r):  return r.restartTime
         }
     }
@@ -1490,6 +1512,8 @@ enum Event: Identifiable, Equatable {
         switch self {
         case .stop:   return true
         case .cue:    return false
+        case .message: return false
+        case .image:  return false
         case .restart:  return false
         }
     }
@@ -2878,6 +2902,36 @@ struct TimerCard: View {
                                                         .font(.custom("Roboto-Regular", size: subTextFontSize * 0.6))
                                                         .foregroundColor(isDark ? .white : .black)
                                                 }
+                                            case .message:
+                                                ZStack {
+                                                    Circle()
+                                                        .fill(flashColor.opacity(0.25))
+                                                        .frame(width: circleDiameter,
+                                                               height: circleDiameter)
+                                                    Circle()
+                                                        .stroke(flashColor, lineWidth: isLandscape ? 1.5 : 1)
+                                                        .frame(width: circleDiameter,
+                                                               height: circleDiameter)
+                                                    Text("M")
+                                                        .font(.custom("Roboto-Regular", size: subTextFontSize * 0.6))
+                                                        .foregroundColor(isDark ? .white : .black)
+                                                }
+                                                .accessibilityLabel("Message event")
+                                            case .image:
+                                                ZStack {
+                                                    Circle()
+                                                        .stroke(flashColor, lineWidth: isLandscape ? 1.5 : 1)
+                                                        .frame(width: circleDiameter,
+                                                               height: circleDiameter)
+                                                    RoundedRectangle(cornerRadius: 3)
+                                                        .stroke(flashColor, lineWidth: isLandscape ? 1.2 : 1)
+                                                        .frame(width: circleDiameter * 0.55,
+                                                               height: circleDiameter * 0.42)
+                                                    Text("I")
+                                                        .font(.custom("Roboto-Regular", size: subTextFontSize * 0.5))
+                                                        .foregroundColor(isDark ? .white : .black)
+                                                }
+                                                .accessibilityLabel("Image event")
                                             }
                                         } else {
                                             Circle()
@@ -4883,6 +4937,10 @@ struct MainScreen: View {
                                 return .stop(StopEvent(eventTime: se.at, duration: se.holdSeconds ?? 0))
                             case .restart:
                                 return .restart(RestartEvent(restartTime: se.at))
+                            case .message:
+                                return .message(MessageEvent(messageTime: se.at))
+                            case .image:
+                                return .image(ImageEvent(imageTime: se.at))
                             default:
                                 // Unknown/new kinds → treat as a cue at the same absolute time
                                 return .cue(CueEvent(cueTime: se.at))
@@ -6613,13 +6671,13 @@ struct MainScreen: View {
                         syncSettings.broadcastToChildren(stopMsg)
                     }
 
-            case .cue(let c):
-                flashZero = true
-                let flashSec = Double(settings.flashDurationOption) / 1000.0
-                DispatchQueue.main.asyncAfter(deadline: .now() + flashSec) {
-                    flashZero = false
-                }
-                events.removeFirst()
+                case .cue(let c):
+                    flashZero = true
+                    let flashSec = Double(settings.flashDurationOption) / 1000.0
+                    DispatchQueue.main.asyncAfter(deadline: .now() + flashSec) {
+                        flashZero = false
+                    }
+                    events.removeFirst()
 
                     let snap = encodeCurrentEvents()
                                     var cueMsg = TimerMessage(
@@ -6635,15 +6693,21 @@ struct MainScreen: View {
                                         flashNow: true
                                     )
                     cueMsg.notesParent = parentNotePayload
-                if syncSettings.role == .parent && syncSettings.isEnabled {
-                    syncSettings.broadcastToChildren(cueMsg)
-                }
+                    if syncSettings.role == .parent && syncSettings.isEnabled {
+                        syncSettings.broadcastToChildren(cueMsg)
+                    }
 
-            case .restart(let r):
-                ticker?.cancel()
-                phase = .running
-                elapsed = 0
-                startDate = Date()
+                case .message:
+                    events.removeFirst()
+
+                case .image:
+                    events.removeFirst()
+
+                case .restart(let r):
+                    ticker?.cancel()
+                    phase = .running
+                    elapsed = 0
+                    startDate = Date()
                 startLoop()
                 events.removeFirst()
 
