@@ -1,8 +1,16 @@
 import Foundation
 import SwiftUI
 
+@MainActor
 /// Drives the single display slot (message/image) as events fire.
 final class CueDisplayController: ObservableObject {
+    struct DurationConfig {
+        var base: TimeInterval
+        var perChar: TimeInterval
+        var max: TimeInterval
+
+        static let `default` = DurationConfig(base: 5.0, perChar: 0.15, max: 12.0)
+    }
     enum Slot: Equatable {
         case none
         case message(CueSheet.MessagePayload)
@@ -10,6 +18,8 @@ final class CueDisplayController: ObservableObject {
     }
 
     @Published private(set) var slot: Slot = .none
+
+    private let durationConfig: DurationConfig
 
     private struct Entry {
         var at: TimeInterval
@@ -20,6 +30,10 @@ final class CueDisplayController: ObservableObject {
     private var timeline: [Entry] = []
     private var cursor: Int = 0
     private var clearWorkItem: DispatchWorkItem?
+
+    init(durationConfig: DurationConfig = .default) {
+        self.durationConfig = durationConfig
+    }
 
     func buildTimeline(from sheet: CueSheet) {
         timeline = sheet.events
@@ -48,6 +62,11 @@ final class CueDisplayController: ObservableObject {
         slot = .none
     }
 
+    func dismiss() {
+        clearWorkItem?.cancel()
+        slot = .none
+    }
+
     func apply(elapsed: TimeInterval) {
         while cursor < timeline.count && elapsed >= timeline[cursor].at {
             let entry = timeline[cursor]
@@ -59,12 +78,38 @@ final class CueDisplayController: ObservableObject {
     private func apply(_ entry: Entry) {
         clearWorkItem?.cancel()
         slot = entry.slot
-        if let hold = entry.hold, hold > 0 {
-            let work = DispatchWorkItem { [weak self] in
-                self?.slot = .none
-            }
-            clearWorkItem = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + hold, execute: work)
+
+        guard let hold = entry.hold else {
+            scheduleDefaultDuration(for: entry.slot)
+            return
         }
+
+        if hold > 0 {
+            scheduleClear(after: hold)
+        }
+        // hold == 0 → sticky until dismissed/replaced
+    }
+
+    private func scheduleDefaultDuration(for slot: Slot) {
+        let charCount: Int = {
+            switch slot {
+            case .message(let payload):
+                return payload.text.count
+            case .image(let payload):
+                return payload.caption?.text.count ?? 0
+            case .none:
+                return 0
+            }
+        }()
+        let duration = min(durationConfig.base + (durationConfig.perChar * Double(charCount)), durationConfig.max)
+        scheduleClear(after: duration)
+    }
+
+    private func scheduleClear(after delay: TimeInterval) {
+        let work = DispatchWorkItem { [weak self] in
+            self?.slot = .none
+        }
+        clearWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 }
