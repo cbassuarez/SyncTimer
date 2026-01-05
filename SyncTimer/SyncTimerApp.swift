@@ -1761,10 +1761,6 @@ struct SyncBar: View {
     /// Called when the role switch is finally confirmed.
     let onRoleConfirmed: (SyncSettings.Role) -> Void
 
-    @State private var awaitingSecondTap = false
-    @State private var showRoleAlert      = false
-    @State private var targetRole: SyncSettings.Role?
-
     private var isSmallPhone: Bool {
         UIScreen.main.bounds.height < 930
     }
@@ -1773,70 +1769,32 @@ struct SyncBar: View {
         let isDark        = (colorScheme == .dark)
         let activeColor   = isDark ? Color.white : Color.black
         let inactiveColor = Color.gray
-        // Mirror Settings lamp state
-               let lampColor: Color = {
-                    if !syncSettings.isEnabled { return .red }
-                    return syncSettings.isEstablished ? .green : .orange
-                }()
 
         HStack(spacing: 0) {
             // ── Role toggle ────────────────────────────
-            Button {
-                guard !isCounting else { return }
-                switch settings.roleSwitchConfirmationMode {
-                case .off:
-                    let newRole: SyncSettings.Role = syncSettings.role == .parent ? .child : .parent
-                    onRoleConfirmed(newRole)
-
-                case .doubleTap:
-                    if awaitingSecondTap {
-                        awaitingSecondTap = false
-                        onRoleConfirmed(syncSettings.role == .parent ? .child : .parent)
-                    } else {
-                        awaitingSecondTap = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                            awaitingSecondTap = false
-                        }
-                    }
-
-                case .popup:
-                    targetRole   = syncSettings.role == .parent ? .child : .parent
-                    showRoleAlert = true
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Text("CHILD")
-                        .font(.custom("Roboto-SemiBold", size: 24))
-                        .foregroundColor(syncSettings.role == .child ? activeColor : inactiveColor)
-                    Text("/")
-                        .font(.custom("Roboto-SemiBold", size: 24))
-                        .foregroundColor(inactiveColor)
-                    Text("PARENT")
-                        .font(.custom("Roboto-SemiBold", size: 24))
-                        .foregroundColor(syncSettings.role == .parent ? activeColor : inactiveColor)
-                }
-                .frame(maxWidth: .infinity)
-                .lineLimit(1)
-                .fixedSize()
-                .layoutPriority(1)
-                .accessibilityLabel("Switch role")
-                .accessibilityHint("Double-tap to toggle between child and parent")
-                // Mirror Settings lamp state
-                        let lampColor: Color = {
-                            if !syncSettings.isEnabled { return .red }
-                            return syncSettings.isEstablished ? .green : .orange
-                        }()
+            HStack(spacing: 4) {
+                Text("CHILD")
+                    .font(.custom("Roboto-SemiBold", size: 24))
+                    .foregroundColor(syncSettings.role == .child ? activeColor : inactiveColor)
+                Text("/")
+                    .font(.custom("Roboto-SemiBold", size: 24))
+                    .foregroundColor(inactiveColor)
+                Text("PARENT")
+                    .font(.custom("Roboto-SemiBold", size: 24))
+                    .foregroundColor(syncSettings.role == .parent ? activeColor : inactiveColor)
             }
-            .disabled(isCounting)
-            .alert(isPresented: $showRoleAlert) {
-                Alert(
-                    title: Text("Confirm Role Switch"),
-                    message: Text("Switch to \((targetRole == .parent) ? "PARENT" : "CHILD") mode?"),
-                    primaryButton: .default(Text("Yes")) {
-                        if let newRole = targetRole { onRoleConfirmed(newRole) }
-                    },
-                    secondaryButton: .cancel()
-                )
+            .frame(maxWidth: .infinity)
+            .lineLimit(1)
+            .fixedSize()
+            .layoutPriority(1)
+            .accessibilityLabel("Switch role")
+            .accessibilityHint("Long-press to toggle between child and parent")
+            .contentShape(Rectangle())
+            .onLongPressGesture(minimumDuration: 0.5) {
+                guard settings.allowSyncChangesInMainView else { return }
+                guard !isCounting else { return }
+                let newRole: SyncSettings.Role = (syncSettings.role == .parent ? .child : .parent)
+                onRoleConfirmed(newRole)
             }
 
             // ── Sync/Stop button ─────────────────────────
@@ -1852,35 +1810,23 @@ struct SyncBar: View {
                     syncSettings.isEstablished ? .connected :
                     (syncSettings.isEnabled ? .streaming : .off)
 
-                SyncStatusLamp(
-                    state: lampState,
-                    size: 18,
-                    highContrast: settings.highContrastSyncIndicator
-                )
+                        SyncStatusLamp(
+                            state: lampState,
+                            size: 18,
+                            highContrast: settings.highContrastSyncIndicator
+                        )
 
                         }
                         .contentShape(Rectangle())
-                        .simultaneousGesture(
-                            LongPressGesture(minimumDuration: 0.5).onEnded { _ in onOpenConnections() }
-                        )
+                        .onLongPressGesture(minimumDuration: 0.5) {
+                            guard settings.allowSyncChangesInMainView else { return }
+                            onOpenConnections()
+                        }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 2)
     }
 
-
-
-    /// Encapsulate the three‐step BLE role change
-    private func applyRoleChange(_ newRole: SyncSettings.Role) {
-        // 1) Tear down whatever BLE role we were in
-        syncSettings.bleDriftManager.stop()
-        // 2) Flip the logical role
-        syncSettings.role = newRole
-        // 3) Re‐start BLE in the new role
-        syncSettings.bleDriftManager.start()
-        // 4) Notify any parent logic
-        onRoleConfirmed(newRole)
-    }
 }
 
 /// Horizontally scrolling carousel of stop‐events, with “◀️/▶️” arrows
@@ -4271,10 +4217,7 @@ struct MainScreen: View {
                                                 isCounting: isCounting,
                                                 isSyncEnabled: syncSettings.isEnabled,
                                                 onOpenConnections: {
-                                                    // same as before: go show radios/peers page
-                                                    previousMode = parentMode
-                                                    parentMode   = .settings
-                                                    settingsPage = 2
+                                                    toggleSyncMode()
                                                 },
                                                 onRoleConfirmed: { newRole in
                                                     // keep your existing role-swap logic
@@ -4296,19 +4239,13 @@ struct MainScreen: View {
                                                 }
                                             )
                                             .environmentObject(syncSettings)
-                                            // Short-tap interactivity is governed by the toggle:
-                                            .allowsHitTesting(settings.allowSyncChangesInMainView)
+                                            .contentShape(Rectangle())
+                                            .onTapGesture {
+                                                previousMode = parentMode
+                                                parentMode   = .settings
+                                                settingsPage = 2
+                                            }
                                         }
-                                        // Long-press MUST live on a parent that is always hit-testable:
-                                        .contentShape(Rectangle())
-                                            .gesture(
-                                                LongPressGesture(minimumDuration: 0.6).onEnded { _ in
-                                                    previousMode = parentMode
-                                                    parentMode   = .settings
-                                                    settingsPage = 2
-                                                },
-                                                including: .subviews
-                                            )
                                     } events: {
                                         // (unchanged EventsBar)
                                         EventsBar(
@@ -5727,9 +5664,7 @@ struct MainScreen: View {
                                     isCounting: isCounting,
                                     isSyncEnabled: syncSettings.isEnabled,
                                     onOpenConnections: {
-                                        previousMode = parentMode
-                                        parentMode   = .settings
-                                        settingsPage = 2
+                                        toggleSyncMode()
                                     },
                                     onRoleConfirmed: { newRole in
                                         let wasEnabled = syncSettings.isEnabled
@@ -5750,17 +5685,13 @@ struct MainScreen: View {
                                     }
                                 )
                                 .environmentObject(syncSettings)
-                                .allowsHitTesting(settings.allowSyncChangesInMainView)
-                            }
-                            .contentShape(Rectangle())
-                            .gesture(
-                                LongPressGesture(minimumDuration: 0.6).onEnded { _ in
+                                .contentShape(Rectangle())
+                                .onTapGesture {
                                     previousMode = parentMode
                                     parentMode   = .settings
                                     settingsPage = 2
-                                },
-                                including: .subviews
-                            )
+                                }
+                            }
                         } events: {
                             // (unchanged)
                             EventsBar(
@@ -6134,9 +6065,7 @@ struct MainScreen: View {
                                     isCounting: isCounting,
                                     isSyncEnabled: syncSettings.isEnabled,
                                     onOpenConnections: {
-                                        previousMode = parentMode
-                                        parentMode   = .settings
-                                        settingsPage = 2
+                                        toggleSyncMode()
                                     },
                                     onRoleConfirmed: { newRole in
                                         let wasEnabled = syncSettings.isEnabled
@@ -6157,17 +6086,13 @@ struct MainScreen: View {
                                     }
                                 )
                                 .environmentObject(syncSettings)
-                                .allowsHitTesting(settings.allowSyncChangesInMainView)
-                            }
-                            .contentShape(Rectangle())
-                            .gesture(
-                                LongPressGesture(minimumDuration: 0.6).onEnded { _ in
+                                .contentShape(Rectangle())
+                                .onTapGesture {
                                     previousMode = parentMode
                                     parentMode   = .settings
                                     settingsPage = 2
-                                },
-                                including: .subviews
-                            )
+                                }
+                            }
                         } events: {
                           
                             EventsBar(
