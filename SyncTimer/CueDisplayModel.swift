@@ -68,9 +68,15 @@ final class CueDisplayController: ObservableObject {
                     return Entry(at: event.at, kind: .message(payload, event.holdSeconds))
                 }
             case .image:
-                if case .image(let payload)? = event.payload {
-                    return Entry(at: event.at, kind: .image(payload, event.holdSeconds))
-                }
+                let payload: CueSheet.ImagePayload = {
+                    if case .image(let payload)? = event.payload { return payload }
+#if DEBUG
+                    assertionFailure("Image event missing payload; scheduling placeholder")
+#endif
+                    let caption = event.label.map { CueSheet.MessagePayload(text: $0) }
+                    return CueSheet.ImagePayload(assetID: event.id, contentMode: .fit, caption: caption)
+                }()
+                return Entry(at: event.at, kind: .image(payload, event.holdSeconds))
             case .cue:
                 if let mark = markMap[event.id] {
                     return Entry(at: event.at, kind: .rehearsalMark(mark, event.holdSeconds))

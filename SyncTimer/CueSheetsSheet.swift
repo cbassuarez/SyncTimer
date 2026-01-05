@@ -244,6 +244,20 @@ struct CueSheetsSheet: View {
                 sheet: s,
                 onSave: { updated in
                     try? store.save(updated, intoFolderID: nil, tags: updated.tags)
+#if DEBUG
+                    if let meta = store.index.sheets[updated.id] {
+                        let url = store.fileURL(for: meta)
+                        if let data = try? Data(contentsOf: url) {
+                            if updated.events.contains(where: { $0.kind == .image }) {
+                                let xml = String(data: data, encoding: .utf8) ?? ""
+                                assert(xml.contains("type=\"image\"") && xml.contains("assetID=\""), "Saved image event missing assetID")
+                            }
+                            if let reloaded = try? CueXML.read(data) {
+                                assert(!reloaded.events.contains(where: { $0.kind == .image && $0.payload == nil }), "Reloaded image event missing payload")
+                            }
+                        }
+                    }
+#endif
                     editingSheet = nil
                 },
                 onCancel: { editingSheet = nil }
@@ -1144,6 +1158,7 @@ private struct EventsSection: View {
                         guard let data = try? await item.loadTransferable(type: Data.self) else { return }
                         do {
                             pickedImageAssetID = try CueLibraryStore.shared.ingestImage(data: data)
+                            kind = .image
                         } catch {
                             pickedImageAssetID = nil
                         }
@@ -1453,11 +1468,15 @@ private struct EventsSection: View {
             e.payload = .message(.init(text: t, spans: []))
 
         case .image:
-            if let id = pickedImageAssetID {
-                let cap = pickedImageCaption.trimmingCharacters(in: .whitespacesAndNewlines)
-                let captionPayload: CueSheet.MessagePayload? = cap.isEmpty ? nil : .init(text: cap, spans: [])
-                e.payload = .image(.init(assetID: id, caption: captionPayload))
+            guard let id = pickedImageAssetID else {
+#if DEBUG
+                assertionFailure("Attempted to add an image event without an assetID")
+#endif
+                return
             }
+            let cap = pickedImageCaption.trimmingCharacters(in: .whitespacesAndNewlines)
+            let captionPayload: CueSheet.MessagePayload? = cap.isEmpty ? nil : .init(text: cap, spans: [])
+            e.payload = .image(.init(assetID: id, caption: captionPayload))
             
         case .cue:
                     e.rehearsalMarkMode = rehearsalMarkMode == .off ? nil : rehearsalMarkMode
