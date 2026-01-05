@@ -2508,6 +2508,16 @@ struct TimerCard: View {
                 let cardCornerRadius: CGFloat = 12
                 let cardWidth = geo.size.width - (horizontalInset * 2)
                 let cardHeight = isLandscape ? geo.size.height : 190
+                let activeDisplayEvent: CueDisplayController.Slot? = {
+                    switch cueDisplay.slot {
+                    case .image:
+                        return cueDisplay.slot
+                    case .message where isMessageExpanded:
+                        return cueDisplay.slot
+                    default:
+                        return nil
+                    }
+                }()
 
                 let cardBody = ZStack {
                     // ── (A) Card background with drop shadow ─────────────────
@@ -2999,104 +3009,112 @@ struct TimerCard: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         
                     }
+                let baseCard = cardBody
+                    .frame(
+                        width: cardWidth,
+                        height: cardHeight
+                    )
+                    // ── Connectivity strip (LED-style) — match badge height; sits between big timer and stop-down timer
+                    .overlay(alignment: .topTrailing) {
+                        // Use the SAME vertical math as the badge so they line up
+                        let badgeTopOffset: CGFloat = {
+                            let base = isLandscape ? fs * 0.90 : fs * 0.78
+                            let compactBump: CGFloat = isCompactWidth ? 8 : 12
+                            return base + compactBump + 14
+                        }()
+
+                        TimerStatusStrip(status: makeStatus())
+                            .padding(.trailing, 28)          // same as “DURATION” padding
+                            .padding(.top, badgeTopOffset + 18) // exactly the badge’s vertical track
+                            .allowsHitTesting(false)
+                    }
+
+                                    // ── Badge overlay (does not affect layout) ───────────────
+                                    .overlay(alignment: .topLeading) {
+                                        if let label = cueBadge.label {
+                                            // Heuristic: place between big timer line and the 5 circles.
+                                            // Uses fs (big font size), width compactness, and orientation.
+                                            let badgeTopOffset: CGFloat = {
+                                                let base = isLandscape ? fs * 0.90 : fs * 0.78
+                                                let compactBump: CGFloat = isCompactWidth ? 8 : 12
+                                                return base + compactBump + 14   // +14 ≈ hint/spacing cushion
+                                            }()
+                                            HStack(spacing: 8) {
+                                                Image(systemName: cueBadge.broadcast
+                                                      ? "antenna.radiowaves.left.and.right"
+                                                      : "doc.text")
+                                                Text("'\(label)' loaded")
+                                                    .font(.footnote.weight(.semibold))
+                                                    .lineLimit(1)
+                                                    .truncationMode(.tail)
+                                                Button {
+                                                                                                            withAnimation(.easeOut(duration: 0.2)) {
+                                                                                                                // clear events first, then clear badge
+                                                                                                                onClearEvents?()
+                                                                                                                cueBadge.clear()
+                                                                                                            }
+                                                                                                        } label: {
+                                                            Image(systemName: "xmark")
+                                                                .font(.caption2)
+                                                                .foregroundStyle(flashColor)   // ← match app flash color
+                                                        }
+                                            }
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 4) // ~85% height vs before
+                                                    .background(.ultraThinMaterial,
+                                                                in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                                    .overlay(
+                                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                            .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                                                    )
+                                                    // Pin to the same left inset as your timer/circles (12pt)
+                                                                    .padding(.leading, 24)
+                                                                    // Drop ~12pt lower than before
+                                                                    .padding(.top, badgeTopOffset + 12)
+                                                                    // Ensure it hugs the left; no accidental centering
+                                                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                            .transition(.move(edge: .top).combined(with: .opacity))
+                                            .allowsHitTesting(true)
+                                        }
+                                    }
+
+                    .animation(
+                        {
+                            if #available(iOS 17, *) { .snappy(duration: 0.26, extraBounce: 0.25) }
+                            else { .easeInOut(duration: 0.26) }
+                        }(),
+                        value: mode
+                    )
+
+                ZStack {
+                    baseCard
+                    if let activeDisplayEvent {
+                        TimerCardDisplayEventOverlay(
+                            event: activeDisplayEvent,
+                            cornerRadius: cardCornerRadius,
+                            onDismiss: {
+                                switch activeDisplayEvent {
+                                case .image:
+                                    dismissImage()
+                                case .message:
+                                    dismissMessage()
+                                case .none:
+                                    break
+                                }
+                            }
+                        )
+                        .transition(.opacity)
+                        .animation(fadeAnimation, value: cueDisplay.slot)
+                        .frame(width: cardWidth, height: cardHeight)
+                        .zIndex(1)
+                    }
                 }
                 .frame(
                     width: cardWidth,
                     height: cardHeight
                 )
                 .padding(.horizontal, horizontalInset)
-
-                // ── Connectivity strip (LED-style) — match badge height; sits between big timer and stop-down timer
-                .overlay(alignment: .topTrailing) {
-                    // Use the SAME vertical math as the badge so they line up
-                    let badgeTopOffset: CGFloat = {
-                        let base = isLandscape ? fs * 0.90 : fs * 0.78
-                        let compactBump: CGFloat = isCompactWidth ? 8 : 12
-                        return base + compactBump + 14
-                    }()
-
-                    TimerStatusStrip(status: makeStatus())
-                        .padding(.trailing, 28)          // same as “DURATION” padding
-                        .padding(.top, badgeTopOffset + 18) // exactly the badge’s vertical track
-                        .allowsHitTesting(false)
-                }
-
-                                // ── Badge overlay (does not affect layout) ───────────────
-                                .overlay(alignment: .topLeading) {
-                                    if let label = cueBadge.label {
-                                        // Heuristic: place between big timer line and the 5 circles.
-                                        // Uses fs (big font size), width compactness, and orientation.
-                                        let badgeTopOffset: CGFloat = {
-                                            let base = isLandscape ? fs * 0.90 : fs * 0.78
-                                            let compactBump: CGFloat = isCompactWidth ? 8 : 12
-                                            return base + compactBump + 14   // +14 ≈ hint/spacing cushion
-                                        }()
-                                        HStack(spacing: 8) {
-                                            Image(systemName: cueBadge.broadcast
-                                                  ? "antenna.radiowaves.left.and.right"
-                                                  : "doc.text")
-                                            Text("'\(label)' loaded")
-                                                .font(.footnote.weight(.semibold))
-                                                .lineLimit(1)
-                                                .truncationMode(.tail)
-                                            Button {
-                                                                                                        withAnimation(.easeOut(duration: 0.2)) {
-                                                                                                            // clear events first, then clear badge
-                                                                                                            onClearEvents?()
-                                                                                                            cueBadge.clear()
-                                                                                                        }
-                                                                                                    } label: {
-                                                            Image(systemName: "xmark")
-                                                                .font(.caption2)
-                                                                .foregroundStyle(flashColor)   // ← match app flash color
-                                                        }
-                                        }
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 4) // ~85% height vs before
-                                                .background(.ultraThinMaterial,
-                                                            in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                                        .stroke(Color.primary.opacity(0.12), lineWidth: 1)
-                                                )
-                                                // Pin to the same left inset as your timer/circles (12pt)
-                                                                .padding(.leading, 24)
-                                                                // Drop ~12pt lower than before
-                                                                .padding(.top, badgeTopOffset + 12)
-                                                                // Ensure it hugs the left; no accidental centering
-                                                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                                        .transition(.move(edge: .top).combined(with: .opacity))
-                                        .allowsHitTesting(true)
-                                    }
-                                }
-
-                .animation(
-                    {
-                        if #available(iOS 17, *) { .snappy(duration: 0.26, extraBounce: 0.25) }
-                        else { .easeInOut(duration: 0.26) }
-                    }(),
-                    value: mode
-                )
-
-                ZStack {
-                    cardBody
-                    if let payload = imagePayload {
-                        ImageOverlay(payload: payload, caption: payload.caption, cornerRadius: cardCornerRadius, onDismiss: dismissImage)
-                            .transition(.opacity)
-                            .animation(fadeAnimation, value: cueDisplay.slot)
-                            .frame(width: cardWidth, height: cardHeight)
-                            .padding(.horizontal, horizontalInset)
-                            .zIndex(1)
-                    } else if let payload = messagePayload, isMessageExpanded {
-                        ExpandedMessageOverlay(payload: payload, cornerRadius: cardCornerRadius, onDismiss: dismissMessage)
-                            .transition(.opacity)
-                            .animation(fadeAnimation, value: cueDisplay.slot)
-                            .frame(width: cardWidth, height: cardHeight)
-                            .padding(.horizontal, horizontalInset)
-                            .zIndex(1)
-                    }
-                }
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Elapsed time: \(mainTime.formattedCS)")
@@ -3260,54 +3278,56 @@ struct TimerCard: View {
         }
     }
     
-    private struct ExpandedMessageOverlay: View {
-        let payload: CueSheet.MessagePayload
-        let cornerRadius: CGFloat
-        var onDismiss: () -> Void
-        
-        var body: some View {
-            ZStack {
-                VStack(spacing: 12) {
-                    Spacer(minLength: 0)
-                    ScrollView {
-                        Text(attributedText(from: payload))
-                            .font(.body)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .accessibilityLabel("Message")
-                            .accessibilityValue(payload.text)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding()
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(.thinMaterial.opacity(0.9))
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay(alignment: .topTrailing) {
-                Button(action: onDismiss) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundColor(.primary)
-                        .padding(10)
-                }
-                .accessibilityLabel("Dismiss message")
-            }
-            .accessibilityAddTraits(.isModal)
-            .accessibilityLabel("Message")
-            .accessibilityValue(payload.text)
-        }
-    }
-    
-    private struct ImageOverlay: View {
-        let payload: CueSheet.ImagePayload
-        let caption: CueSheet.MessagePayload?
+    private struct TimerCardDisplayEventOverlay: View {
+        let event: CueDisplayController.Slot
         let cornerRadius: CGFloat
         var onDismiss: () -> Void
         @State private var uiImage: UIImage?
         
         var body: some View {
             ZStack {
+                overlayContent
+                VStack {
+                    HStack {
+                        Spacer()
+                        Button(action: onDismiss) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 22, weight: .bold))
+                                .foregroundColor(.primary)
+                                .padding(8)
+                        }
+                        .accessibilityLabel("Dismiss")
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(4)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(.thinMaterial.opacity(0.9))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .accessibilityAddTraits(.isModal)
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityValue(accessibilityValue)
+            .onAppear(perform: loadImageIfNeeded)
+            .onChange(of: event) { _ in loadImageIfNeeded() }
+        }
+        
+        @ViewBuilder
+        private var overlayContent: some View {
+            switch event {
+            case .message(let payload):
+                VStack(spacing: 12) {
+                    Spacer(minLength: 0)
+                    ScrollView {
+                        Text(attributedText(from: payload))
+                            .font(.body)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding()
+            case .image(let payload):
                 VStack(spacing: 12) {
                     Group {
                         if let uiImage {
@@ -3327,38 +3347,46 @@ struct TimerCard: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     
-                    if let caption {
+                    if let caption = payload.caption {
                         Text(attributedText(from: caption))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal)
                             .padding(.bottom, 8)
-                            .accessibilityLabel("Image caption")
-                            .accessibilityValue(caption.text)
                     }
                 }
                 .padding()
+            case .none:
+                EmptyView()
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(.thinMaterial.opacity(0.9))
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay(alignment: .topTrailing) {
-                Button(action: onDismiss) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundColor(.primary)
-                        .padding(10)
-                }
-                .accessibilityLabel("Dismiss image")
-            }
-            .onAppear(perform: loadImage)
-            .onChange(of: payload.assetID) { _ in loadImage() }
-            .accessibilityLabel("Image")
-            .accessibilityValue(payload.caption?.text ?? "Image")
-            .accessibilityAddTraits(.isModal)
         }
         
-        private func loadImage() {
+        private var accessibilityLabel: String {
+            switch event {
+            case .message:
+                return "Message"
+            case .image:
+                return "Image"
+            case .none:
+                return ""
+            }
+        }
+        
+        private var accessibilityValue: String {
+            switch event {
+            case .message(let payload):
+                return payload.text
+            case .image(let payload):
+                return payload.caption?.text ?? "Image"
+            case .none:
+                return ""
+            }
+        }
+        
+        private func loadImageIfNeeded() {
+            guard case let .image(payload) = event else {
+                uiImage = nil
+                return
+            }
             Task { @MainActor in
                 let data = try? CueLibraryStore.shared.assetData(id: payload.assetID)
                 let image = data.flatMap { UIImage(data: $0) }
