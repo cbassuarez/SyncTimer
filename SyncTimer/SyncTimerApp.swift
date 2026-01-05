@@ -1755,8 +1755,11 @@ struct SyncBar: View {
     var isCounting: Bool
     
     var isSyncEnabled: Bool
-        /// Long-press to open the active connection subpage (LAN / BLE / Bonjour)
-        let onOpenConnections: () -> Void
+    /// Opens the Sync Settings page from the sync bar.
+    let onOpenSyncSettings: () -> Void
+
+    /// Toggles sync via the same path used in Settings.
+    let onToggleSyncMode: () -> Void
 
     /// Called when the role switch is finally confirmed.
     let onRoleConfirmed: (SyncSettings.Role) -> Void
@@ -1769,6 +1772,10 @@ struct SyncBar: View {
         let isDark        = (colorScheme == .dark)
         let activeColor   = isDark ? Color.white : Color.black
         let inactiveColor = Color.gray
+        let roleGesture = LongPressGesture(minimumDuration: 0.5)
+            .exclusively(before: TapGesture())
+        let syncGesture = LongPressGesture(minimumDuration: 0.5)
+            .exclusively(before: TapGesture())
 
         HStack(spacing: 0) {
             // ── Role toggle ────────────────────────────
@@ -1790,12 +1797,19 @@ struct SyncBar: View {
             .accessibilityLabel("Switch role")
             .accessibilityHint("Long-press to toggle between child and parent")
             .contentShape(Rectangle())
-            .onLongPressGesture(minimumDuration: 0.5) {
-                guard settings.allowSyncChangesInMainView else { return }
-                guard !isCounting else { return }
-                let newRole: SyncSettings.Role = (syncSettings.role == .parent ? .child : .parent)
-                onRoleConfirmed(newRole)
-            }
+            .gesture(roleGesture.onEnded { value in
+                switch value {
+                case .first(true):
+                    guard settings.allowSyncChangesInMainView else { return }
+                    guard !isCounting else { return }
+                    let newRole: SyncSettings.Role = (syncSettings.role == .parent ? .child : .parent)
+                    onRoleConfirmed(newRole)
+                case .second:
+                    onOpenSyncSettings()
+                default:
+                    break
+                }
+            })
 
             // ── Sync/Stop button ─────────────────────────
                         Spacer(minLength: 0)
@@ -1818,13 +1832,22 @@ struct SyncBar: View {
 
                         }
                         .contentShape(Rectangle())
-                        .onLongPressGesture(minimumDuration: 0.5) {
-                            guard settings.allowSyncChangesInMainView else { return }
-                            onOpenConnections()
-                        }
+                        .gesture(syncGesture.onEnded { value in
+                            switch value {
+                            case .first(true):
+                                guard settings.allowSyncChangesInMainView else { return }
+                                onToggleSyncMode()
+                            case .second:
+                                onOpenSyncSettings()
+                            default:
+                                break
+                            }
+                        })
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onOpenSyncSettings)
     }
 
 }
@@ -4216,7 +4239,12 @@ struct MainScreen: View {
                                             SyncBar(
                                                 isCounting: isCounting,
                                                 isSyncEnabled: syncSettings.isEnabled,
-                                                onOpenConnections: {
+                                                onOpenSyncSettings: {
+                                                    previousMode = parentMode
+                                                    parentMode   = .settings
+                                                    settingsPage = 2
+                                                },
+                                                onToggleSyncMode: {
                                                     toggleSyncMode()
                                                 },
                                                 onRoleConfirmed: { newRole in
@@ -4239,12 +4267,6 @@ struct MainScreen: View {
                                                 }
                                             )
                                             .environmentObject(syncSettings)
-                                            .contentShape(Rectangle())
-                                            .onTapGesture {
-                                                previousMode = parentMode
-                                                parentMode   = .settings
-                                                settingsPage = 2
-                                            }
                                         }
                                     } events: {
                                         // (unchanged EventsBar)
@@ -5663,7 +5685,12 @@ struct MainScreen: View {
                                 SyncBar(
                                     isCounting: isCounting,
                                     isSyncEnabled: syncSettings.isEnabled,
-                                    onOpenConnections: {
+                                    onOpenSyncSettings: {
+                                        previousMode = parentMode
+                                        parentMode   = .settings
+                                        settingsPage = 2
+                                    },
+                                    onToggleSyncMode: {
                                         toggleSyncMode()
                                     },
                                     onRoleConfirmed: { newRole in
@@ -5685,12 +5712,6 @@ struct MainScreen: View {
                                     }
                                 )
                                 .environmentObject(syncSettings)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    previousMode = parentMode
-                                    parentMode   = .settings
-                                    settingsPage = 2
-                                }
                             }
                         } events: {
                             // (unchanged)
@@ -6064,7 +6085,12 @@ struct MainScreen: View {
                                 SyncBar(
                                     isCounting: isCounting,
                                     isSyncEnabled: syncSettings.isEnabled,
-                                    onOpenConnections: {
+                                    onOpenSyncSettings: {
+                                        previousMode = parentMode
+                                        parentMode   = .settings
+                                        settingsPage = 2
+                                    },
+                                    onToggleSyncMode: {
                                         toggleSyncMode()
                                     },
                                     onRoleConfirmed: { newRole in
@@ -6086,12 +6112,6 @@ struct MainScreen: View {
                                     }
                                 )
                                 .environmentObject(syncSettings)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    previousMode = parentMode
-                                    parentMode   = .settings
-                                    settingsPage = 2
-                                }
                             }
                         } events: {
                           
