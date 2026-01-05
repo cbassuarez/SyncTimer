@@ -816,6 +816,7 @@ private struct EventsSection: View {
 
     @State private var kind: CueSheet.Event.Kind = .cue
         @State private var cueColorIndex: Int = 0
+    @State private var rehearsalMarkMode: CueSheet.RehearsalMarkMode = .off
         // Musical token inputs
         @State private var bar: Int = 1       // supports negative for anacrusis
         @State private var beat: Int = 1
@@ -1103,6 +1104,10 @@ private struct EventsSection: View {
             composerEventTypeSection
             Divider().opacity(0.12)
             composerFlashColorSection
+            if kind == .cue {
+                            Divider().opacity(0.12)
+                            composerRehearsalMarkSection
+                        }
             Divider().opacity(0.12)
             composerTimeEntrySection
             composerPayloadSection
@@ -1193,6 +1198,10 @@ private struct EventsSection: View {
                     Text("Hold \(hold, specifier: "%.2f") s")
                         .font(.custom("Roboto-Regular", size: 15))
                 }
+            } else if kind == .cue {
+                            Text("Hold controls message/image only; rehearsal marks auto-clear via defaults.")
+                                .font(.custom("Roboto-Regular", size: 12))
+                                .foregroundStyle(.secondary)
             }
         }
     }
@@ -1208,6 +1217,16 @@ private struct EventsSection: View {
             }
         }
     }
+    private var composerRehearsalMarkSection: some View {
+            VStack(alignment: .leading, spacing: 6) {
+                sectionHeader("Rehearsal Mark", "Choose whether this cue shows a rehearsal mark.")
+                Picker("", selection: $rehearsalMarkMode) {
+                    Text("Off").tag(CueSheet.RehearsalMarkMode.off)
+                    Text("Auto").tag(CueSheet.RehearsalMarkMode.auto)
+                }
+                .pickerStyle(.segmented)
+            }
+        }
     private var composerTimeEntrySection: some View {
         VStack(alignment: .leading, spacing: 8) {
             let desc = (globalTiming == .musical)
@@ -1446,6 +1465,10 @@ private struct EventsSection: View {
                 let captionPayload: CueSheet.MessagePayload? = cap.isEmpty ? nil : .init(text: cap, spans: [])
                 e.payload = .image(.init(assetID: id, contentMode: pickedImageMode, caption: captionPayload))
             }
+            
+        case .cue:
+                    e.rehearsalMarkMode = rehearsalMarkMode == .off ? nil : rehearsalMarkMode
+
 
         default:
             break

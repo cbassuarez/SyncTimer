@@ -3319,7 +3319,7 @@ struct TimerCard: View {
         var isSource: Bool = true
 
         var body: some View {
-            var glyph = Text(text)
+            let base = Text(text)
                 .font(.system(size: isBadge ? 12 : 14, weight: .heavy, design: .rounded))
                 .padding(.horizontal, isBadge ? 8 : 10)
                 .padding(.vertical, isBadge ? 4 : 6)
@@ -3334,9 +3334,11 @@ struct TimerCard: View {
                 .accessibilityLabel("Rehearsal mark \(text)")
 
             if let namespace {
-                glyph = glyph.matchedGeometryEffect(id: "rehearsalMarkGlyph", in: namespace, isSource: isSource)
+                return AnyView(base.matchedGeometryEffect(id: "rehearsalMarkGlyph", in: namespace, isSource: isSource))
+            } else {
+                return AnyView(base)
             }
-            return glyph
+
         }
     }
 

@@ -44,15 +44,16 @@ func attributedText(from payload: CueSheet.MessagePayload) -> AttributedString {
         let lineEnd = text[lineStart...].firstIndex(of: "\n") ?? text.endIndex
         let length = text.distance(from: lineStart, to: lineEnd)
         let startOffset = text.distance(from: text.startIndex, to: lineStart)
-        if length >= 0, startOffset <= attributed.characters.count {
-            let attrStart = attributed.index(attributed.startIndex, offsetByCharacters: startOffset)
-            if length > 0, let attrEnd = attributed.index(attrStart, offsetByCharacters: length, limitedBy: attributed.endIndex) {
-                let range = attrStart..<attrEnd
+        let endOffset = startOffset + length
+               if length >= 0, endOffset <= attributed.characters.count, startOffset <= attributed.characters.count {            let attrStart = attributed.index(attributed.startIndex, offsetByCharacters: startOffset)
+                   if length > 0 {
+                                   let attrEnd = attributed.index(attrStart, offsetByCharacters: length)
+                       let range = attrStart..<attrEnd
                 let line = String(text[lineStart..<lineEnd])
                 let leadingSpaces = line.prefix { $0 == " " }.count
                 let body = line.dropFirst(leadingSpaces)
-                var paragraph = ParagraphStyle()
-                paragraph.lineSpacing = 4
+                       let paragraph = NSMutableParagraphStyle()
+                       paragraph.lineSpacing = 4
                 paragraph.paragraphSpacing = 4
                 if body.hasPrefix("- ") || body.hasPrefix("• ") {
                     let prefixLen = min(length, leadingSpaces + 2)
