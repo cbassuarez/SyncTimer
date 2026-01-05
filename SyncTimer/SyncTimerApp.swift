@@ -3298,7 +3298,7 @@ struct TimerCard: View {
                         }
                         .accessibilityLabel("Dismiss")
                     }
-                    Spacer()
+                    Spacer(minLength: 0)
                 }
                 .padding(4)
             }
