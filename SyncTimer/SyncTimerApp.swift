@@ -2005,6 +2005,64 @@ struct EventsCarousel: View {
 
 
 //──────────────────────────────────────────────────────────────
+fileprivate struct SyncViewSyncBarWrapper<Content: View>: View {
+    let settings: AppSettings
+    let syncSettings: SyncSettings
+    let isCounting: Bool
+    let syncBarContent: Content
+    let onNavigateToSyncSettings: () -> Void
+    let onToggleRole: () -> Void
+    let onToggleSync: () -> Void
+
+    @State private var tapSuppressed = false
+
+    var body: some View {
+        _ = syncSettings
+        return ZStack {
+            syncBarContent
+                .allowsHitTesting(false)
+
+            HStack(spacing: 0) {
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .highPriorityGesture(
+                        LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                            guard settings.allowSyncChangesInMainView else { return }
+                            guard !isCounting else { return }
+                            suppressNextTap()
+                            onToggleRole()
+                        }
+                    )
+
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .highPriorityGesture(
+                        LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                            guard settings.allowSyncChangesInMainView else { return }
+                            suppressNextTap()
+                            onToggleSync()
+                        }
+                    )
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard !tapSuppressed else { tapSuppressed = false; return }
+            onNavigateToSyncSettings()
+        }
+    }
+
+    private func suppressNextTap() {
+        tapSuppressed = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            tapSuppressed = false
+        }
+    }
+}
+
+//──────────────────────────────────────────────────────────────
 // MARK: – Bottom button rows
 //──────────────────────────────────────────────────────────────
 struct SyncBottomButtons: View {
@@ -4212,40 +4270,51 @@ struct MainScreen: View {
                                     //main sync bar
                                     ModeBarMorphSwitcher(isSync: parentMode == .sync) {
                                         // --- SYNC content ---
-                                        Group {
-                                            SyncBar(
-                                                isCounting: isCounting,
-                                                isSyncEnabled: syncSettings.isEnabled,
-                                                onOpenConnections: {
-                                                    toggleSyncMode()
-                                                },
-                                                onRoleConfirmed: { newRole in
-                                                    // keep your existing role-swap logic
-                                                    let wasEnabled = syncSettings.isEnabled
-                                                    if wasEnabled {
-                                                        if syncSettings.role == .parent { syncSettings.stopParent() }
-                                                        else                           { syncSettings.stopChild() }
-                                                        syncSettings.isEnabled = false
-                                                    }
-                                                    syncSettings.role = newRole
-                                                    if wasEnabled {
-                                                        switch syncSettings.connectionMethod {
-                                                        case .network, .bluetooth, .bonjour:
-                                                            if newRole == .parent { syncSettings.startParent() }
-                                                            else                  { syncSettings.startChild() }
+                                        SyncViewSyncBarWrapper(
+                                            settings: settings,
+                                            syncSettings: syncSettings,
+                                            isCounting: isCounting,
+                                            syncBarContent: AnyView(
+                                                SyncBar(
+                                                    isCounting: isCounting,
+                                                    isSyncEnabled: syncSettings.isEnabled,
+                                                    onOpenConnections: {
+                                                        toggleSyncMode()
+                                                    },
+                                                    onRoleConfirmed: { newRole in
+                                                        // keep your existing role-swap logic
+                                                        let wasEnabled = syncSettings.isEnabled
+                                                        if wasEnabled {
+                                                            if syncSettings.role == .parent { syncSettings.stopParent() }
+                                                            else                           { syncSettings.stopChild() }
+                                                            syncSettings.isEnabled = false
                                                         }
-                                                        syncSettings.isEnabled = true
+                                                        syncSettings.role = newRole
+                                                        if wasEnabled {
+                                                            switch syncSettings.connectionMethod {
+                                                            case .network, .bluetooth, .bonjour:
+                                                                if newRole == .parent { syncSettings.startParent() }
+                                                                else                  { syncSettings.startChild() }
+                                                            }
+                                                            syncSettings.isEnabled = true
+                                                        }
                                                     }
-                                                }
-                                            )
-                                            .environmentObject(syncSettings)
-                                            .contentShape(Rectangle())
-                                            .onTapGesture {
+                                                )
+                                                .environmentObject(syncSettings)
+                                            ),
+                                            onNavigateToSyncSettings: {
                                                 previousMode = parentMode
                                                 parentMode   = .settings
                                                 settingsPage = 2
+                                            },
+                                            onToggleRole: {
+                                                let newRole: SyncSettings.Role = (syncSettings.role == .parent ? .child : .parent)
+                                                onRoleConfirmed(newRole)
+                                            },
+                                            onToggleSync: {
+                                                toggleSyncMode()
                                             }
-                                        }
+                                        )
                                     } events: {
                                         // (unchanged EventsBar)
                                         EventsBar(
@@ -5659,39 +5728,50 @@ struct MainScreen: View {
                                 .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 6)
                         }
                         ModeBarMorphSwitcher(isSync: parentMode == .sync) {
-                            Group {
-                                SyncBar(
-                                    isCounting: isCounting,
-                                    isSyncEnabled: syncSettings.isEnabled,
-                                    onOpenConnections: {
-                                        toggleSyncMode()
-                                    },
-                                    onRoleConfirmed: { newRole in
-                                        let wasEnabled = syncSettings.isEnabled
-                                        if wasEnabled {
-                                            if syncSettings.role == .parent { syncSettings.stopParent() }
-                                            else                           { syncSettings.stopChild() }
-                                            syncSettings.isEnabled = false
-                                        }
-                                        syncSettings.role = newRole
-                                        if wasEnabled {
-                                            switch syncSettings.connectionMethod {
-                                            case .network, .bluetooth, .bonjour:
-                                                if newRole == .parent { syncSettings.startParent() }
-                                                else                  { syncSettings.startChild() }
+                            SyncViewSyncBarWrapper(
+                                settings: settings,
+                                syncSettings: syncSettings,
+                                isCounting: isCounting,
+                                syncBarContent: AnyView(
+                                    SyncBar(
+                                        isCounting: isCounting,
+                                        isSyncEnabled: syncSettings.isEnabled,
+                                        onOpenConnections: {
+                                            toggleSyncMode()
+                                        },
+                                        onRoleConfirmed: { newRole in
+                                            let wasEnabled = syncSettings.isEnabled
+                                            if wasEnabled {
+                                                if syncSettings.role == .parent { syncSettings.stopParent() }
+                                                else                           { syncSettings.stopChild() }
+                                                syncSettings.isEnabled = false
                                             }
-                                            syncSettings.isEnabled = true
+                                            syncSettings.role = newRole
+                                            if wasEnabled {
+                                                switch syncSettings.connectionMethod {
+                                                case .network, .bluetooth, .bonjour:
+                                                    if newRole == .parent { syncSettings.startParent() }
+                                                    else                  { syncSettings.startChild() }
+                                                }
+                                                syncSettings.isEnabled = true
+                                            }
                                         }
-                                    }
-                                )
-                                .environmentObject(syncSettings)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
+                                    )
+                                    .environmentObject(syncSettings)
+                                ),
+                                onNavigateToSyncSettings: {
                                     previousMode = parentMode
                                     parentMode   = .settings
                                     settingsPage = 2
+                                },
+                                onToggleRole: {
+                                    let newRole: SyncSettings.Role = (syncSettings.role == .parent ? .child : .parent)
+                                    onRoleConfirmed(newRole)
+                                },
+                                onToggleSync: {
+                                    toggleSyncMode()
                                 }
-                            }
+                            )
                         } events: {
                             // (unchanged)
                             EventsBar(
@@ -6060,39 +6140,50 @@ struct MainScreen: View {
                                 .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 6)
                         }
                         ModeBarMorphSwitcher(isSync: parentMode == .sync) {
-                            Group {
-                                SyncBar(
-                                    isCounting: isCounting,
-                                    isSyncEnabled: syncSettings.isEnabled,
-                                    onOpenConnections: {
-                                        toggleSyncMode()
-                                    },
-                                    onRoleConfirmed: { newRole in
-                                        let wasEnabled = syncSettings.isEnabled
-                                        if wasEnabled {
-                                            if syncSettings.role == .parent { syncSettings.stopParent() }
-                                            else                           { syncSettings.stopChild() }
-                                            syncSettings.isEnabled = false
-                                        }
-                                        syncSettings.role = newRole
-                                        if wasEnabled {
-                                            switch syncSettings.connectionMethod {
-                                            case .network, .bluetooth, .bonjour:
-                                                if newRole == .parent { syncSettings.startParent() }
-                                                else                  { syncSettings.startChild() }
+                            SyncViewSyncBarWrapper(
+                                settings: settings,
+                                syncSettings: syncSettings,
+                                isCounting: isCounting,
+                                syncBarContent: AnyView(
+                                    SyncBar(
+                                        isCounting: isCounting,
+                                        isSyncEnabled: syncSettings.isEnabled,
+                                        onOpenConnections: {
+                                            toggleSyncMode()
+                                        },
+                                        onRoleConfirmed: { newRole in
+                                            let wasEnabled = syncSettings.isEnabled
+                                            if wasEnabled {
+                                                if syncSettings.role == .parent { syncSettings.stopParent() }
+                                                else                           { syncSettings.stopChild() }
+                                                syncSettings.isEnabled = false
                                             }
-                                            syncSettings.isEnabled = true
+                                            syncSettings.role = newRole
+                                            if wasEnabled {
+                                                switch syncSettings.connectionMethod {
+                                                case .network, .bluetooth, .bonjour:
+                                                    if newRole == .parent { syncSettings.startParent() }
+                                                    else                  { syncSettings.startChild() }
+                                                }
+                                                syncSettings.isEnabled = true
+                                            }
                                         }
-                                    }
-                                )
-                                .environmentObject(syncSettings)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
+                                    )
+                                    .environmentObject(syncSettings)
+                                ),
+                                onNavigateToSyncSettings: {
                                     previousMode = parentMode
                                     parentMode   = .settings
                                     settingsPage = 2
+                                },
+                                onToggleRole: {
+                                    let newRole: SyncSettings.Role = (syncSettings.role == .parent ? .child : .parent)
+                                    onRoleConfirmed(newRole)
+                                },
+                                onToggleSync: {
+                                    toggleSyncMode()
                                 }
-                            }
+                            )
                         } events: {
                           
                             EventsBar(
