@@ -3112,16 +3112,21 @@ struct TimerCard: View {
                 )
                 .overlay(alignment: .topLeading) {
                     if showOverlayBanner {
-                        ScoreCueBanner(
-                            message: messagePayload,
-                            rehearsalMark: rehearsalMarkText,
-                            namespace: rehearsalMarkNamespace,
-                            onDismiss: dismissMessage,
-                            onToggleExpand: expandMessage
-                        )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
+                        ZStack(alignment: .topLeading) {
+                            Color.clear
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .allowsHitTesting(false)
+                            ScoreCueBanner(
+                                message: messagePayload,
+                                rehearsalMark: rehearsalMarkText,
+                                namespace: rehearsalMarkNamespace,
+                                onDismiss: dismissMessage,
+                                onToggleExpand: expandMessage
+                            )
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
+                        }
+                        .frame(width: cardWidth, height: cardHeight, alignment: .topLeading)
                         .transition(.opacity)
                         .animation(fadeAnimation, value: overlayAnimationToken)
                         .zIndex(3)
