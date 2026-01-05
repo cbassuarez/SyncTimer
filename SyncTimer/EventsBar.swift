@@ -254,8 +254,8 @@ struct EventsBar: View {
                     CueSheetsIcon(accent: cueSheetAccent, size: 30)
                         .frame(width: addWidth, height: barHeight)
 
-
                 }
+                .id("CueSheetsButton") // keep identity stable during mode morphs
                 .buttonStyle(CueSheetsInsetPlateStyle(cornerRadius: 8))
                 .zIndex(9999) //ensure the button wins hit test
                 // Win any gesture races with underlying content
@@ -435,6 +435,8 @@ private struct CueSheetsIcon: View {
             .saturation(1.2)
             .contrast(1.1)
             .accessibilityHidden(true)
+            .transaction { $0.animation = nil }   // keep symbol static; let parent drive transitions
+            .compositingGroup() // keep palette + gradients in one layer during fades
     }
 }
 

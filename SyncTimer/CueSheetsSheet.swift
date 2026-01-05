@@ -604,17 +604,14 @@ private struct CueSheetEditorSheet: View {
 
 
             // Tabs
-            Picker("", selection: $tab) {
-                ForEach(Tab.allCases, id: \.self) { t in
-                    Text(t.rawValue)
-                                            .font(.custom("Roboto-SemiBold", size: 17))
-                                            .tag(t)
-
-                }
-            }
-            .pickerStyle(.segmented)
+            CueEditorTabBar(
+                selection: $tab,
+                isDirty: isDirty,
+                eventsCount: sheet.events.count
+            )
             .padding(.horizontal, 16)
             .padding(.bottom, 10)
+
 
             // Content
             Group {
@@ -636,6 +633,183 @@ private struct IdentifiableIndex: Identifiable {
     let value: Int
     init(_ value: Int) { self.value = value }
 }
+
+// MARK: - Editor Tab Bar (ViewThatFits + Glass)
+private struct CueEditorTabBar: View {
+    @Binding var selection: CueSheetEditorSheet.Tab
+    let isDirty: Bool
+    let eventsCount: Int
+
+    @Namespace private var ns
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            wideRail
+            compactRail
+            overflowRail
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    // MARK: Rails
+
+    private var wideRail: some View {
+        railContainer {
+            tabButton(.details, mode: .iconAndText)
+            tabButton(.events,  mode: .iconAndText)
+        }
+    }
+
+    private var compactRail: some View {
+        railContainer {
+            tabButton(.details, mode: .iconOnly)
+            tabButton(.events,  mode: .iconOnly)
+        }
+    }
+
+    private var overflowRail: some View {
+        Menu {
+            Button { select(.details) } label: {
+                Label("Details", systemImage: symbolName(for: .details, selected: selection == .details))
+            }
+            Button { select(.events) } label: {
+                Label("Events", systemImage: symbolName(for: .events, selected: selection == .events))
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: symbolName(for: selection, selected: true))
+                    .font(.system(size: 15, weight: .semibold))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(Color.primary, Color.accentColor.opacity(0.65))
+                    .contentTransition(.symbolEffect(.replace))
+                Text(selection.rawValue)
+                    .font(.custom("Roboto-SemiBold", size: 15))
+                Spacer(minLength: 6)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(railBackground)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Building blocks
+
+    private enum LabelMode { case iconOnly, iconAndText }
+
+    private func railContainer<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        HStack(spacing: 6) {
+            content()
+        }
+        .padding(4)
+        .frame(maxWidth: .infinity)
+        .background(railBackground)
+    }
+
+    private var railBackground: some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        return shape
+            .fill(.ultraThinMaterial)
+            .cueGlassIfAvailable()
+            .overlay(shape.stroke(Color.primary.opacity(0.10), lineWidth: 1))
+    }
+
+    private func tabButton(_ tab: CueSheetEditorSheet.Tab, mode: LabelMode) -> some View {
+        let selected = (selection == tab)
+
+        return Button {
+            select(tab)
+        } label: {
+            HStack(spacing: 8) {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: symbolName(for: tab, selected: selected))
+                        .font(.system(size: 15, weight: .semibold))
+                        .symbolRenderingMode(selected ? .palette : .hierarchical)
+                        .foregroundStyle(
+                            selected ? Color.primary : Color.secondary,
+                            selected ? Color.accentColor.opacity(0.65) : Color.clear
+                        )
+                        .contentTransition(.symbolEffect(.replace))
+                        .symbolEffect(.bounce, value: selection) // motion without being “toy”
+
+                    if tab == .events, eventsCount > 0 {
+                        Text("\(eventsCount)")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .monospacedDigit()
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.thinMaterial, in: Capsule())
+                            .overlay(Capsule().stroke(Color.primary.opacity(0.10), lineWidth: 1))
+                            .offset(x: 10, y: -10)
+                            .accessibilityLabel("\(eventsCount) events")
+                    }
+                }
+
+                if mode == .iconAndText {
+                    Text(tab.rawValue)
+                        .font(.custom("Roboto-SemiBold", size: 15))
+                        .foregroundStyle(selected ? .primary : .secondary)
+                        .lineLimit(1)
+                }
+
+                if selected, isDirty {
+                    Circle()
+                        .fill(Color.accentColor)
+                        .frame(width: 6, height: 6)
+                        .accessibilityHidden(true)
+                }
+            }
+            .padding(.horizontal, mode == .iconOnly ? 10 : 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background {
+                if selected {
+                    Capsule()
+                        .fill(.thinMaterial)
+                        .cueGlassIfAvailable()
+                        .overlay(Capsule().stroke(Color.primary.opacity(0.14), lineWidth: 1))
+                        .shadow(color: Color.black.opacity(0.10), radius: 10, x: 0, y: 6)
+                        .matchedGeometryEffect(id: "cueEditor.activeTab", in: ns)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(tab.rawValue)
+    }
+
+    private func select(_ tab: CueSheetEditorSheet.Tab) {
+        guard selection != tab else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.spring(response: 0.30, dampingFraction: 0.90)) {
+            selection = tab
+        }
+    }
+
+    private func symbolName(for tab: CueSheetEditorSheet.Tab, selected: Bool) -> String {
+        switch tab {
+        case .details:
+            return selected ? "info.circle.fill" : "info.circle"
+        case .events:
+            return selected ? "list.bullet.rectangle.fill" : "list.bullet.rectangle"
+        }
+    }
+}
+
+// MARK: - Glass helper (real .glassEffect, safely gated at runtime)
+private extension View {
+    @ViewBuilder func cueGlassIfAvailable() -> some View {
+        if #available(iOS 18.0, macOS 15.0, *) {
+            self.glassEffect()
+        } else {
+            self
+        }
+    }
+}
+
 
 // MARK: Details
 private struct DetailsSection: View {
