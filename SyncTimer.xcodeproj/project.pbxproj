@@ -83,6 +83,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		9600A59F2FF1E6E100AA0F8B /* GhostMarkdownEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhostMarkdownEditor.swift; sourceTree = "<group>"; };
 		961396B22E0D503800B847F3 /* StopEventWire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StopEventWire.swift; sourceTree = "<group>"; };
 		9636A7422E791DBB00A062B6 /* SyncTimerWatch Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "SyncTimerWatch Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		9636A74E2E791DBD00A062B6 /* SyncTimerWatch Watch AppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "SyncTimerWatch Watch AppTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
