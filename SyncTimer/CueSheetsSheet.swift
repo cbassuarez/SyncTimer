@@ -1803,6 +1803,19 @@ private struct EventRow: View {
                                     .foregroundStyle(.secondary)
 
             }
+            if event.kind == .cue {
+                Menu {
+                    Button("Auto") { event.rehearsalMarkMode = .auto }
+                    Button("Off") { event.rehearsalMarkMode = nil }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: event.rehearsalMarkMode == .auto ? "a.circle.fill" : "a.circle")
+                        Text(event.rehearsalMarkMode == .auto ? "Mark Auto" : "Mark Off")
+                            .font(.custom("Roboto-Regular", size: 13))
+                    }
+                }
+                .menuStyle(.borderlessButton)
+            }
             Button(role: .destructive, action: onDelete) {
                             Image(systemName: "trash")
                         }

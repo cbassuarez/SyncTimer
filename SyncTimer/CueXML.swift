@@ -17,7 +17,9 @@ enum CueXML {
     // MARK: Write
     static func write(_ sheet: CueSheet, assets: [AssetBlob] = []) -> Data {
         let normalized = sheet.normalized()
-        let needsV2 = normalized.events.contains(where: { $0.kind == .message || $0.kind == .image }) || !assets.isEmpty
+        let hasOverlayContent = normalized.events.contains(where: { $0.kind == .message || $0.kind == .image })
+        let hasRehearsalMarks = normalized.events.contains(where: { ($0.rehearsalMarkMode ?? .off) != .off })
+        let needsV2 = hasOverlayContent || hasRehearsalMarks || !assets.isEmpty
         let version = max(normalized.version, needsV2 ? 2 : normalized.version)
         var xml = ""
         func esc(_ s: String) -> String {
@@ -61,6 +63,10 @@ enum CueXML {
                     if let caption = payload.caption, !caption.spans.isEmpty {
                         extra += " captionFmt=\"\(encodeSpans(caption.spans))\""
                     }
+                }
+            case .cue:
+                if let mode = e.rehearsalMarkMode, mode != .off {
+                    extra += " reh=\"\(mode.rawValue)\""
                 }
             default: break
             }
@@ -151,6 +157,9 @@ enum CueXML {
                 var e = CueSheet.Event(kind: kind, at: Double(at) ?? 0, holdSeconds: nil, label: nil, payload: nil)
                 if let h = attributes["holdSeconds"] { e.holdSeconds = Double(h) }
                 if let l = attributes["label"] { e.label = l }
+                if let reh = attributes["reh"] ?? attributes["rehearsal"] {
+                    e.rehearsalMarkMode = CueSheet.RehearsalMarkMode(rawValue: reh)
+                }
                 switch kind {
                 case .message:
                     let spans = attributes["fmt"].map { CueXML.decodeSpans($0) } ?? []
