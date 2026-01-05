@@ -3806,14 +3806,56 @@ struct MainScreen: View {
      @State private var connectPageShadow: Int = 2
     @State private var lastLoadedLabel: String? = nil
     @State private var lastLoadedWasBroadcast: Bool = false
+    @State private var loadedCueSheetID: UUID? = nil
     
     func apply(_ sheet: CueSheet) {
 
+        loadedCueSheetID = sheet.id
         cueDisplay.reset()
         cueDisplay.buildTimeline(from: sheet)
-        // Defer event mapping to the view that owns `events`
+        mapEvents(from: sheet)
+        // Notify any listeners that a sheet was loaded
         NotificationCenter.default.post(name: .didLoadCueSheet, object: sheet)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    private func mapEvents(from sheet: CueSheet) {
+        let mapped: [Event] = sheet.events
+            .sorted { $0.at < $1.at }
+            .map { se in
+                switch se.kind {
+                case .cue:
+                    return .cue(CueEvent(cueTime: se.at))
+                case .stop:
+                    return .stop(StopEvent(eventTime: se.at, duration: se.holdSeconds ?? 0))
+                case .restart:
+                    return .restart(RestartEvent(restartTime: se.at))
+                case .message:
+                    return .message(MessageEvent(messageTime: se.at))
+                case .image:
+                    return .image(ImageEvent(imageTime: se.at))
+                default:
+                    // Unknown/new kinds → treat as a cue at the same absolute time
+                    return .cue(CueEvent(cueTime: se.at))
+                }
+            }
+        events = mapped
+        // Keep rawStops in sync so the stop loop/timer logic continues to work
+        rawStops = mapped.compactMap {
+            if case let .stop(s) = $0 { return s } else { return nil }
+        }
+    }
+
+    private func reloadCurrentCueSheet() {
+        guard let sheetID = loadedCueSheetID,
+              let meta = CueLibraryStore.shared.index.sheets[sheetID],
+              let sheet = try? CueLibraryStore.shared.load(meta: meta) else { return }
+
+        loadedCueSheetID = sheet.id
+        cueDisplay.reset()
+        cueDisplay.buildTimeline(from: sheet)
+        mapEvents(from: sheet)
+        NotificationCenter.default.post(name: .didLoadCueSheet, object: sheet)
     }
     // Derive connected device display names for the Devices card.
         // Replace internals later with your canonical peer list if you expose one.
@@ -4930,31 +4972,7 @@ struct MainScreen: View {
             // Map a loaded CueSheet into the live events list (drives EventsBar + 5 circles)
                 .onReceive(NotificationCenter.default.publisher(for: .didLoadCueSheet)) { note in
                     guard let sheet = note.object as? CueSheet else { return }
-                    // Absolute time dominance: sort by `at` and map to your Event enum
-                    let mapped: [Event] = sheet.events
-                        .sorted { $0.at < $1.at }
-                        .map { se in
-                            switch se.kind {
-                            case .cue:
-                                return .cue(CueEvent(cueTime: se.at))
-                            case .stop:
-                                return .stop(StopEvent(eventTime: se.at, duration: se.holdSeconds ?? 0))
-                            case .restart:
-                                return .restart(RestartEvent(restartTime: se.at))
-                            case .message:
-                                return .message(MessageEvent(messageTime: se.at))
-                            case .image:
-                                return .image(ImageEvent(imageTime: se.at))
-                            default:
-                                // Unknown/new kinds → treat as a cue at the same absolute time
-                                return .cue(CueEvent(cueTime: se.at))
-                            }
-                        }
-                    events = mapped
-                    // Keep rawStops in sync so the stop loop/timer logic continues to work
-                    rawStops = mapped.compactMap {
-                        if case let .stop(s) = $0 { return s } else { return nil }
-                    }
+                    mapEvents(from: sheet)
                 }
             // Stable SwiftUI sheet presenter (medium/large detents are defined inside CueSheetsSheet)
                 .sheet(isPresented: $showCueSheets) {
@@ -7207,6 +7225,9 @@ struct MainScreen: View {
         guard phase == .idle || phase == .paused else { return }
         ticker?.cancel()
         phase = .idle
+
+        // Rebuild cues/overlays from the currently loaded sheet so state mirrors a fresh load
+        reloadCurrentCueSheet()
         
         // Broadcast reset to children if we’re the parent
         if syncSettings.role == .parent && syncSettings.isEnabled {
