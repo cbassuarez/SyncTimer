@@ -71,8 +71,8 @@ final class CueDisplayController: ObservableObject {
                 let payload: CueSheet.ImagePayload = {
                     if case .image(let payload)? = event.payload { return payload }
 #if DEBUG
-                    assertionFailure("Image event missing payload; scheduling placeholder")
-#endif
+                   print("Image event missing payload; scheduling placeholder")
+                   #endif
                     let caption = event.label.map { CueSheet.MessagePayload(text: $0) }
                     return CueSheet.ImagePayload(assetID: event.id, contentMode: .fit, caption: caption)
                 }()

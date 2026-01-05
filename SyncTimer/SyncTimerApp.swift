@@ -3518,8 +3518,8 @@ struct TimerCard: View {
                                 } else {
                                     VStack {
                                         ProgressView()
-                                        Text("Image unavailable")
-                                            .font(.body.weight(.semibold))
+                                  //      Text("Image unavailable")
+                                            //           .font(.body.weight(.semibold))
                                     }
                                     .frame(width: containerWidth)
                                 }
