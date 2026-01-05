@@ -44,6 +44,39 @@ final class CueDisplayControllerTests: XCTestCase {
         waitForExpectations(timeout: 1.0)
     }
 
+    func testRehearsalMarkUsesDefaultDurationAndSettles() {
+        let controller = CueDisplayController(durationConfig: .init(base: 0.1, perChar: 0.0, max: 0.1))
+        var s = CueSheet(title: "Test")
+        s.events = [
+            CueSheet.Event(kind: .cue, at: 0, holdSeconds: nil, rehearsalMarkMode: .auto)
+        ]
+        controller.buildTimeline(from: s)
+        controller.apply(elapsed: 0)
+        XCTAssertEqual(controller.rehearsalMarkText, "A")
+        XCTAssertEqual(controller.settledRehearsalMarkText, "A")
+
+        let exp = expectation(description: "mark clears after default duration")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            XCTAssertNil(controller.rehearsalMarkText)
+            XCTAssertEqual(controller.settledRehearsalMarkText, "A")
+            exp.fulfill()
+        }
+        waitForExpectations(timeout: 1.0)
+    }
+
+    func testDismissKeepsSettledMark() {
+        let controller = CueDisplayController(durationConfig: .init(base: 0.2, perChar: 0.0, max: 0.2))
+        var s = CueSheet(title: "Test")
+        s.events = [
+            CueSheet.Event(kind: .cue, at: 0, holdSeconds: 0.2, rehearsalMarkMode: .auto)
+        ]
+        controller.buildTimeline(from: s)
+        controller.apply(elapsed: 0)
+        controller.dismiss()
+        XCTAssertNil(controller.rehearsalMarkText)
+        XCTAssertEqual(controller.settledRehearsalMarkText, "A")
+    }
+
     func testDefaultDurationUsesCharacterCountAndCap() {
         let controller = CueDisplayController(durationConfig: .init(base: 0.1, perChar: 0.1, max: 0.25))
         controller.buildTimeline(from: sheet(message: "1234567890", hold: nil))

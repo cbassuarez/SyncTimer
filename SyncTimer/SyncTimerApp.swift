@@ -2329,6 +2329,7 @@ struct TimerCard: View {
     var events: [Event]
     var onClearEvents: (() -> Void)? = nil
     @State private var isMessageExpanded = false
+    @Namespace private var rehearsalMarkNamespace
 
     // ── Derived styling ────────────────────────────────────────────
     private var isDark: Bool  { colorScheme == .dark }
@@ -2484,22 +2485,18 @@ struct TimerCard: View {
                 let subTextFontSize: CGFloat = isLandscape ? 28 : 20 // for “SYNCING…”, circles’ “S/C/R” labels
                 let circleDiameter: CGFloat = isLandscape ? 30 : 18  // for the 5 event circles
                 let stopTimerFontSize: CGFloat = isLandscape ? 30 : 24 // for the small stop‐timer underneath
-                let messagePayload: CueSheet.MessagePayload? = nil
-                let imagePayload: CueSheet.ImagePayload? = nil
+                let messagePayload: CueSheet.MessagePayload? = cueDisplay.messagePayload
+                let imagePayload: CueSheet.ImagePayload? = cueDisplay.image
+                let rehearsalMarkText: String? = cueDisplay.rehearsalMarkText
+                let overlayAnimationToken = "\(messagePayload?.text ?? "")|\(rehearsalMarkText ?? "")|\(imagePayload?.assetID.uuidString ?? "")"
                 let placement = messagePlacement(for: geo.size)
                 let showCollapsedMessage = false
                 let fadeAnimation = Animation.easeInOut(duration: 0.25)
                 let cardCornerRadius: CGFloat = 12
                 let cardWidth = geo.size.width - (horizontalInset * 2)
                 let cardHeight = isLandscape ? geo.size.height : 190
-                let activeDisplayEvent: CueDisplayController.Slot? = {
-                    switch cueDisplay.slot {
-                    case .none:
-                        return nil
-                    default:
-                        return cueDisplay.slot
-                    }
-                }()
+                let showOverlayBanner = (messagePayload != nil || rehearsalMarkText != nil) && !isMessageExpanded
+                let showExpandedOverlay = isMessageExpanded && (messagePayload != nil || rehearsalMarkText != nil)
 
                 let cardBody = ZStack {
                     // ── (A) Card background with drop shadow ─────────────────
@@ -2640,7 +2637,7 @@ struct TimerCard: View {
                                 .padding(.horizontal, 12)
                                 .padding(.top, 6)
                                 .transition(.opacity)
-                                .animation(fadeAnimation, value: cueDisplay.slot)
+                                .animation(fadeAnimation, value: overlayAnimationToken)
                         } else {
                             ZStack {
                                 let primaryHintColor = isDark ? Color.white : Color.black
@@ -2680,7 +2677,7 @@ struct TimerCard: View {
                                 }
                             }
                             .transition(.opacity)
-                            .animation(fadeAnimation, value: cueDisplay.slot)
+                            .animation(fadeAnimation, value: overlayAnimationToken)
                         }
                         
                         
@@ -2780,7 +2777,7 @@ struct TimerCard: View {
                                 .padding(.horizontal, 12)
                                 .padding(.bottom, 4)
                                 .transition(.opacity)
-                                .animation(fadeAnimation, value: cueDisplay.slot)
+                                .animation(fadeAnimation, value: overlayAnimationToken)
                         }
                         
                         // ── NEW: when width ≤389, show failsafe icons here ─────────
@@ -2822,7 +2819,7 @@ struct TimerCard: View {
                             CollapsedMessageBanner(payload: payload, onDismiss: dismissMessage, onExpand: expandMessage)
                                 .padding(.horizontal, 12)
                                 .transition(.opacity)
-                                .animation(fadeAnimation, value: cueDisplay.slot)
+                                .animation(fadeAnimation, value: overlayAnimationToken)
                         } else {
                             HStack(spacing: 0) {
                                 if syncSettings.isEnabled && !syncSettings.isEstablished {
@@ -2907,7 +2904,7 @@ struct TimerCard: View {
                             .padding(.horizontal, 12)
                             .padding(.top, 4)
                             .transition(.opacity)
-                            .animation(fadeAnimation, value: cueDisplay.slot)
+                            .animation(fadeAnimation, value: overlayAnimationToken)
                         }
                         
                         Spacer(minLength: 4)
@@ -2918,7 +2915,7 @@ struct TimerCard: View {
                                     .padding(.horizontal, 12)
                                     .padding(.bottom, 6)
                                     .transition(.opacity)
-                                    .animation(fadeAnimation, value: cueDisplay.slot)
+                                    .animation(fadeAnimation, value: overlayAnimationToken)
                             } else {
                                 HStack {
                                     Text("EVENTS VIEW")
@@ -2931,7 +2928,7 @@ struct TimerCard: View {
                                 .padding(.horizontal, 12)
                                 .padding(.bottom, 6)
                                 .transition(.opacity)
-                                .animation(fadeAnimation, value: cueDisplay.slot)
+                                .animation(fadeAnimation, value: overlayAnimationToken)
                             }
                         }
                     }
@@ -3030,6 +3027,10 @@ struct TimerCard: View {
                                                     .font(.footnote.weight(.semibold))
                                                     .lineLimit(1)
                                                     .truncationMode(.tail)
+                                                if cueDisplay.rehearsalMarkText == nil, let settled = cueDisplay.settledRehearsalMarkText {
+                                                    RehearsalMarkGlyph(text: settled, namespace: rehearsalMarkNamespace, isBadge: true, isSource: false)
+                                                        .transition(.opacity)
+                                                }
                                                 Button {
                                                                                                             withAnimation(.easeOut(duration: 0.2)) {
                                                                                                                 // clear events first, then clear badge
@@ -3072,25 +3073,53 @@ struct TimerCard: View {
 
                 ZStack {
                     baseCard
-                    if let activeDisplayEvent {
+                    if let imagePayload {
                         TimerCardDisplayEventOverlay(
-                            event: activeDisplayEvent,
+                            message: nil,
+                            image: imagePayload,
+                            rehearsalMark: nil,
                             cornerRadius: cardCornerRadius,
+                            namespace: rehearsalMarkNamespace,
                             onDismiss: {
-                                switch activeDisplayEvent {
-                                case .image:
-                                    dismissImage()
-                                case .message:
-                                    dismissMessage()
-                                case .none:
-                                    break
-                                }
+                                dismissImage()
                             }
                         )
                         .transition(.opacity)
-                        .animation(fadeAnimation, value: cueDisplay.slot)
+                        .animation(fadeAnimation, value: overlayAnimationToken)
                         .frame(width: cardWidth, height: cardHeight)
                         .zIndex(1)
+                    }
+                    if showExpandedOverlay {
+                        TimerCardDisplayEventOverlay(
+                            message: messagePayload,
+                            image: nil,
+                            rehearsalMark: rehearsalMarkText,
+                            cornerRadius: cardCornerRadius,
+                            namespace: rehearsalMarkNamespace,
+                            onDismiss: {
+                                dismissMessage()
+                            }
+                        )
+                        .transition(.opacity)
+                        .animation(fadeAnimation, value: overlayAnimationToken)
+                        .frame(width: cardWidth, height: cardHeight)
+                        .zIndex(2)
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if showOverlayBanner {
+                        ScoreCueBanner(
+                            message: messagePayload,
+                            rehearsalMark: rehearsalMarkText,
+                            namespace: rehearsalMarkNamespace,
+                            onDismiss: dismissMessage,
+                            onToggleExpand: expandMessage
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .transition(.opacity)
+                        .animation(fadeAnimation, value: overlayAnimationToken)
+                        .zIndex(3)
                     }
                 }
                 .frame(
@@ -3106,10 +3135,17 @@ struct TimerCard: View {
                 ? "Tap left half for Events View, right half for Sync View"
                 : "Tap to switch views"
             )
-            .onChange(of: cueDisplay.slot) { _ in
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isMessageExpanded = false
-                }
+            .onChange(of: cueDisplay.messagePayload) { _ in
+                resetExpansion()
+                collapseOverlayIfNeeded()
+            }
+            .onChange(of: cueDisplay.rehearsalMarkText) { _ in
+                resetExpansion()
+                collapseOverlayIfNeeded()
+            }
+            .onChange(of: cueDisplay.image) { _ in
+                resetExpansion()
+                collapseOverlayIfNeeded()
             }
         }
         
@@ -3202,6 +3238,7 @@ struct TimerCard: View {
     private func dismissMessage() {
         withAnimation(.easeInOut(duration: 0.2)) {
             isMessageExpanded = false
+            cueDisplay.isExpanded = false
             cueDisplay.dismiss()
         }
     }
@@ -3209,6 +3246,7 @@ struct TimerCard: View {
     private func dismissImage() {
         withAnimation(.easeInOut(duration: 0.2)) {
             isMessageExpanded = false
+            cueDisplay.isExpanded = false
             cueDisplay.dismiss()
         }
     }
@@ -3216,7 +3254,20 @@ struct TimerCard: View {
     private func expandMessage() {
         withAnimation(.easeInOut(duration: 0.2)) {
             isMessageExpanded = true
+            cueDisplay.isExpanded = true
         }
+    }
+
+    private func resetExpansion() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isMessageExpanded = false
+            cueDisplay.isExpanded = false
+        }
+    }
+
+    private func collapseOverlayIfNeeded() {
+        guard cueDisplay.messagePayload == nil, cueDisplay.rehearsalMarkText == nil else { return }
+        resetExpansion()
     }
     
     private func messagePlacement(for size: CGSize) -> MessagePlacement {
@@ -3261,9 +3312,99 @@ struct TimerCard: View {
         }
     }
     
+    private struct RehearsalMarkGlyph: View {
+        let text: String
+        var namespace: Namespace.ID?
+        var isBadge: Bool = false
+        var isSource: Bool = true
+
+        var body: some View {
+            var glyph = Text(text)
+                .font(.system(size: isBadge ? 12 : 14, weight: .heavy, design: .rounded))
+                .padding(.horizontal, isBadge ? 8 : 10)
+                .padding(.vertical, isBadge ? 4 : 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.primary.opacity(0.12))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.primary.opacity(0.18), lineWidth: 1)
+                )
+                .accessibilityLabel("Rehearsal mark \(text)")
+
+            if let namespace {
+                glyph = glyph.matchedGeometryEffect(id: "rehearsalMarkGlyph", in: namespace, isSource: isSource)
+            }
+            return glyph
+        }
+    }
+
+    private struct ReservedRehearsalMarkSlot: View {
+        let mark: String?
+        var namespace: Namespace.ID?
+        var body: some View {
+            Group {
+                if let mark {
+                    RehearsalMarkGlyph(text: mark, namespace: namespace)
+                } else {
+                    Color.clear
+                        .frame(width: 44, height: 32)
+                }
+            }
+            .frame(width: 54, alignment: .leading)
+        }
+    }
+
+    private struct ScoreCueBanner: View {
+        let message: CueSheet.MessagePayload?
+        let rehearsalMark: String?
+        var namespace: Namespace.ID
+        var onDismiss: () -> Void
+        var onToggleExpand: () -> Void
+
+        var body: some View {
+            HStack(alignment: .top, spacing: 12) {
+                ReservedRehearsalMarkSlot(mark: rehearsalMark, namespace: namespace)
+                if let message {
+                    Text(attributedText(from: message))
+                        .font(.body.italic())
+                        .lineSpacing(4)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityLabel("Message")
+                        .accessibilityValue(message.text)
+                } else {
+                    Spacer(minLength: 0)
+                }
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(.primary)
+                        .padding(2)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture(perform: onToggleExpand)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
     private struct TimerCardDisplayEventOverlay: View {
-        let event: CueDisplayController.Slot
+        let message: CueSheet.MessagePayload?
+        let image: CueSheet.ImagePayload?
+        let rehearsalMark: String?
         let cornerRadius: CGFloat
+        var namespace: Namespace.ID?
         var onDismiss: () -> Void
         @State private var uiImage: UIImage?
         
@@ -3293,32 +3434,19 @@ struct TimerCard: View {
             .accessibilityLabel(accessibilityLabel)
             .accessibilityValue(accessibilityValue)
             .onAppear(perform: loadImageIfNeeded)
-            .onChange(of: event) { _ in loadImageIfNeeded() }
+            .onChange(of: image?.assetID) { _ in loadImageIfNeeded() }
         }
         
         @ViewBuilder
         private var overlayContent: some View {
-            switch event {
-            case .message(let payload):
-                VStack(spacing: 12) {
-                    Spacer(minLength: 0)
-                    ScrollView {
-                        Text(attributedText(from: payload))
-                            .font(.body)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding()
-            case .image(let payload):
+            if let payload = image {
                 VStack(spacing: 12) {
                     Group {
                         if let uiImage {
                             Image(uiImage: uiImage)
                                 .resizable()
-                                .aspectRatio(contentMode: payload.contentMode == .fill ? .fill : .fit)
+                                .scaledToFit()
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .clipped()
                         } else {
                             VStack {
                                 ProgressView()
@@ -3338,42 +3466,47 @@ struct TimerCard: View {
                     }
                 }
                 .padding()
-            case .none:
-                EmptyView()
+            } else if message != nil || rehearsalMark != nil {
+                VStack(spacing: 12) {
+                    ScrollView {
+                        HStack(alignment: .top, spacing: 12) {
+                            ReservedRehearsalMarkSlot(mark: rehearsalMark, namespace: namespace)
+                            if let message {
+                                Text(attributedText(from: message))
+                                    .font(.body.italic())
+                                    .lineSpacing(5)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            } else {
+                                Spacer(minLength: 0)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding()
             }
         }
         
         private var accessibilityLabel: String {
-            switch event {
-            case .message:
-                return "Message"
-            case .image:
-                return "Image"
-            case .none:
-                return ""
-            }
+            if message != nil { return "Message" }
+            if image != nil { return "Image" }
+            if rehearsalMark != nil { return "Rehearsal mark" }
+            return ""
         }
         
         private var accessibilityValue: String {
-            switch event {
-            case .message(let payload):
-                return payload.text
-            case .image(let payload):
-                return payload.caption?.text ?? "Image"
-            case .none:
-                return ""
-            }
+            if let payload = message { return payload.text }
+            if let payload = image { return payload.caption?.text ?? "Image" }
+            if let mark = rehearsalMark { return "Rehearsal mark \(mark)" }
+            return ""
         }
         
         private func loadImageIfNeeded() {
-            guard case let .image(payload) = event else {
-                uiImage = nil
-                return
-            }
+            guard let image else { uiImage = nil; return }
             Task { @MainActor in
-                let data = try? CueLibraryStore.shared.assetData(id: payload.assetID)
-                let image = data.flatMap { UIImage(data: $0) }
-                uiImage = image
+                let data = try? CueLibraryStore.shared.assetData(id: image.assetID)
+                let loaded = data.flatMap { UIImage(data: $0) }
+                uiImage = loaded
             }
         }
     }

@@ -8,6 +8,10 @@
 import Foundation
 
 public struct CueSheet: Identifiable, Equatable, Hashable {
+    public enum RehearsalMarkMode: String, Codable {
+        case auto
+        case off
+    }
     public struct TempoChange: Equatable, Hashable { public var atBar: Int; public var bpm: Double }
     public struct MeterChange: Equatable, Hashable { public var atBar: Int; public var num: Int; public var den: Int }
     public struct Event: Identifiable, Equatable, Hashable {
@@ -22,13 +26,15 @@ public struct CueSheet: Identifiable, Equatable, Hashable {
         public var holdSeconds: TimeInterval?  // for stop-hold semantics
         public var label: String?              // optional label
         public var payload: Payload?
-        public init(id: UUID = UUID(), kind: Kind, at: TimeInterval, holdSeconds: TimeInterval? = nil, label: String? = nil, payload: Payload? = nil) {
+        public var rehearsalMarkMode: CueSheet.RehearsalMarkMode?
+        public init(id: UUID = UUID(), kind: Kind, at: TimeInterval, holdSeconds: TimeInterval? = nil, label: String? = nil, payload: Payload? = nil, rehearsalMarkMode: CueSheet.RehearsalMarkMode? = nil) {
             self.id = id
             self.kind = kind
             self.at = at
             self.holdSeconds = holdSeconds
             self.label = label
             self.payload = payload
+            self.rehearsalMarkMode = rehearsalMarkMode
         }
         // NOTE: no colorToken/tolerance per your spec
     }
