@@ -427,6 +427,7 @@ private struct PageOne_TimerCard: View {
 
     // ── Track that user did tap into Events at least once ───────
     @State private var didEnterEventsView: Bool = false
+    @StateObject private var cueDisplay = CueDisplayController()
 
 
     var body: some View {
@@ -485,6 +486,7 @@ private struct PageOne_TimerCard: View {
                 .frame(height: 200)
                 .environmentObject(AppSettings())
                 .environmentObject(SyncSettings())
+                .environmentObject(cueDisplay)
 
 
                 // Two clear, half-width tap buttons
@@ -548,6 +550,7 @@ private struct PageTwo_Countdown: View {
     @State private var timerCancellable: AnyCancellable? = nil
     @State private var flashZero: Bool = false
     @State private var showSecondLine: Bool = false
+    @StateObject private var cueDisplay = CueDisplayController()
 
 
     // ── Convert “raw digits” [3, 0, 0] → 3.00s ───────────────────
@@ -696,6 +699,7 @@ private struct PageTwo_Countdown: View {
                 .frame(height: 200)
                 .environmentObject(AppSettings())
                 .environmentObject(SyncSettings())
+                .environmentObject(cueDisplay)
 
                 // ── Custom NumPad (same layout as app, but tighter vertical spacing) ─
                 VStack(spacing: 8) {
@@ -771,6 +775,7 @@ private struct PageThree_AddEvent: View {
     @State private var didAddStop = false
     @State private var didAddCue  = false
     @State private var advanceWorkItem: DispatchWorkItem?
+    @StateObject private var cueDisplay = CueDisplayController()
 
 
     // Pre-chosen times
@@ -832,6 +837,7 @@ private struct PageThree_AddEvent: View {
             .frame(height: 160)
             .environmentObject(AppSettings())
             .environmentObject(SyncSettings())
+            .environmentObject(cueDisplay)
 
 
             // THINMATERIAL CARD + SHADOW + OFFSET
@@ -910,6 +916,7 @@ private struct PageFour_Sync: View {
     @State private var showPostSyncText = false
     @State private var finishScheduled  = false
     @State private var ticker: AnyCancellable?
+    @StateObject private var cueDisplay = CueDisplayController()
     private let dt: TimeInterval = 1.0 / 100.0
 
 
@@ -963,6 +970,7 @@ All set! Timers are aligned—changes on one reflect on the other instantly.
                 )
                 .environmentObject(AppSettings())
                 .environmentObject(mockSyncSettings)
+                .environmentObject(cueDisplay)
                 .frame(height: 150)
 
 
@@ -987,6 +995,7 @@ All set! Timers are aligned—changes on one reflect on the other instantly.
                 )
                 .environmentObject(AppSettings())
                 .environmentObject(mockSyncSettings)
+                .environmentObject(cueDisplay)
                 .frame(height: 150)
                 .padding(.top, 50) // <-- shifted down by 50pt
             }

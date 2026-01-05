@@ -2260,6 +2260,7 @@ struct TimerCard: View {
 
     @EnvironmentObject private var cueBadge: CueBadgeState
     @EnvironmentObject private var clockSync: ClockSyncService
+    @EnvironmentObject private var cueDisplay: CueDisplayController
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var syncSettings: SyncSettings
@@ -2306,6 +2307,9 @@ struct TimerCard: View {
         default: return "."
         }
     }
+    private enum MessagePlacement {
+        case gap, circles, modeBar, header
+    }
 
     // ── Flags for hint flashes ───────────────────────────────────────
     private var shouldFlashLeft: Bool {
@@ -2334,6 +2338,7 @@ struct TimerCard: View {
     var isCountdownActive: Bool
     var events: [Event]
     var onClearEvents: (() -> Void)? = nil
+    @State private var isMessageExpanded = false
 
     // ── Derived styling ────────────────────────────────────────────
     private var isDark: Bool  { colorScheme == .dark }
@@ -2489,6 +2494,17 @@ struct TimerCard: View {
                 let subTextFontSize: CGFloat = isLandscape ? 28 : 20 // for “SYNCING…”, circles’ “S/C/R” labels
                 let circleDiameter: CGFloat = isLandscape ? 30 : 18  // for the 5 event circles
                 let stopTimerFontSize: CGFloat = isLandscape ? 30 : 24 // for the small stop‐timer underneath
+                let messagePayload: CueSheet.MessagePayload? = {
+                    if case let .message(payload) = cueDisplay.slot { return payload }
+                    return nil
+                }()
+                let imagePayload: CueSheet.ImagePayload? = {
+                    if case let .image(payload) = cueDisplay.slot { return payload }
+                    return nil
+                }()
+                let placement = messagePlacement(for: geo.size)
+                let showCollapsedMessage = messagePayload != nil && !isMessageExpanded
+                let fadeAnimation = Animation.easeInOut(duration: 0.25)
 
                 ZStack {
                     // ── (A) Card background with drop shadow ─────────────────
@@ -2624,42 +2640,52 @@ struct TimerCard: View {
                     // ── (B) Full vertical stack ────────────────────────────
                     VStack(spacing: 0) {
                         // B.1) Top hints “START POINT” / “DURATION” ────────────
-                        ZStack {
-                            let primaryHintColor = isDark ? Color.white : Color.black
-                            HStack {
-                                Text(leftHint)
-                                    .foregroundColor(
-                                        shouldFlashLeft
-                                        ? (leftFlash ? primaryHintColor : Color.gray)
-                                        : Color.gray
-                                    )
-                                Spacer()
-                                Text(rightHint)
-                                    .foregroundColor(
-                                        shouldFlashRight
-                                        ? (rightFlash ? primaryHintColor : Color.gray)
-                                        : Color.gray
-                                    )
+                        if let payload = messagePayload, showCollapsedMessage, placement == .header {
+                            CollapsedMessageBanner(payload: payload, onDismiss: dismissMessage, onExpand: expandMessage)
+                                .padding(.horizontal, 12)
+                                .padding(.top, 6)
+                                .transition(.opacity)
+                                .animation(fadeAnimation, value: cueDisplay.slot)
+                        } else {
+                            ZStack {
+                                let primaryHintColor = isDark ? Color.white : Color.black
+                                HStack {
+                                    Text(leftHint)
+                                        .foregroundColor(
+                                            shouldFlashLeft
+                                            ? (leftFlash ? primaryHintColor : Color.gray)
+                                            : Color.gray
+                                        )
+                                    Spacer()
+                                    Text(rightHint)
+                                        .foregroundColor(
+                                            shouldFlashRight
+                                            ? (rightFlash ? primaryHintColor : Color.gray)
+                                            : Color.gray
+                                        )
+                                }
+                                .font(.custom("Roboto-Regular", size: hintFontSize))
+                                .padding(.horizontal, 12)
+                                .padding(.top, 6)
+                                
+                                // ── “ERR” flashes ────────────────────────────────────
+                                if showErr {
+                                    Text("ERR")
+                                        .font(.custom("Roboto-Regular", size: hintFontSize))
+                                        .foregroundColor(txtMain)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.top, 6)
+                                }
                             }
-                            .font(.custom("Roboto-Regular", size: hintFontSize))
-                            .padding(.horizontal, 12)
-                            .padding(.top, 6)
-                            
-                            // ── “ERR” flashes ────────────────────────────────────
-                            if showErr {
-                                Text("ERR")
-                                    .font(.custom("Roboto-Regular", size: hintFontSize))
-                                    .foregroundColor(txtMain)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.top, 6)
+                            .onChange(of: syncSettings.statusMessage) { newMsg in
+                                if newMsg.contains("Invalid")
+                                    || newMsg.contains("failed")
+                                    || newMsg.contains("Timeout") {
+                                    triggerErrFlash()
+                                }
                             }
-                        }
-                        .onChange(of: syncSettings.statusMessage) { newMsg in
-                            if newMsg.contains("Invalid")
-                                || newMsg.contains("failed")
-                                || newMsg.contains("Timeout") {
-                                triggerErrFlash()
-                            }
+                            .transition(.opacity)
+                            .animation(fadeAnimation, value: cueDisplay.slot)
                         }
                         
                         
@@ -2753,6 +2779,14 @@ struct TimerCard: View {
                         .padding(.horizontal, 12)
                         Spacer(minLength: 4)
                             .accessibilityElement(children: .combine)
+
+                        if let payload = messagePayload, showCollapsedMessage, placement == .gap {
+                            CollapsedMessageBanner(payload: payload, onDismiss: dismissMessage, onExpand: expandMessage)
+                                .padding(.horizontal, 12)
+                                .padding(.bottom, 4)
+                                .transition(.opacity)
+                                .animation(fadeAnimation, value: cueDisplay.slot)
+                        }
                         
                         // ── NEW: when width ≤389, show failsafe icons here ─────────
                         if isCompactWidth {
@@ -2789,102 +2823,121 @@ struct TimerCard: View {
                         
                         
                         // B.3) “SYNCING…” / “NOTHING FOUND YET…” or 5 event‐circles ──
-                        HStack(spacing: 0) {
-                            if syncSettings.isEnabled && !syncSettings.isEstablished {
-                                if syncError {
-                                    Text("ERR01: No devices found")
-                                        .font(.custom("Roboto-Light", size: subTextFontSize))
-                                        .foregroundColor(isDark ? .white : .black)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.leading, 0) // moved 18 more to the right
-                                } else {
-                                    if showNothingYet {
-                                        Text("NOTHING FOUND YET\(dotString)")
+                        if let payload = messagePayload, showCollapsedMessage, placement == .circles {
+                            CollapsedMessageBanner(payload: payload, onDismiss: dismissMessage, onExpand: expandMessage)
+                                .padding(.horizontal, 12)
+                                .transition(.opacity)
+                                .animation(fadeAnimation, value: cueDisplay.slot)
+                        } else {
+                            HStack(spacing: 0) {
+                                if syncSettings.isEnabled && !syncSettings.isEstablished {
+                                    if syncError {
+                                        Text("ERR01: No devices found")
                                             .font(.custom("Roboto-Light", size: subTextFontSize))
                                             .foregroundColor(isDark ? .white : .black)
                                             .frame(maxWidth: .infinity, alignment: .leading)
-                                            .padding(.leading, 0)
+                                            .padding(.leading, 0) // moved 18 more to the right
                                     } else {
-                                        Text("SYNCING\(dotString)")
-                                            .font(.custom("Roboto-Light", size: subTextFontSize))
-                                            .foregroundColor(isDark ? .white : .black)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .padding(.leading, 0)
-                                    }
-                                }
-                            } else {
-                                ForEach(0..<5) { idx in
-                                    if idx < events.count {
-                                        switch events[idx] {
-                                        case .stop:
-                                            ZStack {
-                                                Circle()
-                                                    .fill(flashColor)
-                                                    .frame(width: circleDiameter,
-                                                           height: circleDiameter)
-                                                Text("S")
-                                                    .font(.custom("Roboto-Regular", size: subTextFontSize * 0.6))
-                                                    .foregroundColor(isDark ? .black : .white)
-                                            }
-                                        case .cue:
-                                            ZStack {
-                                                Circle()
-                                                    .stroke(flashColor, lineWidth: isLandscape ? 1.5 : 1)
-                                                    .frame(width: circleDiameter,
-                                                           height: circleDiameter)
-                                                Text("C")
-                                                    .font(.custom("Roboto-Regular", size: subTextFontSize * 0.6))
-                                                    .foregroundColor(flashColor)
-                                            }
-                                        case .restart:
-                                            ZStack {
-                                                Circle()
-                                                    .stroke(flashColor, lineWidth: isLandscape ? 1.5 : 1)
-                                                    .frame(width: circleDiameter,
-                                                           height: circleDiameter)
-                                                Text("R")
-                                                    .font(.custom("Roboto-Regular", size: subTextFontSize * 0.6))
-                                                    .foregroundColor(isDark ? .white : .black)
-                                            }
+                                        if showNothingYet {
+                                            Text("NOTHING FOUND YET\(dotString)")
+                                                .font(.custom("Roboto-Light", size: subTextFontSize))
+                                                .foregroundColor(isDark ? .white : .black)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .padding(.leading, 0)
+                                        } else {
+                                            Text("SYNCING\(dotString)")
+                                                .font(.custom("Roboto-Light", size: subTextFontSize))
+                                                .foregroundColor(isDark ? .white : .black)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .padding(.leading, 0)
                                         }
-                                    } else {
-                                        Circle()
-                                            .stroke(Color.gray, lineWidth: isLandscape ? 1.5 : 1)
-                                            .frame(width: circleDiameter,
-                                                   height: circleDiameter)
                                     }
-                                    Spacer().frame(width: isLandscape ? 8 : 4)
+                                } else {
+                                    ForEach(0..<5) { idx in
+                                        if idx < events.count {
+                                            switch events[idx] {
+                                            case .stop:
+                                                ZStack {
+                                                    Circle()
+                                                        .fill(flashColor)
+                                                        .frame(width: circleDiameter,
+                                                               height: circleDiameter)
+                                                    Text("S")
+                                                        .font(.custom("Roboto-Regular", size: subTextFontSize * 0.6))
+                                                        .foregroundColor(isDark ? .black : .white)
+                                                }
+                                            case .cue:
+                                                ZStack {
+                                                    Circle()
+                                                        .stroke(flashColor, lineWidth: isLandscape ? 1.5 : 1)
+                                                        .frame(width: circleDiameter,
+                                                               height: circleDiameter)
+                                                    Text("C")
+                                                        .font(.custom("Roboto-Regular", size: subTextFontSize * 0.6))
+                                                        .foregroundColor(flashColor)
+                                                }
+                                            case .restart:
+                                                ZStack {
+                                                    Circle()
+                                                        .stroke(flashColor, lineWidth: isLandscape ? 1.5 : 1)
+                                                        .frame(width: circleDiameter,
+                                                               height: circleDiameter)
+                                                    Text("R")
+                                                        .font(.custom("Roboto-Regular", size: subTextFontSize * 0.6))
+                                                        .foregroundColor(isDark ? .white : .black)
+                                                }
+                                            }
+                                        } else {
+                                            Circle()
+                                                .stroke(Color.gray, lineWidth: isLandscape ? 1.5 : 1)
+                                                .frame(width: circleDiameter,
+                                                       height: circleDiameter)
+                                        }
+                                        Spacer().frame(width: isLandscape ? 8 : 4)
+                                    }
                                 }
+                                
+                                Spacer()
+                                
+                                Text(stopActive
+                                     ? stopRemaining.formattedAdaptiveCS(alwaysShowHours: settings.showHours)
+                                     : (settings.showHours ? "00:00:00.00" : "00:00.00"))
+                                .font(.custom("Roboto-Regular", size: stopTimerFontSize))
+                                .foregroundColor(
+                                    stopActive
+                                    ? flashColor
+                                    : (mode == .sync ? txtSec : txtMain)
+                                )
                             }
-                            
-                            Spacer()
-                            
-                            Text(stopActive
-                                 ? stopRemaining.formattedAdaptiveCS(alwaysShowHours: settings.showHours)
-                                 : (settings.showHours ? "00:00:00.00" : "00:00.00"))
-                            .font(.custom("Roboto-Regular", size: stopTimerFontSize))
-                            .foregroundColor(
-                                stopActive
-                                ? flashColor
-                                : (mode == .sync ? txtSec : txtMain)
-                            )
+                            .padding(.horizontal, 12)
+                            .padding(.top, 4)
+                            .transition(.opacity)
+                            .animation(fadeAnimation, value: cueDisplay.slot)
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.top, 4)
                         
                         Spacer(minLength: 4)
                         if !phoneStyleOnMiniLandscape {
                             // B.4) Bottom labels “EVENTS VIEW” / “SYNC VIEW” ──────
-                            HStack {
-                                Text("EVENTS VIEW")
-                                    .foregroundColor(mode == .stop ? txtMain : txtSec)
-                                Spacer()
-                                Text("SYNC VIEW")
-                                    .foregroundColor(mode == .sync ? txtMain : txtSec)
+                            if let payload = messagePayload, showCollapsedMessage, placement == .modeBar {
+                                CollapsedMessageBanner(payload: payload, onDismiss: dismissMessage, onExpand: expandMessage)
+                                    .padding(.horizontal, 12)
+                                    .padding(.bottom, 6)
+                                    .transition(.opacity)
+                                    .animation(fadeAnimation, value: cueDisplay.slot)
+                            } else {
+                                HStack {
+                                    Text("EVENTS VIEW")
+                                        .foregroundColor(mode == .stop ? txtMain : txtSec)
+                                    Spacer()
+                                    Text("SYNC VIEW")
+                                        .foregroundColor(mode == .sync ? txtMain : txtSec)
+                                }
+                                .font(.custom("Roboto-Regular", size: isLandscape ?  28 : 24))
+                                .padding(.horizontal, 12)
+                                .padding(.bottom, 6)
+                                .transition(.opacity)
+                                .animation(fadeAnimation, value: cueDisplay.slot)
                             }
-                            .font(.custom("Roboto-Regular", size: isLandscape ?  28 : 24))
-                            .padding(.horizontal, 12)
-                            .padding(.bottom, 6)
                         }
                     }
                     // ── (B.5) Failsafe indicators ─────────────────────────────────
@@ -3015,6 +3068,17 @@ struct TimerCard: View {
                                         .allowsHitTesting(true)
                                     }
                                 }
+                .overlay {
+                    if let payload = imagePayload {
+                        ImageOverlay(payload: payload, caption: payload.caption, onDismiss: dismissImage)
+                            .transition(.opacity)
+                            .animation(fadeAnimation, value: cueDisplay.slot)
+                    } else if let payload = messagePayload, isMessageExpanded {
+                        ExpandedMessageOverlay(payload: payload, onDismiss: dismissMessage)
+                            .transition(.opacity)
+                            .animation(fadeAnimation, value: cueDisplay.slot)
+                    }
+                }
                 
                 .animation(
                     {
@@ -3033,6 +3097,11 @@ struct TimerCard: View {
                 ? "Tap left half for Events View, right half for Sync View"
                 : "Tap to switch views"
             )
+            .onChange(of: cueDisplay.slot) { _ in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isMessageExpanded = false
+                }
+            }
         }
         
         // ── Lifecycle & syncing‐phase orchestration ──────────────────────
@@ -3119,6 +3188,168 @@ struct TimerCard: View {
         }
         doToggle()
         
+    }
+    
+    private func dismissMessage() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isMessageExpanded = false
+            cueDisplay.dismiss()
+        }
+    }
+    
+    private func dismissImage() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isMessageExpanded = false
+            cueDisplay.dismiss()
+        }
+    }
+    
+    private func expandMessage() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isMessageExpanded = true
+        }
+    }
+    
+    private func messagePlacement(for size: CGSize) -> MessagePlacement {
+        let h = size.height
+        if h >= 190 { return .gap }
+        if h >= 170 { return .circles }
+        if h >= 150 { return .modeBar }
+        return .header
+    }
+    
+    private struct CollapsedMessageBanner: View {
+        let payload: CueSheet.MessagePayload
+        var onDismiss: () -> Void
+        var onExpand: () -> Void
+        
+        var body: some View {
+            HStack(alignment: .center, spacing: 8) {
+                Text(attributedText(from: payload))
+                    .lineLimit(2)
+                    .accessibilityLabel("Message")
+                    .accessibilityValue(payload.text)
+                Spacer(minLength: 8)
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .bold))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss message")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture(perform: onExpand)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Message")
+            .accessibilityValue(payload.text)
+        }
+    }
+    
+    private struct ExpandedMessageOverlay: View {
+        let payload: CueSheet.MessagePayload
+        var onDismiss: () -> Void
+        
+        var body: some View {
+            ZStack(alignment: .topTrailing) {
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                VStack(alignment: .leading, spacing: 12) {
+                    ScrollView {
+                        Text(attributedText(from: payload))
+                            .font(.body)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityLabel("Message")
+                            .accessibilityValue(payload.text)
+                    }
+                    Spacer()
+                }
+                .padding()
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundColor(.primary)
+                        .padding(10)
+                }
+                .accessibilityLabel("Dismiss message")
+            }
+            .contentShape(Rectangle())
+            .accessibilityAddTraits(.isModal)
+            .accessibilityLabel("Message")
+            .accessibilityValue(payload.text)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+    
+    private struct ImageOverlay: View {
+        let payload: CueSheet.ImagePayload
+        let caption: CueSheet.MessagePayload?
+        var onDismiss: () -> Void
+        @State private var uiImage: UIImage?
+        
+        var body: some View {
+            ZStack(alignment: .topTrailing) {
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                VStack(spacing: 12) {
+                    Group {
+                        if let uiImage {
+                            Image(uiImage: uiImage)
+                                .resizable()
+                                .aspectRatio(contentMode: payload.contentMode == .fill ? .fill : .fit)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .clipped()
+                        } else {
+                            VStack {
+                                ProgressView()
+                                Text("Image unavailable")
+                                    .font(.body.weight(.semibold))
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    
+                    if let caption {
+                        Text(attributedText(from: caption))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal)
+                            .padding(.bottom, 8)
+                            .accessibilityLabel("Image caption")
+                            .accessibilityValue(caption.text)
+                    }
+                }
+                .padding()
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundColor(.primary)
+                        .padding(10)
+                }
+                .accessibilityLabel("Dismiss image")
+            }
+            .onAppear(perform: loadImage)
+            .onChange(of: payload.assetID) { _ in loadImage() }
+            .contentShape(Rectangle())
+            .accessibilityLabel("Image")
+            .accessibilityValue(payload.caption?.text ?? "Image")
+            .accessibilityAddTraits(.isModal)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        
+        private func loadImage() {
+            Task { @MainActor in
+                let data = try? CueLibraryStore.shared.assetData(id: payload.assetID)
+                let image = data.flatMap { UIImage(data: $0) }
+                uiImage = image
+            }
+        }
     }
     
 }
@@ -3352,29 +3583,6 @@ struct MainScreen: View {
         // Defer event mapping to the view that owns `events`
         NotificationCenter.default.post(name: .didLoadCueSheet, object: sheet)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
-    }
-    @ViewBuilder private func displayBannerView() -> some View {
-        switch cueDisplay.slot {
-        case .none:
-            EmptyView()
-        case .message(let payload):
-            Text(payload.text)
-                .font(.custom("Roboto-SemiBold", size: 16))
-                .lineLimit(1)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial, in: Capsule())
-        case .image(let payload):
-            HStack(spacing: 6) {
-                Image(systemName: "photo")
-                Text(payload.caption?.text ?? "Image")
-                    .lineLimit(1)
-            }
-            .font(.custom("Roboto-SemiBold", size: 15))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial, in: Capsule())
-        }
     }
     // Derive connected device display names for the Devices card.
         // Replace internals later with your canonical peer list if you expose one.
@@ -3896,7 +4104,6 @@ struct MainScreen: View {
                             let h = fullGeo.size.height * 0.22
                             // phone landscape timercard
                             VStack(spacing: 8) {
-                                displayBannerView()
                                 TimerCard(
                                     mode: $parentMode,
                                     flashZero: $flashZero,
@@ -3917,6 +4124,7 @@ struct MainScreen: View {
                                     events: events,
                                     onClearEvents: { events.removeAll(); hasUnsaved = false }
                                 )
+                                .environmentObject(cueDisplay)
                                 .frame(width: w, height: h)
                             }
                             .position(x: fullGeo.size.width/2, y: fullGeo.size.height/2)
@@ -3935,7 +4143,6 @@ struct MainScreen: View {
                                 timer:
                                     //OG phone portrait timercard
                                     VStack(spacing: 8) {
-                                        displayBannerView()
                                         TimerCard(
                                             mode: $parentMode,
                                             flashZero: $flashZero,
@@ -3961,6 +4168,7 @@ struct MainScreen: View {
                                                 hasUnsaved = false
                                             }
                                         )
+                                        .environmentObject(cueDisplay)
                                     }
                                 
                                 // Lock timer interactions while child is connected
@@ -5088,7 +5296,6 @@ struct MainScreen: View {
             let h  = fullGeo.size.height * 0.22   // phone-landscape proportion
 //ipad mini timercard for when in landscape
             VStack(spacing: 8) {
-                displayBannerView()
                 TimerCard(
                     mode: $parentMode,
                     flashZero: $flashZero,
@@ -5420,7 +5627,6 @@ struct MainScreen: View {
                     timer:
                         // ipad timercard in landscape, using iphone portrait timercard as the head of a columned right pane, hence the name
                         VStack(spacing: 8) {
-                            displayBannerView()
                             TimerCard(
                                 mode: $parentMode,
                                 flashZero: $flashZero,
@@ -5440,10 +5646,11 @@ struct MainScreen: View {
                                 stopStep: stopStep,
                                 makeFlashed: makeFlashedOverlay,
                                 isCountdownActive: willCountDown,
-                                events: events,
-                                onClearEvents: { events.removeAll(); hasUnsaved = false }
-                            )
-                        }
+                    events: events,
+                    onClearEvents: { events.removeAll(); hasUnsaved = false }
+                )
+                .environmentObject(cueDisplay)
+            }
                         .allowsHitTesting(!(lockActive || uiLockedByParent)),
                     settings:
                         SettingsPagerCard(
@@ -5752,7 +5959,6 @@ struct MainScreen: View {
                         mode: $parentMode,
                         timer:
                             VStack(spacing: 8) {
-                                displayBannerView()
                                 TimerCard(
                                     mode: $parentMode,
                                     flashZero: $flashZero,
@@ -5782,6 +5988,7 @@ struct MainScreen: View {
                                         hasUnsaved = false
                                     }
                                 )
+                                .environmentObject(cueDisplay)
                             }
                             .allowsHitTesting(!(lockActive || uiLockedByParent))
                             .transition(.opacity)
