@@ -7,6 +7,7 @@ import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
+import PhotosUI
 
 // MARK: - Header explainer
 private var cueSheetsExplainer: some View {
@@ -800,6 +801,13 @@ private struct MetaStrip: View {
 
 // MARK: Events
 private struct EventsSection: View {
+    @State private var messageDraft: String = ""
+
+    @State private var pickedImageItem: PhotosPickerItem? = nil
+    @State private var pickedImageAssetID: UUID? = nil
+    @State private var pickedImageMode: CueSheet.ImagePayload.ContentMode = .fit
+    @State private var pickedImageCaption: String = ""
+
     @Binding var sheet: CueSheet
 
     enum EntryMode { case musical, absolute }
@@ -1097,21 +1105,88 @@ private struct EventsSection: View {
             composerFlashColorSection
             Divider().opacity(0.12)
             composerTimeEntrySection
+            composerPayloadSection
             composerPreviewAndAddRow
+
         }
         .padding(12)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
+    @ViewBuilder private var composerPayloadSection: some View {
+        switch kind {
+        case .message:
+            VStack(alignment: .leading, spacing: 8) {
+                sectionHeader("Message", "Text shown on devices when this event fires.")
+                TextEditor(text: $messageDraft)
+                    .frame(minHeight: 90)
+                    .padding(10)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    )
+            }
+
+        case .image:
+            VStack(alignment: .leading, spacing: 10) {
+                sectionHeader("Image", "Pick an image asset and how it should scale.")
+
+                PhotosPicker(selection: $pickedImageItem, matching: .images) {
+                    Label(pickedImageAssetID == nil ? "Choose Image" : "Replace Image", systemImage: "photo")
+                }
+                .onChange(of: pickedImageItem) { item in
+                    guard let item else { return }
+                    Task { @MainActor in
+                        defer { pickedImageItem = nil }
+                        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+                        do {
+                            pickedImageAssetID = try CueLibraryStore.shared.ingestImage(data: data)
+                        } catch {
+                            pickedImageAssetID = nil
+                        }
+                    }
+                }
+
+                Picker("Mode", selection: $pickedImageMode) {
+                    Text("Fit").tag(CueSheet.ImagePayload.ContentMode.fit)
+                    Text("Fill").tag(CueSheet.ImagePayload.ContentMode.fill)
+                }
+                .pickerStyle(.segmented)
+
+                TextField("Caption (optional)", text: $pickedImageCaption)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+        default:
+            EmptyView()
+        }
+    }
+
     private var composerEventTypeSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             sectionHeader("Event Type", "Choose Cue (flash), Stop (with hold), or Restart.")
             Picker("", selection: $kind) {
-                Image(systemName: "bolt.fill").tag(CueSheet.Event.Kind.cue)
-                Image(systemName: "hand.raised.fill").tag(CueSheet.Event.Kind.stop)
-                Image(systemName: "gobackward").tag(CueSheet.Event.Kind.restart)
+                Label("Cue", systemImage: "bolt.fill")
+                    .labelStyle(.iconOnly)
+                    .tag(CueSheet.Event.Kind.cue)
+
+                Label("Stop", systemImage: "hand.raised.fill")
+                    .labelStyle(.iconOnly)
+                    .tag(CueSheet.Event.Kind.stop)
+
+                Label("Restart", systemImage: "gobackward")
+                    .labelStyle(.iconOnly)
+                    .tag(CueSheet.Event.Kind.restart)
+
+                Label("Message", systemImage: "text.bubble")
+                    .labelStyle(.iconOnly)
+                    .tag(CueSheet.Event.Kind.message)
+
+                Label("Image", systemImage: "photo")
+                    .labelStyle(.iconOnly)
+                    .tag(CueSheet.Event.Kind.image)
             }
             .pickerStyle(.segmented)
-            .frame(maxWidth: 220)
+
 
             if kind == .stop {
                 Stepper(value: $hold, in: 0...30, step: 0.1) {
@@ -1212,11 +1287,23 @@ private struct EventsSection: View {
             Button { addEvent() } label: {
                 Label("Add", systemImage: "plus.circle.fill")
                     .font(.custom("Roboto-SemiBold", size: 15))
+                    .disabled(!canAddEvent)
 
             }
             .buttonStyle(.borderedProminent)
         }
     }
+    private var canAddEvent: Bool {
+        switch kind {
+        case .message:
+            return !messageDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .image:
+            return pickedImageAssetID != nil
+        default:
+            return true
+        }
+    }
+
     @ViewBuilder private func sectionHeader(_ title: String, _ subtitle: String) -> some View {
         Text(title).font(.custom("Roboto-SemiBold", size: 15))
         Text(subtitle).font(.custom("Roboto-Regular", size: 12)).foregroundStyle(.secondary)
@@ -1345,6 +1432,25 @@ private struct EventsSection: View {
     private func addEvent() {
         let at: Double = (globalTiming == .absolute) ? parseTime(timeText) : musicalToSecondsNew()
         var e = CueSheet.Event(kind: kind, at: max(0, at), holdSeconds: nil, label: nil)
+        switch kind {
+        case .stop:
+            e.holdSeconds = max(0, hold)
+
+        case .message:
+            let t = messageDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+            e.payload = .message(.init(text: t, spans: []))
+
+        case .image:
+            if let id = pickedImageAssetID {
+                let cap = pickedImageCaption.trimmingCharacters(in: .whitespacesAndNewlines)
+                let captionPayload: CueSheet.MessagePayload? = cap.isEmpty ? nil : .init(text: cap, spans: [])
+                e.payload = .image(.init(assetID: id, contentMode: pickedImageMode, caption: captionPayload))
+            }
+
+        default:
+            break
+        }
+
         if kind == .stop { e.holdSeconds = max(0, hold) }
         sheet.events.append(e)
                 if globalTiming == .musical {
@@ -1361,6 +1467,15 @@ private struct EventsSection: View {
                     // keep parallel arrays in sorted order too
                     syncSortWithAnchors()
                 }
+        if kind == .message {
+            messageDraft = ""
+        }
+        if kind == .image {
+            pickedImageAssetID = nil
+            pickedImageMode = .fit
+            pickedImageCaption = ""
+        }
+
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
@@ -1659,8 +1774,18 @@ private struct EventRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            let symbol = (event.kind == .cue ? "bolt.fill" : event.kind == .stop ? "hand.raised.fill" : "gobackward")
+            let symbol: String = {
+                switch event.kind {
+                case .cue:     return "bolt.fill"
+                case .stop:    return "hand.raised.fill"
+                case .restart: return "gobackward"
+                case .message: return "text.bubble"
+                case .image:   return "photo"
+                default:       return "questionmark"
+                }
+            }()
             Image(systemName: symbol).frame(width: 22)
+
             TextField("Label", text: Binding(
                 get: { event.label ?? "" },
                 set: { event.label = $0.isEmpty ? nil : $0 }
