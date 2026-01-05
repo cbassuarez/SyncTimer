@@ -21,27 +21,28 @@ struct EventsWindow: View {
         VStack(spacing: 8) {
             // Top control bar: cycle mode & add events
             EventsBar(
-                events: $events,
-                eventMode: $eventMode,
-                isPaused: isPaused,                       // NEW: gate opening
-                unsavedChanges: hasUnsaved,               // NEW: red dot if true
-                isCounting: isCounting,
-                cueSheetAccent: appSettings.flashColor,
-                onAddStop: {
-                    let t = (events.last?.fireTime ?? 0) + 5
-                    events.append(.stop(StopEvent(eventTime: t, duration: 2)))
-                },
-                onAddCue: {
-                    let t = (events.last?.fireTime ?? 0) + 5
-                    events.append(.cue(CueEvent(cueTime: t)))
-                },
-                onAddRestart: {
-                    let t = (events.last?.fireTime ?? 0) + 5
-                    events.append(.restart(RestartEvent(restartTime: t)))
-                }
-            )
-            .frame(height: 64)
-            .padding(.horizontal, 8)
+                            events: $events,
+                            eventMode: $eventMode,
+                            isPaused: isPaused,                       // NEW: gate opening
+                            unsavedChanges: hasUnsaved,               // NEW: red dot if true
+                            onOpenCueSheets: nil,
+                            isCounting: isCounting,
+                            onAddStop: {
+                                let t = (events.last?.fireTime ?? 0) + 5
+                                events.append(.stop(StopEvent(eventTime: t, duration: 2)))
+                            },
+                            onAddCue: {
+                                let t = (events.last?.fireTime ?? 0) + 5
+                                events.append(.cue(CueEvent(cueTime: t)))
+                            },
+                            onAddRestart: {
+                                let t = (events.last?.fireTime ?? 0) + 5
+                                events.append(.restart(RestartEvent(restartTime: t)))
+                        },
+                        cueSheetAccent: appSettings.flashColor
+                        )
+                        .frame(height: 64)
+                        .padding(.horizontal, 8)
 
             // Existing carousel renderer from your codebase
             EventsCarousel(events: $events, isCounting: isCounting)

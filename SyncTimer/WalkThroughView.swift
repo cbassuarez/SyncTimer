@@ -857,11 +857,14 @@ private struct PageThree_AddEvent: View {
             EventsBar(
                 events: $previewEvents,
                 eventMode: $eventMode,
+                isPaused: false,
+                unsavedChanges: false,
+                onOpenCueSheets: nil,
                 isCounting: false,
-                cueSheetAccent: .red,
                 onAddStop:    { },
                 onAddCue:     { },
-                onAddRestart: { }
+                onAddRestart: { },
+                cueSheetAccent: .red
             )
             .frame(height: 80)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))

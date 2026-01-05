@@ -2543,7 +2543,7 @@ struct TimerCard: View {
                                 
                                 shape
                                     .fill(.ultraThinMaterial)
-                                    .glassEffect()
+                                 //   .glassEffect()
                                 
                                 // light “glass” rim stroke (looks premium, cheap to render)
                                     .overlay(
@@ -4322,16 +4322,15 @@ struct MainScreen: View {
     var body: some View {
         GeometryReader { geo in
         // Use the *actual window* size
-            let winSize = geo.size
-            let screenWidth  = winSize.width
-            let screenHeight = winSize.height
+            let winSize: CGSize = geo.size
+                        let screenWidth: CGFloat  = winSize.width
+                        let screenHeight: CGFloat = winSize.height
 
             // Phones keep their size-class logic
-            let isPhoneLandscape = (verticalSizeClass == .compact)
-            let isPad = UIDevice.current.userInterfaceIdiom == .pad
+            let isPhoneLandscape: Bool = (verticalSizeClass == .compact)
+                        let isPad: Bool = UIDevice.current.userInterfaceIdiom == .pad
             // iPad: decide by aspect, not size class
-            let isPadLandscapeByAspect = winSize.width > winSize.height
-
+            let isPadLandscapeByAspect: Bool = winSize.width > winSize.height
         
         // 1) Use the **actual window size** if provided (iPad/Split/Stage Manager),
               
@@ -4540,10 +4539,11 @@ struct MainScreen: View {
                                             unsavedChanges: hasUnsaved,
                                             onOpenCueSheets: { openCueSheets() },
                                             isCounting: isCounting,
-                                            cueSheetAccent: settings.flashColor,
                                             onAddStop: commitStopEntry,
                                             onAddCue:  commitCueEntry,
-                                            onAddRestart: commitRestartEntry
+                                            onAddRestart: commitRestartEntry,
+                                            cueSheetAccent: settings.flashColor
+
                                         )
                                     }
 
@@ -5965,10 +5965,10 @@ struct MainScreen: View {
                                 unsavedChanges: hasUnsaved,
                                 onOpenCueSheets: { openCueSheets() },
                                 isCounting: isCounting,
-                                cueSheetAccent: settings.flashColor,
                                 onAddStop: commitStopEntry,
                                 onAddCue:  commitCueEntry,
-                                onAddRestart: commitRestartEntry
+                                onAddRestart: commitRestartEntry,
+                                cueSheetAccent: settings.flashColor
                             )
                         }
 
@@ -6366,10 +6366,10 @@ struct MainScreen: View {
                                 unsavedChanges: hasUnsaved,
                                 onOpenCueSheets: { openCueSheets() },
                                 isCounting: isCounting,
-                                cueSheetAccent: settings.flashColor,
                                 onAddStop: commitStopEntry,
                                 onAddCue:  commitCueEntry,
-                                onAddRestart: commitRestartEntry
+                                onAddRestart: commitRestartEntry,
+                                cueSheetAccent: settings.flashColor
                             )
                         }
                         .padding(.horizontal, 16)
