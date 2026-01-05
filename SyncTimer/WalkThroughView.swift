@@ -858,6 +858,7 @@ private struct PageThree_AddEvent: View {
                 events: $previewEvents,
                 eventMode: $eventMode,
                 isCounting: false,
+                cueSheetAccent: .red,
                 onAddStop:    { },
                 onAddCue:     { },
                 onAddRestart: { }

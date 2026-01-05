@@ -26,6 +26,7 @@ struct EventsWindow: View {
                 isPaused: isPaused,                       // NEW: gate opening
                 unsavedChanges: hasUnsaved,               // NEW: red dot if true
                 isCounting: isCounting,
+                cueSheetAccent: appSettings.flashColor,
                 onAddStop: {
                     let t = (events.last?.fireTime ?? 0) + 5
                     events.append(.stop(StopEvent(eventTime: t, duration: 2)))
@@ -97,5 +98,4 @@ private struct CueSheetsMediumDetentPlaceholder: View {
         .padding()
     }
 }
-
 
