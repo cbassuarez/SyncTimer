@@ -3115,6 +3115,7 @@ struct TimerCard: View {
                             onDismiss: dismissMessage,
                             onToggleExpand: expandMessage
                         )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
                         .transition(.opacity)
@@ -3319,17 +3320,18 @@ struct TimerCard: View {
         var isSource: Bool = true
 
         var body: some View {
+            let corner: CGFloat = isBadge ? 6 : 8
             let base = Text(text)
                 .font(.system(size: isBadge ? 12 : 14, weight: .heavy, design: .rounded))
                 .padding(.horizontal, isBadge ? 8 : 10)
                 .padding(.vertical, isBadge ? 4 : 6)
                 .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.primary.opacity(0.12))
+                    RoundedRectangle(cornerRadius: corner, style: .continuous)
+                                           .fill(Color.primary.opacity(0.22))
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(Color.primary.opacity(0.18), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: corner, style: .continuous)
+                                            .stroke(Color.primary.opacity(0.5), lineWidth: 2)
                 )
                 .accessibilityLabel("Rehearsal mark \(text)")
 
