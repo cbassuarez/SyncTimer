@@ -2494,28 +2494,20 @@ struct TimerCard: View {
                 let subTextFontSize: CGFloat = isLandscape ? 28 : 20 // for “SYNCING…”, circles’ “S/C/R” labels
                 let circleDiameter: CGFloat = isLandscape ? 30 : 18  // for the 5 event circles
                 let stopTimerFontSize: CGFloat = isLandscape ? 30 : 24 // for the small stop‐timer underneath
-                let messagePayload: CueSheet.MessagePayload? = {
-                    if case let .message(payload) = cueDisplay.slot { return payload }
-                    return nil
-                }()
-                let imagePayload: CueSheet.ImagePayload? = {
-                    if case let .image(payload) = cueDisplay.slot { return payload }
-                    return nil
-                }()
+                let messagePayload: CueSheet.MessagePayload? = nil
+                let imagePayload: CueSheet.ImagePayload? = nil
                 let placement = messagePlacement(for: geo.size)
-                let showCollapsedMessage = messagePayload != nil && !isMessageExpanded
+                let showCollapsedMessage = false
                 let fadeAnimation = Animation.easeInOut(duration: 0.25)
                 let cardCornerRadius: CGFloat = 12
                 let cardWidth = geo.size.width - (horizontalInset * 2)
                 let cardHeight = isLandscape ? geo.size.height : 190
                 let activeDisplayEvent: CueDisplayController.Slot? = {
                     switch cueDisplay.slot {
-                    case .image:
-                        return cueDisplay.slot
-                    case .message where isMessageExpanded:
-                        return cueDisplay.slot
-                    default:
+                    case .none:
                         return nil
+                    default:
+                        return cueDisplay.slot
                     }
                 }()
 
