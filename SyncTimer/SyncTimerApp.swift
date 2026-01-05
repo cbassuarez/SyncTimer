@@ -2065,6 +2065,10 @@ struct EventsCarousel: View {
             return "\(index). Stop at \(timeString(s.eventTime))"
         case .cue(let c):
             return "\(index). Cue at \(timeString(c.cueTime))"
+        case .message(let m):
+                    return "\(index). Message at \(timeString(m.messageTime))"
+                case .image(let i):
+                    return "\(index). Image at \(timeString(i.imageTime))"
         case .restart(let r):
             return "\(index). Restart at \(timeString(r.restartTime))"
         }
