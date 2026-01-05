@@ -15,19 +15,35 @@
       "hidden" : false,
       "layers" : [
         {
+          "fill" : {
+            "linear-gradient" : [
+              "display-p3:0.30547,0.79196,0.25826,1.00000",
+              "display-p3:0.03920,0.59762,0.00000,1.00000"
+            ],
+            "orientation" : {
+              "start" : {
+                "x" : 0.5000000000000001,
+                "y" : 0
+              },
+              "stop" : {
+                "x" : 0.5,
+                "y" : 0.7
+              }
+            }
+          },
           "hidden" : false,
           "image-name" : "New Project.svg",
           "name" : "New Project",
           "position" : {
-            "scale" : 0.32,
+            "scale" : 0.47,
             "translation-in-points" : [
-              218,
-              0
+              167.8046875,
+              5.684341886080802e-14
             ]
           }
         }
       ],
-      "lighting" : "individual",
+      "lighting" : "combined",
       "name" : "Green Circle",
       "shadow" : {
         "kind" : "layer-color",
@@ -36,7 +52,7 @@
       "specular" : true,
       "translucency" : {
         "enabled" : true,
-        "value" : 0.33
+        "value" : 0.52
       }
     },
     {
@@ -61,14 +77,30 @@
       "hidden" : false,
       "layers" : [
         {
+          "fill" : {
+            "linear-gradient" : [
+              "display-p3:0.93720,0.73340,-0.13556,1.00000",
+              "display-p3:1.00000,0.96954,0.00000,1.00000"
+            ],
+            "orientation" : {
+              "start" : {
+                "x" : 0.5,
+                "y" : 1
+              },
+              "stop" : {
+                "x" : 0.5,
+                "y" : 0.19602885999177624
+              }
+            }
+          },
           "hidden" : false,
           "image-name" : "New Project-3.svg",
           "name" : "New Project-3",
           "opacity" : 1,
           "position" : {
-            "scale" : 0.32,
+            "scale" : 0.38,
             "translation-in-points" : [
-              0,
+              -72.83531249999999,
               0
             ]
           }
@@ -109,13 +141,30 @@
       "hidden" : false,
       "layers" : [
         {
+          "blend-mode" : "normal",
+          "fill" : {
+            "linear-gradient" : [
+              "display-p3:1.00000,0.37199,0.00000,0.86199",
+              "display-p3:0.93153,0.07829,0.00000,0.86199"
+            ],
+            "orientation" : {
+              "start" : {
+                "x" : 0.5,
+                "y" : 0
+              },
+              "stop" : {
+                "x" : 0.5,
+                "y" : 0.9363750589304957
+              }
+            }
+          },
           "image-name" : "New Project-2.svg",
           "name" : "New Project-2",
           "opacity" : 1,
           "position" : {
-            "scale" : 0.32,
+            "scale" : 0.29,
             "translation-in-points" : [
-              -235.046875,
+              -265.75468750000005,
               0
             ]
           }

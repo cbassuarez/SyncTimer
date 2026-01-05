@@ -98,13 +98,6 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		964605212E8A8FB8003B5415 /* Exceptions for "SyncTimer" folder in "SyncTimerWatch Watch App" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				AppIcon.icon,
-			);
-			target = 9636A7412E791DBB00A062B6 /* SyncTimerWatch Watch App */;
-		};
 		968E1B092E79329900F79392 /* Exceptions for "Watch" folder in "SyncTimer" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -118,6 +111,13 @@
 			membershipExceptions = (
 				NowView.swift,
 				WatchSyncTimerApp.swift,
+			);
+			target = 9636A7412E791DBB00A062B6 /* SyncTimerWatch Watch App */;
+		};
+		96E952D52F0B5071009EFC34 /* Exceptions for "SyncTimer" folder in "SyncTimerWatch Watch App" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				AppIcon.icon,
 			);
 			target = 9636A7412E791DBB00A062B6 /* SyncTimerWatch Watch App */;
 		};
@@ -159,7 +159,7 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				96F6611B2E0D304B00F78CC3 /* Exceptions for "SyncTimer" folder in "SyncTimer" target */,
-				964605212E8A8FB8003B5415 /* Exceptions for "SyncTimer" folder in "SyncTimerWatch Watch App" target */,
+				96E952D52F0B5071009EFC34 /* Exceptions for "SyncTimer" folder in "SyncTimerWatch Watch App" target */,
 			);
 			path = SyncTimer;
 			sourceTree = "<group>";
@@ -925,7 +925,7 @@
 					"$(SRCROOT)",
 					"$(PROJECT_DIR)",
 				);
-				MARKETING_VERSION = 0.8;
+				MARKETING_VERSION = 0.9;
 				OTHER_LDFLAGS = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.StageDevices.SyncTimer;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -988,7 +988,7 @@
 					"$(SRCROOT)",
 					"$(PROJECT_DIR)",
 				);
-				MARKETING_VERSION = 0.8;
+				MARKETING_VERSION = 0.9;
 				ONLY_ACTIVE_ARCH = NO;
 				OTHER_LDFLAGS = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.StageDevices.SyncTimer;
