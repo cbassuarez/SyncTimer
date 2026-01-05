@@ -846,21 +846,12 @@ private struct DetailsSection: View {
                     .focused($focus, equals: .tag)
                 }
 
-                // Notes (full width)
-                VStack(alignment: .leading, spacing: 8) {
-                    FieldHeader("Notes").font(.custom("Roboto-SemiBold", size: 15))
-                    TextEditor(text: Binding(
-                        get: { sheet.notes ?? "" },
-                        set: { sheet.notes = $0.isEmpty ? nil : $0 }
-                    ))
-                    .frame(minHeight: 160)
-                    .padding(10)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                    )
-                    .focused($focus, equals: .notes)
-                }
+                // Notes (glass hero)
+                CueSheetNotesCard(
+                    notes: $sheet.notes,
+                    modified: sheet.modified,
+                    focus: $focus
+                )
             }
             .padding(.vertical, 6)
             .padding(.bottom, 12)
@@ -883,6 +874,336 @@ private struct DetailsSection: View {
         sheet.tags.append(t)
         tagDraft = ""
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+}
+
+private func glassCardBackground(isEditing: Bool) -> some View {
+    let radius: CGFloat = 16
+    return RoundedRectangle(cornerRadius: radius, style: .continuous)
+        .fill(.clear)
+        .background(
+            Group {
+                if #available(iOS 18.0, macOS 15.0, *) {
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .fill(.clear)
+                        .glassEffect()
+                } else {
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                }
+            }
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 0.75)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .stroke(Color.primary.opacity(0.12), lineWidth: 1.1)
+        )
+        .shadow(color: Color.black.opacity(isEditing ? 0.08 : 0.16), radius: isEditing ? 6 : 12, x: 0, y: isEditing ? 3 : 8)
+}
+
+private struct CueSheetNotesCard: View {
+    @Binding var notes: String?
+    let modified: Date
+    @Binding var focus: DetailsSection.Field?
+    private enum Mode { case edit, preview }
+    @State private var mode: Mode = .edit
+    @State private var isExpanded: Bool = false
+    @State private var showClearConfirm = false
+    @Namespace private var toggleNS
+    @FocusState private var notesFocused: Bool
+    private let limit = 10_000
+    private let radius: CGFloat = 16
+
+    private var binding: Binding<String> {
+        Binding<String>(
+            get: { notes ?? "" },
+            set: { newVal in
+                notes = newVal.isEmpty ? nil : newVal
+            }
+        )
+    }
+
+    private var isCollapsedPreview: Bool {
+        !notesFocused && !(isExpanded) && !(binding.wrappedValue.isEmpty)
+    }
+
+    private var previewText: AttributedString {
+        let text = binding.wrappedValue
+        if text.isEmpty { return AttributedString("") }
+        if let parsed = try? AttributedString(
+            markdown: text,
+            options: .init(
+                interpretedSyntax: .full,
+                failurePolicy: .returnPartiallyParsedIfPossible
+            )
+        ) {
+            return parsed
+        }
+        return AttributedString(text)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            header
+            card
+        }
+        .animation(.easeInOut(duration: 0.22), value: mode)
+        .onChange(of: focus.wrappedValue) { newValue in
+            notesFocused = (newValue == .notes)
+        }
+        .onChange(of: notesFocused) { newValue in
+            if newValue {
+                focus = .notes
+                withAnimation(.easeInOut(duration: 0.18)) { isExpanded = true }
+                mode = .edit
+            } else if focus == .notes {
+                focus = nil
+                if !binding.wrappedValue.isEmpty {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        isExpanded = false
+                        mode = .preview
+                    }
+                }
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack {
+            FieldHeader("Notes").font(.custom("Roboto-SemiBold", size: 15))
+            Spacer(minLength: 8)
+            HStack(spacing: 8) {
+                toggle
+                templateMenu
+                clearButton
+            }
+            .labelStyle(.iconOnly)
+        }
+    }
+
+    private var toggle: some View {
+        HStack(spacing: 4) {
+            toggleButton(.edit, systemImage: "square.and.pencil")
+            toggleButton(.preview, systemImage: "eye")
+        }
+        .padding(6)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.primary.opacity(0.06))
+        )
+    }
+
+    private func toggleButton(_ target: Mode, systemImage: String) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                mode = target
+            }
+            if target == .edit {
+                isExpanded = true
+                notesFocused = true
+            } else {
+                notesFocused = false
+            }
+        } label: {
+            ZStack {
+                if mode == target {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.primary.opacity(0.08))
+                        .matchedGeometryEffect(id: "pill", in: toggleNS)
+                }
+                Image(systemName: systemImage)
+                    .font(.system(size: 14, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .frame(width: 28, height: 24)
+                    .contentTransition(.symbolEffect(.replace))
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var templateMenu: some View {
+        Menu {
+            templateButton("Rehearsal")
+            templateButton("Run")
+            templateButton("Cues")
+            templateButton("Lighting")
+            templateButton("Tech")
+        } label: {
+            Image(systemName: "wand.and.stars")
+                .font(.system(size: 14, weight: .semibold))
+                .frame(width: 28, height: 24)
+                .symbolRenderingMode(.palette)
+        }
+    }
+
+    private func templateButton(_ title: String) -> some View {
+        Button(title) {
+            insertTemplate(title)
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+    }
+
+    private var clearButton: some View {
+        Button {
+            showClearConfirm = true
+        } label: {
+            Image(systemName: "trash")
+                .font(.system(size: 14, weight: .semibold))
+                .frame(width: 28, height: 24)
+                .symbolRenderingMode(.hierarchical)
+        }
+        .confirmationDialog("Clear notes?", isPresented: $showClearConfirm) {
+            Button("Clear", role: .destructive) {
+                notes = nil
+                mode = .edit
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    private var card: some View {
+        let editing = mode == .edit
+        return VStack(alignment: .leading, spacing: 10) {
+            content
+            footer
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, minHeight: editing || isExpanded ? 240 : 160, alignment: .topLeading)
+        .background(glassCardBackground(isEditing: notesFocused))
+        .overlay(
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .stroke(Color.white.opacity(notesFocused ? 0.12 : 0.18), lineWidth: 0.4)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .onTapGesture {
+            if isCollapsedPreview {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isExpanded = true
+                    mode = .edit
+                    notesFocused = true
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        if (mode == .preview || isCollapsedPreview) && !binding.wrappedValue.isEmpty {
+            preview
+        } else {
+            editor
+        }
+    }
+
+    private var editor: some View {
+        ZStack(alignment: .topLeading) {
+            GhostMarkdownEditor(
+                text: binding,
+                isEditable: true,
+                characterLimit: limit
+            )
+            .focused($notesFocused)
+            .opacity(mode == .edit ? 1 : 0.0001)
+
+            if binding.wrappedValue.isEmpty {
+                Text("Add cue sheet notes… (Markdown)")
+                    .font(.custom("Roboto-Regular", size: 16))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 6)
+                    .padding(.leading, 4)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private var preview: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(previewText)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(isCollapsedPreview ? 4 : nil)
+                .animation(.none, value: binding.wrappedValue)
+
+            if isCollapsedPreview {
+                HStack {
+                    Spacer()
+                    Label("Expand", systemImage: "chevron.down")
+                        .font(.custom("Roboto-Regular", size: 13))
+                        .labelStyle(.titleAndIcon)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 2)
+                .opacity(0.8)
+            } else if !notesFocused {
+                HStack {
+                    Spacer()
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isExpanded = false
+                        }
+                    } label: {
+                        Label("Collapse", systemImage: "chevron.up")
+                            .font(.custom("Roboto-Regular", size: 13))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if isCollapsedPreview {
+                LinearGradient(
+                    colors: [
+                        Color.clear,
+                        Color(.systemBackground).opacity(0.65)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 36)
+                .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private var footer: some View {
+        HStack(spacing: 10) {
+            Text("\(binding.wrappedValue.count) / \(limit)")
+                .font(.custom("Roboto-Regular", size: 12))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            Capsule()
+                .fill(Color.primary.opacity(0.08))
+                .frame(width: 1, height: 14)
+            Text("MARKDOWN")
+                .font(.custom("Roboto-SemiBold", size: 11))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule()
+                        .fill(Color.primary.opacity(0.08))
+                )
+            Spacer()
+            Text(modified.formatted(date: .abbreviated, time: .shortened))
+                .font(.custom("Roboto-Regular", size: 12))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.top, 4)
+    }
+
+    private func insertTemplate(_ title: String) {
+        let template = "### \(title)\n- "
+        var current = binding.wrappedValue
+        if current.isEmpty {
+            current = template
+        } else {
+            current.append("\n\n---\n\n\(template)")
+        }
+        binding.wrappedValue = String(current.prefix(limit))
+        mode = .edit
+        isExpanded = true
+        notesFocused = true
     }
 }
 

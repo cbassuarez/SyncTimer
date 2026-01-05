@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		9600A5A02FF1E6E100AA0F8B /* GhostMarkdownEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9600A59F2FF1E6E100AA0F8B /* GhostMarkdownEditor.swift */; };
 		961396C22E0D503800B847F3 /* StopEventWire.swift in Sources */ = {isa = PBXBuildFile; fileRef = 961396B22E0D503800B847F3 /* StopEventWire.swift */; };
 		961396D22E0D503800B847F3 /* StopEventWire.swift in Resources */ = {isa = PBXBuildFile; fileRef = 961396B22E0D503800B847F3 /* StopEventWire.swift */; };
 		9636A7392E79193100A062B6 /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9640DBA32DF695F0002688A4 /* WatchConnectivity.framework */; };
@@ -83,6 +84,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		9600A59F2FF1E6E100AA0F8B /* GhostMarkdownEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhostMarkdownEditor.swift; sourceTree = "<group>"; };
 		961396B22E0D503800B847F3 /* StopEventWire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StopEventWire.swift; sourceTree = "<group>"; };
 		9636A7422E791DBB00A062B6 /* SyncTimerWatch Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "SyncTimerWatch Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		9636A74E2E791DBD00A062B6 /* SyncTimerWatch Watch AppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "SyncTimerWatch Watch AppTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -556,6 +558,7 @@
 				96DF202A2E79311700FFB580 /* TimerMessage+Wire.swift in Sources */,
 				96F296442E793F130039B071 /* ConnectivityManager.swift in Sources */,
 				96F296452E793F130039B071 /* ControlRequest.swift in Sources */,
+				9600A5A02FF1E6E100AA0F8B /* GhostMarkdownEditor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
