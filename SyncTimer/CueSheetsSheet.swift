@@ -879,20 +879,22 @@ private struct DetailsSection: View {
 
 private func glassCardBackground(isEditing: Bool) -> some View {
     let radius: CGFloat = 16
-    return RoundedRectangle(cornerRadius: radius, style: .continuous)
+    let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        return shape
         .fill(.clear)
-        .background(
+        .background {
             Group {
                 if #available(iOS 18.0, macOS 15.0, *) {
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                shape
                         .fill(.clear)
                         .glassEffect()
+                        .clipShape(shape)
                 } else {
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                shape
                         .fill(.ultraThinMaterial)
                 }
             }
-        )
+        }
         .overlay(
             RoundedRectangle(cornerRadius: radius, style: .continuous)
                 .stroke(Color.white.opacity(0.16), lineWidth: 0.75)

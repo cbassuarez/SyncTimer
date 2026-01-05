@@ -34,6 +34,8 @@ struct GhostMarkdownEditor: View {
             // Render layer
             ScrollView(.vertical) {
                 Text(rendered)
+                    .font(bodyFont)
+                    .foregroundStyle(.primary)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .padding(.vertical, 6)
