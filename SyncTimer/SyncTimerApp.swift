@@ -3027,10 +3027,6 @@ struct TimerCard: View {
                                                     .font(.footnote.weight(.semibold))
                                                     .lineLimit(1)
                                                     .truncationMode(.tail)
-                                                if cueDisplay.rehearsalMarkText == nil, let settled = cueDisplay.settledRehearsalMarkText {
-                                                    RehearsalMarkGlyph(text: settled, namespace: rehearsalMarkNamespace, isBadge: true, isSource: false)
-                                                        .transition(.opacity)
-                                                }
                                                 Button {
                                                                                                             withAnimation(.easeOut(duration: 0.2)) {
                                                                                                                 // clear events first, then clear badge
@@ -4373,12 +4369,6 @@ struct MainScreen: View {
                                 value: parentMode
                             )
                             
-                            // If events are cleared by any UI (e.g., your Clear button), also clear the file badge.
-                            .onChange(of: events) { newValue in
-                                if newValue.isEmpty {
-                                    cueBadge.clear()
-                                }
-                            }
                             .frame(height: isVerySmallPhone ? 220
                                    : isSmallPhone     ? 260
                                    : 296)
@@ -5838,7 +5828,6 @@ struct MainScreen: View {
                   }(),
                   value: parentMode
                 )
-                .onChange(of: events) { if $0.isEmpty { cueBadge.clear() } }
                 .zIndex(2) // card always above
                 // Make timer width match the mode bar by using the same horizontal padding:
                       .padding(.horizontal, colPad)
