@@ -2505,20 +2505,23 @@ struct TimerCard: View {
                 let placement = messagePlacement(for: geo.size)
                 let showCollapsedMessage = messagePayload != nil && !isMessageExpanded
                 let fadeAnimation = Animation.easeInOut(duration: 0.25)
+                let cardCornerRadius: CGFloat = 12
+                let cardWidth = geo.size.width - (horizontalInset * 2)
+                let cardHeight = isLandscape ? geo.size.height : 190
 
-                ZStack {
+                let cardBody = ZStack {
                     // ── (A) Card background with drop shadow ─────────────────
                     if !isLandscape || isPadLayout {
                       Group {
                           if settings.lowPowerMode {
                                                     // Low-Power: flat fill only (no blur/material)
-                                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                    RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
                                                       .fill(isDark ? Color.black : Color.white)
                                                       
 
                                                   } else {
                           // Normal: material + subtle “glass” cues (safe on all iOS 16/17)
-                          let corner: CGFloat = 12
+                          let corner: CGFloat = cardCornerRadius
                           let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
 
                           shape
@@ -2632,7 +2635,7 @@ struct TimerCard: View {
                                 .transition(.opacity)
                                 .animation(.easeInOut(duration: Double(settings.flashDurationOption) / 1000), value: flashZero)
                                 .background(Color(.systemBackground))
-                                .cornerRadius(12)
+                                .cornerRadius(cardCornerRadius)
                                 .opacity(0.5)
                         }
                     }
@@ -2998,11 +3001,10 @@ struct TimerCard: View {
                     }
                 }
                 .frame(
-                    width: geo.size.width - (horizontalInset * 2),
-                    height: isLandscape ? geo.size.height : 190
+                    width: cardWidth,
+                    height: cardHeight
                 )
                 .padding(.horizontal, horizontalInset)
-               
 
                 // ── Connectivity strip (LED-style) — match badge height; sits between big timer and stop-down timer
                 .overlay(alignment: .topTrailing) {
@@ -3068,18 +3070,7 @@ struct TimerCard: View {
                                         .allowsHitTesting(true)
                                     }
                                 }
-                .overlay {
-                    if let payload = imagePayload {
-                        ImageOverlay(payload: payload, caption: payload.caption, onDismiss: dismissImage)
-                            .transition(.opacity)
-                            .animation(fadeAnimation, value: cueDisplay.slot)
-                    } else if let payload = messagePayload, isMessageExpanded {
-                        ExpandedMessageOverlay(payload: payload, onDismiss: dismissMessage)
-                            .transition(.opacity)
-                            .animation(fadeAnimation, value: cueDisplay.slot)
-                    }
-                }
-                
+
                 .animation(
                     {
                         if #available(iOS 17, *) { .snappy(duration: 0.26, extraBounce: 0.25) }
@@ -3088,7 +3079,24 @@ struct TimerCard: View {
                     value: mode
                 )
 
-
+                ZStack {
+                    cardBody
+                    if let payload = imagePayload {
+                        ImageOverlay(payload: payload, caption: payload.caption, cornerRadius: cardCornerRadius, onDismiss: dismissImage)
+                            .transition(.opacity)
+                            .animation(fadeAnimation, value: cueDisplay.slot)
+                            .frame(width: cardWidth, height: cardHeight)
+                            .padding(.horizontal, horizontalInset)
+                            .zIndex(1)
+                    } else if let payload = messagePayload, isMessageExpanded {
+                        ExpandedMessageOverlay(payload: payload, cornerRadius: cardCornerRadius, onDismiss: dismissMessage)
+                            .transition(.opacity)
+                            .animation(fadeAnimation, value: cueDisplay.slot)
+                            .frame(width: cardWidth, height: cardHeight)
+                            .padding(.horizontal, horizontalInset)
+                            .zIndex(1)
+                    }
+                }
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Elapsed time: \(mainTime.formattedCS)")
@@ -3254,13 +3262,13 @@ struct TimerCard: View {
     
     private struct ExpandedMessageOverlay: View {
         let payload: CueSheet.MessagePayload
+        let cornerRadius: CGFloat
         var onDismiss: () -> Void
         
         var body: some View {
-            ZStack(alignment: .topTrailing) {
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                VStack(alignment: .leading, spacing: 12) {
+            ZStack {
+                VStack(spacing: 12) {
+                    Spacer(minLength: 0)
                     ScrollView {
                         Text(attributedText(from: payload))
                             .font(.body)
@@ -3268,9 +3276,15 @@ struct TimerCard: View {
                             .accessibilityLabel("Message")
                             .accessibilityValue(payload.text)
                     }
-                    Spacer()
+                    Spacer(minLength: 0)
                 }
                 .padding()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(.thinMaterial.opacity(0.9))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay(alignment: .topTrailing) {
                 Button(action: onDismiss) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 22, weight: .bold))
@@ -3279,24 +3293,21 @@ struct TimerCard: View {
                 }
                 .accessibilityLabel("Dismiss message")
             }
-            .contentShape(Rectangle())
             .accessibilityAddTraits(.isModal)
             .accessibilityLabel("Message")
             .accessibilityValue(payload.text)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
     
     private struct ImageOverlay: View {
         let payload: CueSheet.ImagePayload
         let caption: CueSheet.MessagePayload?
+        let cornerRadius: CGFloat
         var onDismiss: () -> Void
         @State private var uiImage: UIImage?
         
         var body: some View {
-            ZStack(alignment: .topTrailing) {
-                Rectangle()
-                    .fill(.ultraThinMaterial)
+            ZStack {
                 VStack(spacing: 12) {
                     Group {
                         if let uiImage {
@@ -3326,6 +3337,12 @@ struct TimerCard: View {
                     }
                 }
                 .padding()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(.thinMaterial.opacity(0.9))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay(alignment: .topTrailing) {
                 Button(action: onDismiss) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 22, weight: .bold))
@@ -3336,11 +3353,9 @@ struct TimerCard: View {
             }
             .onAppear(perform: loadImage)
             .onChange(of: payload.assetID) { _ in loadImage() }
-            .contentShape(Rectangle())
             .accessibilityLabel("Image")
             .accessibilityValue(payload.caption?.text ?? "Image")
             .accessibilityAddTraits(.isModal)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         
         private func loadImage() {
