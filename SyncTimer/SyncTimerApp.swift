@@ -4540,6 +4540,7 @@ struct MainScreen: View {
                                             unsavedChanges: hasUnsaved,
                                             onOpenCueSheets: { openCueSheets() },
                                             isCounting: isCounting,
+                                            cueSheetAccent: settings.flashColor,
                                             onAddStop: commitStopEntry,
                                             onAddCue:  commitCueEntry,
                                             onAddRestart: commitRestartEntry
@@ -5964,6 +5965,7 @@ struct MainScreen: View {
                                 unsavedChanges: hasUnsaved,
                                 onOpenCueSheets: { openCueSheets() },
                                 isCounting: isCounting,
+                                cueSheetAccent: settings.flashColor,
                                 onAddStop: commitStopEntry,
                                 onAddCue:  commitCueEntry,
                                 onAddRestart: commitRestartEntry
@@ -6364,6 +6366,7 @@ struct MainScreen: View {
                                 unsavedChanges: hasUnsaved,
                                 onOpenCueSheets: { openCueSheets() },
                                 isCounting: isCounting,
+                                cueSheetAccent: settings.flashColor,
                                 onAddStop: commitStopEntry,
                                 onAddCue:  commitCueEntry,
                                 onAddRestart: commitRestartEntry

@@ -170,6 +170,7 @@ struct EventsBar: View {
     let onAddStop: () -> Void
     let onAddCue: () -> Void
     let onAddRestart: () -> Void
+    var cueSheetAccent: Color = .accentColor
 
     var body: some View {
         let _arrowSpacing: CGFloat = 55
@@ -224,13 +225,17 @@ struct EventsBar: View {
                 .offset(y: 0)
                 .disabled(isCounting)
                 // Power-user path: long-press menu is safe (menu dismisses before action)
-                                .contextMenu {
-                                    Button {
-                                        attemptOpenCueSheets()
-                                    } label: {
-                                        Label("Cue Sheets…", systemImage: "paperclip")
-                                    }
-                                }
+                .contextMenu {
+                    Button {
+                        attemptOpenCueSheets()
+                    } label: {
+                        Label {
+                            Text("Cue Sheets…")
+                        } icon: {
+                            CueSheetsIcon(accent: cueSheetAccent)
+                        }
+                    }
+                }
                 // ─── Rectangular “+” button → opens Cue Sheets ─────────────────
                                 
 
@@ -242,38 +247,37 @@ struct EventsBar: View {
             .frame(width: totalWidth, height: barHeight, alignment: .center)
             .offset(y: 0)
             // Trailing attach button (paperclip). Small, low emphasis, 44pt hit target.
-                        .overlay(alignment: .trailing) {
-                            Button {
-                                attemptOpenCueSheets()
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "paperclip")
-                                        .imageScale(.medium)
-                                    // No text; icon only to avoid competing with “+”
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .stroke(Color.primary.opacity(0.10), lineWidth: 1)
-                                )
-                                .contentShape(Rectangle())
-                                .frame(minWidth: 44, minHeight: 44) // ensure comfortable hit size
-                                .onTapGesture { attemptOpenCueSheets() }
-                            }
-                            .buttonStyle(.plain)
-                            .zIndex(9999) //ensure paperclip wins hit test
-                            // Win any gesture races with underlying content
-                            .highPriorityGesture(TapGesture().onEnded { attemptOpenCueSheets() })
-                            .simultaneousGesture(TapGesture().onEnded { attemptOpenCueSheets() })
-                            .allowsHitTesting(true)
-                            .padding(.trailing, 8)
-                            .opacity((isPaused && !isCounting) ? 1.0 : 0.35)
-                            //.disabled(!isPaused || isCounting)
-                            .accessibilityLabel("Cue Sheets")
-                            .accessibilityHint("Attach or load a cue sheet for this timer")
-                        }
+            .overlay(alignment: .trailing) {
+                Button {
+                    attemptOpenCueSheets()
+                } label: {
+                    HStack(spacing: 6) {
+                        CueSheetsIcon(accent: cueSheetAccent)
+                        // No text; icon only to avoid competing with “+”
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color.primary.opacity(0.10), lineWidth: 1)
+                    )
+                    .contentShape(Rectangle())
+                    .frame(minWidth: 44, minHeight: 44) // ensure comfortable hit size
+                    .onTapGesture { attemptOpenCueSheets() }
+                }
+                .buttonStyle(.plain)
+                .zIndex(9999) //ensure paperclip wins hit test
+                // Win any gesture races with underlying content
+                .highPriorityGesture(TapGesture().onEnded { attemptOpenCueSheets() })
+                .simultaneousGesture(TapGesture().onEnded { attemptOpenCueSheets() })
+                .allowsHitTesting(true)
+                .padding(.trailing, 8)
+                .opacity((isPaused && !isCounting) ? 1.0 : 0.35)
+                //.disabled(!isPaused || isCounting)
+                .accessibilityLabel("Cue Sheets")
+                .accessibilityHint("Attach or load a cue sheet for this timer")
+            }
         }
         .frame(height: 60)  // fix overall bar height at 60
     }
@@ -306,12 +310,39 @@ private enum Haptics {
     static func light()   { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
     static func warning() { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
 }
+// MARK: - Cue sheets icon
+private struct CueSheetsIcon: View {
+    var accent: Color
+    var scale: Image.Scale = .medium
+
+    var body: some View {
+        let image: Image = {
+            if #available(iOS 17.0, *) {
+                return Image(systemName: "document.viewfinder", variableValue: 1.0)
+            } else {
+                return Image(systemName: "document.viewfinder")
+            }
+        }()
+
+        if #available(iOS 17.0, *) {
+            image
+                .imageScale(scale)
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(Color.gray, accent.gradient)
+        } else {
+            image
+                .imageScale(scale)
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(Color.gray, accent)
+        }
+    }
+}
 // MARK: - Local helpers
 private extension EventsBar {
     func attemptOpenCueSheets() {
         // Rely on the parent’s `.disabled(!isPaused || isCounting)` to enforce pause-only.
-                // Do not silently block here — just fire the presenter on next runloop tick.
-                Haptics.light()
-                DispatchQueue.main.async { onOpenCueSheets?() }
-                }    }
-
+        // Do not silently block here — just fire the presenter on next runloop tick.
+        Haptics.light()
+        DispatchQueue.main.async { onOpenCueSheets?() }
+    }
+}
