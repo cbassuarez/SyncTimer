@@ -880,19 +880,22 @@ private struct DetailsSection: View {
 private func glassCardBackground(isEditing: Bool) -> some View {
     let radius: CGFloat = 16
     let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-        return shape
+    return shape
         .fill(.clear)
         .background {
-            Group {
-                if #available(iOS 18.0, macOS 15.0, *) {
+            if #available(iOS 26.0, macOS 15.0, *) {
                 shape
-                        .fill(.clear)
-                        .glassEffect()
-                        .clipShape(shape)
-                } else {
+                    .fill(.clear)
+                    .glassEffect(.regular, in: shape)
+            } else if #available(iOS 18.0, macOS 15.0, *) {
                 shape
-                        .fill(.ultraThinMaterial)
-                }
+                    .fill(.clear)
+                    .containerShape(shape)
+                    .glassEffect()
+                    .clipShape(shape)
+            } else {
+                shape
+                    .fill(.ultraThinMaterial)
             }
         }
         .overlay(
@@ -904,6 +907,34 @@ private func glassCardBackground(isEditing: Bool) -> some View {
                 .stroke(Color.primary.opacity(0.12), lineWidth: 1.1)
         )
         .shadow(color: Color.black.opacity(isEditing ? 0.08 : 0.16), radius: isEditing ? 6 : 12, x: 0, y: isEditing ? 3 : 8)
+}
+
+private func glassToggleBackground(radius: CGFloat) -> some View {
+    let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+    return shape
+        .fill(.clear)
+        .background {
+            if #available(iOS 26.0, macOS 15.0, *) {
+                shape
+                    .fill(.clear)
+                    .glassEffect(.regular, in: shape)
+            } else if #available(iOS 18.0, macOS 15.0, *) {
+                shape
+                    .fill(.clear)
+                    .containerShape(shape)
+                    .glassEffect()
+                    .clipShape(shape)
+            } else {
+                shape
+                    .fill(.ultraThinMaterial)
+            }
+        }
+        .overlay(
+            shape.stroke(Color.white.opacity(0.16), lineWidth: 0.6)
+        )
+        .overlay(
+            shape.stroke(Color.primary.opacity(0.1), lineWidth: 1)
+        )
 }
 
 private struct CueSheetNotesCard: View {
@@ -930,21 +961,6 @@ private struct CueSheetNotesCard: View {
 
     private var isCollapsedPreview: Bool {
         !notesFocused && !(isExpanded) && !(binding.wrappedValue.isEmpty)
-    }
-
-    private var previewText: AttributedString {
-        let text = binding.wrappedValue
-        if text.isEmpty { return AttributedString("") }
-        if let parsed = try? AttributedString(
-            markdown: text,
-            options: .init(
-                interpretedSyntax: .full,
-                failurePolicy: .returnPartiallyParsedIfPossible
-            )
-        ) {
-            return parsed
-        }
-        return AttributedString(text)
     }
 
     var body: some View {
@@ -982,23 +998,23 @@ private struct CueSheetNotesCard: View {
                 templateMenu
                 clearButton
             }
-            .labelStyle(.iconOnly)
         }
     }
 
     private var toggle: some View {
-        HStack(spacing: 4) {
-            toggleButton(.edit, systemImage: "square.and.pencil")
-            toggleButton(.preview, systemImage: "eye")
+        let toggleRadius: CGFloat = 12
+        return HStack(spacing: 6) {
+            toggleButton(.edit, systemImage: "square.and.pencil", title: "Edit", containerRadius: toggleRadius)
+            toggleButton(.preview, systemImage: "eye", title: "Preview", containerRadius: toggleRadius)
         }
-        .padding(6)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.primary.opacity(0.06))
-        )
+        .padding(.horizontal, 6)
+        .padding(.vertical, 6)
+        .frame(height: 36)
+        .background(glassToggleBackground(radius: toggleRadius))
+        .clipShape(RoundedRectangle(cornerRadius: toggleRadius, style: .continuous))
     }
 
-    private func toggleButton(_ target: Mode, systemImage: String) -> some View {
+    private func toggleButton(_ target: Mode, systemImage: String, title: String, containerRadius: CGFloat) -> some View {
         Button {
             withAnimation(.easeInOut(duration: 0.18)) {
                 mode = target
@@ -1012,14 +1028,15 @@ private struct CueSheetNotesCard: View {
         } label: {
             ZStack {
                 if mode == target {
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(Color.primary.opacity(0.08))
+                    RoundedRectangle(cornerRadius: containerRadius - 3, style: .continuous)
+                        .fill(Color.primary.opacity(0.1))
                         .matchedGeometryEffect(id: "pill", in: toggleNS)
                 }
-                Image(systemName: systemImage)
-                    .font(.system(size: 14, weight: .semibold))
-                    .symbolRenderingMode(.hierarchical)
-                    .frame(width: 28, height: 24)
+                Label(title, systemImage: systemImage)
+                    .font(.custom("Roboto-SemiBold", size: 13))
+                    .labelStyle(.titleAndIcon)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, 6)
                     .contentTransition(.symbolEffect(.replace))
             }
         }
@@ -1101,20 +1118,26 @@ private struct CueSheetNotesCard: View {
 
     private var editor: some View {
         ZStack(alignment: .topLeading) {
-            GhostMarkdownEditor(
-                text: binding,
-                isEditable: true,
-                characterLimit: limit
-            )
-            .focused($notesFocused)
-            .opacity(mode == .edit ? 1 : 0.0001)
+            TextEditor(text: binding)
+                .font(.custom("Roboto-Regular", size: 16))
+                .foregroundColor(.primary)
+                .scrollContentBackground(.hidden)
+                .focused($notesFocused)
+                .tint(.accentColor)
+                .padding(.vertical, 4)
+                .padding(.horizontal, 2)
+                .onChange(of: binding.wrappedValue) { newValue in
+                    if newValue.count > limit {
+                        binding.wrappedValue = String(newValue.prefix(limit))
+                    }
+                }
 
             if binding.wrappedValue.isEmpty {
                 Text("Add cue sheet notes… (Markdown)")
                     .font(.custom("Roboto-Regular", size: 16))
                     .foregroundStyle(.secondary)
-                    .padding(.top, 6)
-                    .padding(.leading, 4)
+                    .padding(.top, 10)
+                    .padding(.leading, 8)
                     .allowsHitTesting(false)
             }
         }
@@ -1122,7 +1145,7 @@ private struct CueSheetNotesCard: View {
 
     private var preview: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(previewText)
+            Text(renderMarkdownPreview(binding.wrappedValue))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .lineLimit(isCollapsedPreview ? 4 : nil)
@@ -1206,6 +1229,53 @@ private struct CueSheetNotesCard: View {
         mode = .edit
         isExpanded = true
         notesFocused = true
+    }
+
+    private func renderMarkdownPreview(_ source: String) -> AttributedString {
+        guard !source.isEmpty else { return AttributedString("") }
+        let parsed = (try? AttributedString(
+            markdown: source,
+            options: .init(
+                interpretedSyntax: .full,
+                failurePolicy: .returnPartiallyParsedIfPossible
+            )
+        )) ?? AttributedString(source)
+        var attributed = parsed
+        var paragraph = ParagraphStyle()
+        paragraph.lineSpacing = 2
+        var paragraphContainer = AttributeContainer()
+        paragraphContainer.paragraphStyle = paragraph
+        attributed.setAttributes(paragraphContainer, mergePolicy: .keepNew)
+
+        for range in attributed.runs.indices {
+            let intents = attributed[range].inlinePresentationIntent ?? []
+            let hasEmphasis = intents.contains(.emphasized)
+            let hasStrong = intents.contains(.stronglyEmphasized)
+            let font: Font
+            switch (hasStrong, hasEmphasis) {
+            case (true, true):
+                font = Font.custom("Roboto-SemiBold", size: 16).italic()
+            case (true, false):
+                font = Font.custom("Roboto-SemiBold", size: 16)
+            case (false, true):
+                font = Font.custom("Roboto-Regular", size: 16).italic()
+            default:
+                font = Font.custom("Roboto-Regular", size: 16)
+            }
+            var container = AttributeContainer()
+            container.font = font
+            container.paragraphStyle = paragraph
+            attributed[range].setAttributes(container, mergePolicy: .keepNew)
+        }
+
+        if attributed.runs.isEmpty {
+            var container = AttributeContainer()
+            container.font = Font.custom("Roboto-Regular", size: 16)
+            container.paragraphStyle = paragraph
+            attributed.setAttributes(container, mergePolicy: .keepNew)
+        }
+
+        return attributed
     }
 }
 
