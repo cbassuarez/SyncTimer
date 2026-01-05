@@ -805,7 +805,6 @@ private struct EventsSection: View {
 
     @State private var pickedImageItem: PhotosPickerItem? = nil
     @State private var pickedImageAssetID: UUID? = nil
-    @State private var pickedImageMode: CueSheet.ImagePayload.ContentMode = .fit
     @State private var pickedImageCaption: String = ""
 
     @Binding var sheet: CueSheet
@@ -1133,7 +1132,7 @@ private struct EventsSection: View {
 
         case .image:
             VStack(alignment: .leading, spacing: 10) {
-                sectionHeader("Image", "Pick an image asset and how it should scale.")
+                sectionHeader("Image", "Pick an image asset. TimerCard overlays always width-fit the image.")
 
                 PhotosPicker(selection: $pickedImageItem, matching: .images) {
                     Label(pickedImageAssetID == nil ? "Choose Image" : "Replace Image", systemImage: "photo")
@@ -1150,12 +1149,6 @@ private struct EventsSection: View {
                         }
                     }
                 }
-
-                Picker("Mode", selection: $pickedImageMode) {
-                    Text("Fit").tag(CueSheet.ImagePayload.ContentMode.fit)
-                    Text("Fill").tag(CueSheet.ImagePayload.ContentMode.fill)
-                }
-                .pickerStyle(.segmented)
 
                 TextField("Caption (optional)", text: $pickedImageCaption)
                     .textFieldStyle(.roundedBorder)
@@ -1463,7 +1456,7 @@ private struct EventsSection: View {
             if let id = pickedImageAssetID {
                 let cap = pickedImageCaption.trimmingCharacters(in: .whitespacesAndNewlines)
                 let captionPayload: CueSheet.MessagePayload? = cap.isEmpty ? nil : .init(text: cap, spans: [])
-                e.payload = .image(.init(assetID: id, contentMode: pickedImageMode, caption: captionPayload))
+                e.payload = .image(.init(assetID: id, caption: captionPayload))
             }
             
         case .cue:
@@ -1495,7 +1488,6 @@ private struct EventsSection: View {
         }
         if kind == .image {
             pickedImageAssetID = nil
-            pickedImageMode = .fit
             pickedImageCaption = ""
         }
 

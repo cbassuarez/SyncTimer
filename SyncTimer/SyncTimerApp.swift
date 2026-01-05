@@ -3442,32 +3442,41 @@ struct TimerCard: View {
         @ViewBuilder
         private var overlayContent: some View {
             if let payload = image {
-                VStack(spacing: 12) {
-                    Group {
-                        if let uiImage {
-                            Image(uiImage: uiImage)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        } else {
-                            VStack {
-                                ProgressView()
-                                Text("Image unavailable")
-                                    .font(.body.weight(.semibold))
+                GeometryReader { proxy in
+                    let horizontalPadding: CGFloat = 16
+                    let containerWidth = max(0, proxy.size.width - (horizontalPadding * 2))
+
+                    ScrollView(.vertical, showsIndicators: true) {
+                        VStack(spacing: 12) {
+                            Group {
+                                if let uiImage {
+                                    Image(uiImage: uiImage)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: containerWidth)
+                                } else {
+                                    VStack {
+                                        ProgressView()
+                                        Text("Image unavailable")
+                                            .font(.body.weight(.semibold))
+                                    }
+                                    .frame(width: containerWidth)
+                                }
                             }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .frame(maxWidth: .infinity, alignment: .center)
+
+                            if let caption = payload.caption {
+                                Text(attributedText(from: caption))
+                                    .frame(maxWidth: containerWidth, alignment: .leading)
+                                    .padding(.bottom, 8)
+                            }
                         }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, horizontalPadding)
+                        .padding(.vertical, 12)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    
-                    if let caption = payload.caption {
-                        Text(attributedText(from: caption))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal)
-                            .padding(.bottom, 8)
-                    }
+                    .frame(width: proxy.size.width, height: proxy.size.height)
                 }
-                .padding()
             } else if message != nil || rehearsalMark != nil {
                 VStack(spacing: 12) {
                     ScrollView {
