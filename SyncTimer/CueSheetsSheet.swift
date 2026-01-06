@@ -2768,7 +2768,7 @@ private enum NoteGrid: String, CaseIterable, Identifiable {
        }
        var label: String {
            switch self {
-           case .off: return "x:y"
+           case .off: return "polyrhythm"
            case .triplet: return "3:2"
            case .quintuplet: return "5:4"
            case .septuplet: return "7:4"
