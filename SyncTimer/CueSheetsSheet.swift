@@ -78,6 +78,7 @@ extension URL: Identifiable { public var id: String { absoluteString } }
 // MARK: - Cue Sheets medium-detent
 struct CueSheetsSheet: View {
     @Binding var isPresented: Bool
+    @Environment(\.dismiss) private var dismiss
     var canBroadcast: () -> Bool = { false }
     let onLoad: (CueSheet) -> Void
     let onBroadcast: (CueSheet) -> Void
@@ -94,6 +95,14 @@ struct CueSheetsSheet: View {
     @State private var editingSheet: CueSheet? = nil
     private let cardRadius: CGFloat = 12  // match Recent/All cards
     @State private var showBroadcastChoice = false
+
+    private var needsExplicitDismiss: Bool {
+#if targetEnvironment(macCatalyst)
+        return true
+#else
+        return UIDevice.current.userInterfaceIdiom == .pad
+#endif
+    }
 
     var body: some View {
         // Snapshot data (filtered). If the store hasn’t primed yet, render empty.
@@ -117,10 +126,18 @@ struct CueSheetsSheet: View {
                     .font(.custom("Roboto-SemiBold", size: 24))
 
                     Spacer()
-                    Button { showingImporter = true } label: {
-                        Label("Import", systemImage: "square.and.arrow.down")
-                            .font(.custom("Roboto-Regular", size: 16))
+                    HStack(spacing: 10) {
+                        Button { showingImporter = true } label: {
+                            Label("Import", systemImage: "square.and.arrow.down")
+                                .font(.custom("Roboto-Regular", size: 16))
 
+                        }
+                        if needsExplicitDismiss {
+                            CueSheetsDoneButton {
+                                isPresented = false
+                                dismiss()
+                            }
+                        }
                     }
                    
                 }
@@ -471,6 +488,29 @@ private struct SearchBar: View {
         .padding(.vertical, 10)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+    }
+}
+
+private struct CueSheetsDoneButton: View {
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                let circle = Circle()
+                circle
+                    .fill(.ultraThinMaterial)
+                    .cueGlassIfAvailable()
+                    .overlay(circle.stroke(Color.primary.opacity(0.14), lineWidth: 1))
+                Image(systemName: "checkmark")
+                    .font(.system(size: 15, weight: .bold))
+                    .symbolRenderingMode(.hierarchical)
+            }
+            .frame(width: 36, height: 36)
+            .shadow(color: .black.opacity(0.10), radius: 10, x: 0, y: 4)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Done")
     }
 }
 
