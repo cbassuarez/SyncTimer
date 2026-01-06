@@ -1553,7 +1553,6 @@ private struct EventsSection: View {
     enum EntryMode { case musical, absolute }
         // Global timing selector (drives all sub-sections)
         @State private var globalTiming: EntryMode = .absolute
-    @Namespace private var eventTypeAuxNamespace
 
     @State private var kind: CueSheet.Event.Kind = .cue
         @State private var cueColorIndex: Int = 0
@@ -1618,221 +1617,238 @@ private struct EventsSection: View {
        @State private var showTempoChanges: Bool = false
        @State private var showMeterChanges: Bool = false
     @ViewBuilder private var timingSection: some View {
+        let bpmSteps: [Double] = Array(stride(from: 20.0, through: 300.0, by: 1.0))
         // ───────────────── TIMING (Global + Changes) ─────────────────
-                       VStack(alignment: .leading, spacing: 12) {
-                           Text("Timing").font(.custom("Roboto-SemiBold", size: 17))
-                                               // Global timing selector
-                                               Picker("", selection: $globalTiming) {
-                                                   Text("Absolute time").tag(EntryMode.absolute)
-                                                   Text("Metered").tag(EntryMode.musical)
-                                               }
-                                               .pickerStyle(.segmented)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Timing").font(.custom("Roboto-SemiBold", size: 17))
+            // Global timing selector
+            Picker("", selection: $globalTiming) {
+                Text("Absolute time").tag(EntryMode.absolute)
+                Text("Metered").tag(EntryMode.musical)
+            }
+            .pickerStyle(.segmented)
 
-                           // —— Global (only when Metered) ———————————————
-                                              if globalTiming == .musical {
-                                                  Text("Global").font(.subheadline.weight(.bold)).font(.custom("Roboto-SemiBold", size: 15))
-                                                  // Initial tempo
-                                                  VStack(alignment: .leading, spacing: 6) {
-                                                      HStack {
-                                                          Text("Tempo").font(.custom("Roboto-Regular", size: 15))
-                                                          Spacer()
-                                                          Text("\(Int(sheet.bpm)) BPM")
-                                                              .font(.custom("Roboto-Regular", size: 15)).monospacedDigit()
-                                                      }
-                                                      Slider(value: $sheet.bpm, in: 20...300, step: 1)
-                                                  }
-                                                  // Initial time signature — styled fraction control
-                                                  FractionMeterControl(
-                                                      numerator: $sheet.timeSigNum,
-                                                      denominator: $sheet.timeSigDen,
-                                                      presetDenominators: presetDenoms
-                                                  )
-                                                  Divider().opacity(0.15)
-                                              }
+            // —— Global (only when Metered) ———————————————
+            if globalTiming == .musical {
+                Text("Global").font(.subheadline.weight(.bold)).font(.custom("Roboto-SemiBold", size: 15))
+                // Initial tempo
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Tempo").font(.custom("Roboto-Regular", size: 15))
+                        Spacer()
+                        Text("\(Int(sheet.bpm)) BPM")
+                            .font(.custom("Roboto-Regular", size: 15)).monospacedDigit()
+                    }
+                    TimerBehaviorPage.CustomStepSlider(
+                        value: Binding {
+                            sheet.bpm
+                        } set: { newVal in
+                            sheet.bpm = newVal
+                        },
+                        steps: bpmSteps,
+                        range: 20...300,
+                        thresholdVertical: 90,
+                        thumbColor: .accentColor
+                    )
+                    .frame(height: 44)
+                }
+                // Initial time signature — styled fraction control
+                FractionMeterControl(
+                    numerator: $sheet.timeSigNum,
+                    denominator: $sheet.timeSigDen,
+                    presetDenominators: presetDenoms
+                )
+                Divider().opacity(0.15)
+            }
 
-       
-                           // —— Tempo Changes (collapsible; only when Metered) ———
-                           if globalTiming == .musical {
-                               DisclosureGroup(isExpanded: $showTempoChanges) {
-                                   
-                                   VStack(alignment: .leading, spacing: 8) {
-                                       
-                                       HStack(spacing: 10) {
-                                           Spacer(minLength: 8)
-                                           
-                                           // BPM slider (same look as Global)
-                                           VStack(alignment: .leading, spacing: 6) {
-                                               HStack {
-                                                   Text("BPM").font(.custom("Roboto-Regular", size: 15))
-                                                   Spacer()
-                                                   Text("\(Int(tBPM))")
-                                                       .font(.custom("Roboto-Regular", size: 15)).monospacedDigit()
-                                               }
-                                               Slider(value: $tBPM, in: 20...300, step: 1)
-                                           }
-                                       }
-                                       
-                                       // Musical-position authoring (no absolute variant here)
-                                       
-                                       // Grid + Tuplet (bold x:y) + BeatGridPad (no Beat/Index badges)
-                                       HStack(spacing: 10) {
-                                           NoteGridSegmented(selection: $tGrid)
 
-                                           Menu {
-                                               Button("x:y") { tTuplet = .off; tNormalizeIndex() }
-                                               Button("3:2 (Triplet)") { tTuplet = .triplet; tNormalizeIndex() }
-                                               Button("5:4 (Quintuplet)") { tTuplet = .quintuplet; tNormalizeIndex() }
-                                               Button("7:4 (Septuplet)") { tTuplet = .septuplet; tNormalizeIndex() }
-                                           } label: {
-                                               TupletMenuLabel(tTuplet.label)
-                                           }
-                                       }
-                                       BeatGridPad(
-                                        beats: sheet.timeSigNum,
-                                        slotsPerBeat: tTotalSlotsPerBeat,
-                                        selectedBeat: $tBeat,
-                                        selectedIndex: $tIndex
-                                       )
-                                       .padding(.top, 6)
-                                       
-                                       
-                                       HStack {
-                                           Text("Will change at \(String(format: "%.2f", tPreviewSeconds()))s")
-                                            .font(.custom("Roboto-Regular", size: 13))
-                                           .foregroundStyle(.secondary)
+            // —— Tempo Changes (collapsible; only when Metered) ———
+            if globalTiming == .musical {
+                DisclosureGroup(isExpanded: $showTempoChanges) {
 
-                                           Spacer()
-                                           Button {
-                                               addTempoChange()
-                                           } label: {
-                                               Label("Add Tempo Change", systemImage: "metronome.fill")
-                                           }
-                                           .buttonStyle(.borderedProminent)
-                                       }
-                                   }
-                               } label: {
-                                   HStack {
-                                       Text("Tempo Changes").font(.custom("Roboto-SemiBold", size: 15))
-                                       Spacer()
-                                       if !sheet.tempoChanges.isEmpty {
-                                           Text("\(sheet.tempoChanges.count)")
-                                               .font(.custom("Roboto-Regular", size: 11))
-                                               .padding(.horizontal, 6).padding(.vertical, 2)
-                                               .background(.ultraThinMaterial, in: Capsule())
-                                       }
-                                   }
-                               }
-                               
-                               // Existing tempo changes (always visible list)
-                               if !sheet.tempoChanges.isEmpty {
-                                   VStack(spacing: 8) {
-                                       ForEach(Array(sheet.tempoChanges.indices), id: \.self) { i in
-                                           HStack(spacing: 10) {
-                                               Text("Bar \(sheet.tempoChanges[i].atBar)")
-                                                   .font(.custom("Roboto-Regular", size: 15))
-                                                   .foregroundStyle(.secondary)
-                                                   .frame(minWidth: 72, alignment: .leading)
-                                               Stepper(value: $sheet.tempoChanges[i].bpm, in: 20...300, step: 1) {
-                                                   Text("\(Int(sheet.tempoChanges[i].bpm)) BPM")
-                                                       .font(.custom("Roboto-Regular", size: 15))
-                                               }
-                                               Spacer()
-                                               Button(role: .destructive) {
-                                                   sheet.tempoChanges.remove(at: i)
-                                                   UIImpactFeedbackGenerator().impactOccurred()
-                                               } label: { Image(systemName: "trash") }
-                                                   .buttonStyle(.borderless)
-                                           }
-                                           .padding(10)
-                                           .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                                       }
-                                   }
-                               }
-                           }
-       
-                           // —— Time Signature Changes (collapsible; only when Metered) —
-                           if globalTiming == .musical {
-                               DisclosureGroup(isExpanded: $showMeterChanges) {
-                                   
-                                   VStack(alignment: .leading, spacing: 8) {
-                                       
-                                       Stepper(value: $mBar, in: 1...9999) {
-                                           Text("Bar \(mBar)").font(.custom("Roboto-Regular", size: 15))
-                                       }
-                                       
-                                       // Fraction control for the meter to add
-                                       FractionMeterControl(
-                                        numerator: $mNum,
-                                        denominator: $mDen,
-                                        presetDenominators: presetDenoms
-                                       )
-                                       
-                                       
-                                       HStack {
-                                           Text("Will change at \(mPreviewLabel())")
-                                           .font(.custom("Roboto-Regular", size: 13))
-                                           .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
 
-                                           Spacer()
-                                           Button {
-                                               addMeterChange()
-                                           } label: {
-                                               Label("Add Time Signature", systemImage: "flag.2.crossed")
-                                           }
-                                           .buttonStyle(.borderedProminent)
-                                       }
-                                   }
-                               } label: {
-                                   HStack {
-                                       Text("Time Signature Changes").font(.custom("Roboto-SemiBold", size: 15))
-                                       Spacer()
-                                       if !sheet.meterChanges.isEmpty {
-                                           Text("\(sheet.meterChanges.count)")
-                                               .font(.custom("Roboto-Regular", size: 11))
-                                               .padding(.horizontal, 6).padding(.vertical, 2)
-                                               .background(.ultraThinMaterial, in: Capsule())
-                                       }
-                                   }
-                               }
-                           }
-                           if !sheet.meterChanges.isEmpty {
-                               VStack(spacing: 8) {
-                                   ForEach(Array(sheet.meterChanges.indices), id: \.self) { i in
-                                       let mc = sheet.meterChanges[i]
-                                       HStack(spacing: 12) {
-                                                                           Text("Bar \(mc.atBar)")
-                                                                               .font(.custom("Roboto-Regular", size: 15))
-                                                                               .foregroundStyle(.secondary)
-                                                                               .frame(minWidth: 64, alignment: .leading)
-                                                                           Text("\(mc.num)/\(mc.den)")
-                                                                               .font(.custom("Roboto-SemiBold", size: 16)).monospacedDigit()
-                                                                               .padding(.horizontal, 10)
-                                                                               .padding(.vertical, 6)
-                                                                               .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                                                                           Spacer()
-                                                                           Button {
-                                                                               editingMeterItem = IdentifiableIndex(i)
-                                                                               editNumDraft = mc.num
-                                                                               editDenDraft = mc.den
-                                                                           } label: {
-                                                                               Label("Edit", systemImage: "pencil")
-                                                                           }
-                                                                           .buttonStyle(.borderless)
-                                                                           Button(role: .destructive) {
-                                                                               sheet.meterChanges.remove(at: i)
-                                                                               UIImpactFeedbackGenerator().impactOccurred()
-                                                                           } label: { Image(systemName: "trash") }
-                                                                           .buttonStyle(.borderless)
-                                                                       }
+                        HStack(spacing: 10) {
+                            Spacer(minLength: 8)
 
-                                       .padding(10)
-                                       .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                                   }
-                               }
-                           }
-                       }
-                       .padding(12)
-                       .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                            // BPM slider (same look as Global)
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text("BPM").font(.custom("Roboto-Regular", size: 15))
+                                    Spacer()
+                                    Text("\(Int(tBPM))")
+                                        .font(.custom("Roboto-Regular", size: 15)).monospacedDigit()
+                                }
+                                TimerBehaviorPage.CustomStepSlider(
+                                    value: $tBPM,
+                                    steps: bpmSteps,
+                                    range: 20...300,
+                                    thresholdVertical: 90,
+                                    thumbColor: .accentColor
+                                )
+                                .frame(height: 44)
+                            }
+                        }
+
+                        // Musical-position authoring (no absolute variant here)
+
+                        // Grid + Tuplet (bold x:y) + BeatGridPad (no Beat/Index badges)
+                        HStack(spacing: 10) {
+                            NoteGridSegmented(selection: $tGrid)
+
+                            Menu {
+                                Button("x:y") { tTuplet = .off; tNormalizeIndex() }
+                                Button("3:2 (Triplet)") { tTuplet = .triplet; tNormalizeIndex() }
+                                Button("5:4 (Quintuplet)") { tTuplet = .quintuplet; tNormalizeIndex() }
+                                Button("7:4 (Septuplet)") { tTuplet = .septuplet; tNormalizeIndex() }
+                            } label: {
+                                TupletMenuLabel(tTuplet.label)
+                            }
+                        }
+                        BeatGridPad(
+                         beats: sheet.timeSigNum,
+                         slotsPerBeat: tTotalSlotsPerBeat,
+                         selectedBeat: $tBeat,
+                         selectedIndex: $tIndex
+                        )
+                        .padding(.top, 6)
+
+
+                        HStack {
+                            Text("Will change at \(String(format: "%.2f", tPreviewSeconds()))s")
+                             .font(.custom("Roboto-Regular", size: 13))
+                            .foregroundStyle(.secondary)
+
+                            Spacer()
+                            Button {
+                                addTempoChange()
+                            } label: {
+                                Label("Add Tempo Change", systemImage: "metronome.fill")
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text("Tempo Changes").font(.custom("Roboto-SemiBold", size: 15))
+                        Spacer()
+                        if !sheet.tempoChanges.isEmpty {
+                            Text("\(sheet.tempoChanges.count)")
+                                .font(.custom("Roboto-Regular", size: 11))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(.ultraThinMaterial, in: Capsule())
+                        }
+                    }
+                }
+
+                // Existing tempo changes (always visible list)
+                if !sheet.tempoChanges.isEmpty {
+                    VStack(spacing: 8) {
+                        ForEach(Array(sheet.tempoChanges.indices), id: \.self) { i in
+                            HStack(spacing: 10) {
+                                Text("Bar \(sheet.tempoChanges[i].atBar)")
+                                    .font(.custom("Roboto-Regular", size: 15))
+                                    .foregroundStyle(.secondary)
+                                    .frame(minWidth: 72, alignment: .leading)
+                                Stepper(value: $sheet.tempoChanges[i].bpm, in: 20...300, step: 1) {
+                                    Text("\(Int(sheet.tempoChanges[i].bpm)) BPM")
+                                        .font(.custom("Roboto-Regular", size: 15))
+                                }
+                                Spacer()
+                                Button(role: .destructive) {
+                                    sheet.tempoChanges.remove(at: i)
+                                    UIImpactFeedbackGenerator().impactOccurred()
+                                } label: { Image(systemName: "trash") }
+                                    .buttonStyle(.borderless)
+                            }
+                            .padding(10)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+                }
+            }
+
+            // —— Time Signature Changes (collapsible; only when Metered) —
+            if globalTiming == .musical {
+                DisclosureGroup(isExpanded: $showMeterChanges) {
+
+                    VStack(alignment: .leading, spacing: 8) {
+
+                        Stepper(value: $mBar, in: 1...9999) {
+                            Text("Bar \(mBar)").font(.custom("Roboto-Regular", size: 15))
+                        }
+
+                        // Fraction control for the meter to add
+                        FractionMeterControl(
+                         numerator: $mNum,
+                         denominator: $mDen,
+                         presetDenominators: presetDenoms
+                        )
+
+
+                        HStack {
+                            Text("Will change at \(mPreviewLabel())")
+                            .font(.custom("Roboto-Regular", size: 13))
+                            .foregroundStyle(.secondary)
+
+                            Spacer()
+                            Button {
+                                addMeterChange()
+                            } label: {
+                                Label("Add Time Signature", systemImage: "flag.2.crossed")
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text("Time Signature Changes").font(.custom("Roboto-SemiBold", size: 15))
+                        Spacer()
+                        if !sheet.meterChanges.isEmpty {
+                            Text("\(sheet.meterChanges.count)")
+                                .font(.custom("Roboto-Regular", size: 11))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(.ultraThinMaterial, in: Capsule())
+                        }
+                    }
+                }
+            }
+            if !sheet.meterChanges.isEmpty {
+                VStack(spacing: 8) {
+                    ForEach(Array(sheet.meterChanges.indices), id: \.self) { i in
+                        let mc = sheet.meterChanges[i]
+                        HStack(spacing: 12) {
+                                                        Text("Bar \(mc.atBar)")
+                                                            .font(.custom("Roboto-Regular", size: 15))
+                                                            .foregroundStyle(.secondary)
+                                                            .frame(minWidth: 64, alignment: .leading)
+                                                        Text("\(mc.num)/\(mc.den)")
+                                                            .font(.custom("Roboto-SemiBold", size: 16)).monospacedDigit()
+                                                            .padding(.horizontal, 10)
+                                                            .padding(.vertical, 6)
+                                                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                                                        Spacer()
+                                                        Button {
+                                                            editingMeterItem = IdentifiableIndex(i)
+                                                            editNumDraft = mc.num
+                                                            editDenDraft = mc.den
+                                                        } label: {
+                                                            Label("Edit", systemImage: "pencil")
+                                                        }
+                                                        .buttonStyle(.borderless)
+                                                        Button(role: .destructive) {
+                                                            sheet.meterChanges.remove(at: i)
+                                                            UIImpactFeedbackGenerator().impactOccurred()
+                                                        } label: { Image(systemName: "trash") }
+                                                        .buttonStyle(.borderless)
+                                                    }
+
+                        .padding(10)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+        }
     }
     private var timingSummaryStrip: some View {
         let modeLabel = globalTiming == .musical ? "Metered" : "Absolute"
@@ -1877,6 +1893,17 @@ private struct EventsSection: View {
                 .font(.custom("Roboto-SemiBold", size: 14))
             }
             .buttonStyle(.plain)
+        }
+        .padding(.vertical, 4)
+    }
+    private var timingGroupCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            timingSummaryStrip
+            if showTimingDetails {
+                Divider().opacity(0.1).padding(.horizontal, 2)
+                timingSection
+                    .transition(.opacity)
+            }
         }
         .padding(12)
         .background(glassCardBackground())
@@ -1984,35 +2011,58 @@ private struct EventsSection: View {
     }
 
     private var composerEventTypeSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             sectionHeader("Event Type", "Pick what fires. Hold applies to Stop; rehearsal marks to Cue.")
             EventTypeChipRow(selection: $kind)
-            ZStack(alignment: .topLeading) {
-                if kind == .stop {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Stepper(value: $hold, in: 0...30, step: 0.1) {
-                            Text("Hold \(hold, specifier: "%.2f") s")
-                                .font(.custom("Roboto-Regular", size: 15))
-                        }
+            eventTypeDescription
+            if kind == .stop {
+                VStack(alignment: .leading, spacing: 6) {
+                    Stepper(value: $hold, in: 0...30, step: 0.1) {
+                        Text("Hold \(hold, specifier: "%.2f") s")
+                            .font(.custom("Roboto-Regular", size: 15))
                     }
-                    .matchedGeometryEffect(id: "eventTypeAux", in: eventTypeAuxNamespace)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                } else if kind == .cue {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Hold controls message/image only; rehearsal marks auto-clear via defaults.")
-                            .font(.custom("Roboto-Regular", size: 12))
-                            .foregroundStyle(.secondary)
-                    }
-                    .matchedGeometryEffect(id: "eventTypeAux", in: eventTypeAuxNamespace)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                } else {
-                    Color.clear
-                        .frame(height: 0)
-                        .matchedGeometryEffect(id: "eventTypeAux", in: eventTypeAuxNamespace)
                 }
+                .transition(.opacity)
             }
         }
-        .animation(.snappy(duration: 0.25), value: kind)
+        .animation(.easeInOut(duration: 0.18), value: kind)
+    }
+    private var eventTypeDescription: some View {
+        let copy = eventTypeCopy(for: kind)
+        return ZStack(alignment: .topLeading) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(copy.primary)
+                    .font(.custom("Roboto-Regular", size: 14))
+                if let secondary = copy.secondary {
+                    Text(secondary)
+                        .font(.custom("Roboto-Regular", size: 12))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .id(kind)
+            .transition(.opacity)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: 52, alignment: .topLeading)
+        .animation(.easeInOut(duration: 0.18), value: kind)
+    }
+    private func eventTypeCopy(for kind: CueSheet.Event.Kind) -> (primary: String, secondary: String?) {
+        switch kind {
+        case .stop:
+            return ("Stop playback at this moment.", "Optional hold keeps the timer paused before clearing.")
+        case .cue:
+            return ("Drop a cue marker with flash color and rehearsal mark options.", "Hold controls message/image only; rehearsal marks auto-clear via defaults.")
+        case .restart:
+            return ("Restart the timer from zero and continue running.", nil)
+        case .message:
+            return ("Show a message overlay when the event triggers.", nil)
+        case .image:
+            return ("Display an overlay image on connected devices.", nil)
+        case .flashColor:
+            return ("Change the flash accent color mid-score.", nil)
+        default:
+            return ("Trigger the selected event.", nil)
+        }
     }
     private var composerFlashColorSection: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -2104,8 +2154,8 @@ private struct EventsSection: View {
             Image(systemName: "chevron.down")
                 .font(.system(size: 13, weight: .semibold))
         }
-        .frame(minHeight: 18)
-        .cueGlassChrome(minHeight: 44)
+        .frame(minWidth: 104, minHeight: 18, alignment: .center)
+        .cueGlassChrome(minHeight: 48)
     }
 
 private struct EventTypeChipRow: View {
@@ -2261,13 +2311,12 @@ private struct EventTypeChipRow: View {
     var body: some View {
         ZStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 14) {
-                timingSummaryStrip
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        if showTimingDetails {
-                            timingSection
-                                .transition(.opacity.combined(with: .move(edge: .top)))
-                        }
+                        timingGroupCard
+                        Divider()
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 4)
                         composerCard
                         Divider().opacity(0.08)
                         eventList
@@ -2733,15 +2782,14 @@ private enum NoteGrid: String, CaseIterable, Identifiable {
 @ViewBuilder
 private func NoteGlyph(_ grid: NoteGrid, height: CGFloat = 14, vpad: CGFloat = 5) -> some View {
     if let ui = UIImage(named: grid.assetName) {
-        let scaleY: CGFloat = 3.0
-        let targetHeight = height * 2.0
+        let glyphWidth = height
+        let targetHeight = glyphWidth * 1.2
         Image(uiImage: ui)
             .renderingMode(.original)
             .resizable()
-            .scaledToFit()
-            .frame(height: targetHeight)
-            .scaleEffect(x: 1, y: scaleY, anchor: .center)
-            .padding(.vertical, vpad + 1) // makes segmented control a bit taller
+            .aspectRatio(contentMode: .fit)
+            .frame(width: glyphWidth, height: targetHeight)
+            .padding(.vertical, vpad + 2) // makes segmented control a bit taller
             .accessibilityLabel(Text(grid.fallback))
     } else {
         Text(grid.fallback)
