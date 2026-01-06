@@ -1233,24 +1233,17 @@ private struct CueSheetNotesCard: View {
 
     private func renderMarkdownPreview(_ source: String) -> AttributedString {
         guard !source.isEmpty else { return AttributedString("") }
-        let parsed = (try? AttributedString(
+        var attributed = (try? AttributedString(
             markdown: source,
             options: .init(
                 interpretedSyntax: .full,
                 failurePolicy: .returnPartiallyParsedIfPossible
             )
         )) ?? AttributedString(source)
-        var attributed = parsed
-        var paragraph = ParagraphStyle()
-        paragraph.lineSpacing = 2
-        var paragraphContainer = AttributeContainer()
-        paragraphContainer.paragraphStyle = paragraph
-        attributed.setAttributes(paragraphContainer, mergePolicy: .keepNew)
-
-        for range in attributed.runs.indices {
-            let intents = attributed[range].inlinePresentationIntent ?? []
+        for run in attributed.runs {
+                    let intents = run.inlinePresentationIntent ?? []
             let hasEmphasis = intents.contains(.emphasized)
-            let hasStrong = intents.contains(.stronglyEmphasized)
+                        let hasStrong = intents.contains(.stronglyEmphasized)
             let font: Font
             switch (hasStrong, hasEmphasis) {
             case (true, true):
@@ -1262,17 +1255,13 @@ private struct CueSheetNotesCard: View {
             default:
                 font = Font.custom("Roboto-Regular", size: 16)
             }
-            var container = AttributeContainer()
-            container.font = font
-            container.paragraphStyle = paragraph
-            attributed[range].setAttributes(container, mergePolicy: .keepNew)
+            var slice = attributed[run.range]
+                       slice.font = font
+                       attributed[run.range] = slice
         }
 
         if attributed.runs.isEmpty {
-            var container = AttributeContainer()
-            container.font = Font.custom("Roboto-Regular", size: 16)
-            container.paragraphStyle = paragraph
-            attributed.setAttributes(container, mergePolicy: .keepNew)
+            attributed.font = Font.custom("Roboto-Regular", size: 16)
         }
 
         return attributed
