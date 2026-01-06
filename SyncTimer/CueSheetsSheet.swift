@@ -2106,7 +2106,7 @@ private struct EventsSection: View {
             Image(systemName: "chevron.down")
                 .font(.system(size: 13, weight: .semibold))
         }
-        .frame(minHeight: 44)
+        .frame(minHeight: 18)
         .cueGlassChrome(minHeight: 44)
     }
 
