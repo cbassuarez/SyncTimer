@@ -1967,8 +1967,19 @@ private struct EventsSection: View {
 
                 HStack(spacing: 10) {
                     PhotosPicker(selection: $pickedImageItem, matching: .images) {
-                        Label(pickedImageAssetID == nil ? "Choose Image" : "Replace Image", systemImage: "photo")
+                        HStack(spacing: 8) {
+                        Image(systemName: "photo")
+                        Text(pickedImageAssetID == nil ? "Choose Image" : "Replace Image")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .opacity(0.6)
                     }
+                    .font(.custom("Roboto-SemiBold", size: 15))
+                    .frame(maxWidth: .infinity, minHeight: 48, alignment: .center)
+                    .cueGlassChrome(minHeight: 48)
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
                     .onChange(of: pickedImageItem) { item in
                         guard let item else { return }
                         Task { @MainActor in
