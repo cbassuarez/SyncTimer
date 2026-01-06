@@ -9080,6 +9080,7 @@ struct AboutPage: View {
             .padding(20)
             .sheet(isPresented: $showHallOfFame) {
                 HallOfFameCard()
+                    .environmentObject(appSettings)
                     .presentationDetents([.medium])
                     .presentationDragIndicator(.hidden)
             }
