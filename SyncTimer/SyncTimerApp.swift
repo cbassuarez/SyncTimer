@@ -7856,6 +7856,7 @@ struct SegmentedControlPicker<Option: SegmentedOption>: View {
                 .foregroundColor(selection.id == option.id ? .white : .primary)
                 .padding(.vertical, 10)
                 .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
                 .background(activeBackground(for: option))
                 .accessibilityLabel(option.label)
                 .accessibilityHint("Selects \(option.label) tab")

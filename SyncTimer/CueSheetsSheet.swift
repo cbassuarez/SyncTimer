@@ -1079,6 +1079,7 @@ private struct CueEditorTabBar: View {
             .padding(.horizontal, mode == .iconOnly ? 10 : 12)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
             .background {
                 if selected {
                     Capsule()
@@ -1347,6 +1348,8 @@ fileprivate struct GlassTwoOptionTabs<Selection: Hashable>: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.horizontal, 6)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -1490,6 +1493,8 @@ private struct CueSheetNotesCard: View {
                     .padding(.horizontal, 6)
                     .contentTransition(.symbolEffect(.replace))
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
