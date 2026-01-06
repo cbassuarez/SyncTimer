@@ -2735,7 +2735,7 @@ private enum NoteGrid: String, CaseIterable, Identifiable {
 @ViewBuilder
 private func NoteGlyph(_ grid: NoteGrid, height: CGFloat = 14, vpad: CGFloat = 5) -> some View {
     if let ui = UIImage(named: grid.assetName) {
-        let scaleY: CGFloat = 1.17
+        let scaleY: CGFloat = 2.0
         let targetHeight = height * 1.1
         Image(uiImage: ui)
             .renderingMode(.original)
