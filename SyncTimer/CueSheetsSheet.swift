@@ -1515,7 +1515,7 @@ private struct MetaStrip: View {
 private func defaultLabel(for event: CueSheet.Event) -> String {
     switch event.kind {
     case .cue:
-        return event.rehearsalMarkMode == .auto ? "Cue (Mark Auto)" : "Cue"
+        return event.rehearsalMarkMode == .auto ? "Cue (+Rehearsal Mark)" : "Cue"
     case .stop:
         return "Stop"
     case .restart:
@@ -2024,8 +2024,8 @@ private struct EventsSection: View {
             VStack(alignment: .leading, spacing: 6) {
                 sectionHeader("Rehearsal Mark", "Choose whether this cue shows a rehearsal mark.")
                 Picker("", selection: $rehearsalMarkMode) {
-                    Text("Off").tag(CueSheet.RehearsalMarkMode.off)
-                    Text("Auto").tag(CueSheet.RehearsalMarkMode.auto)
+                    Text("No").tag(CueSheet.RehearsalMarkMode.off)
+                    Text("Yes").tag(CueSheet.RehearsalMarkMode.auto)
                 }
                 .pickerStyle(.segmented)
             }
@@ -2093,6 +2093,7 @@ private struct EventsSection: View {
                 ForEach(NoteGrid.subdivisionsOnly) { g in NoteGlyph(g, height: 32, vpad: 5).tag(g) }
                 }
             .pickerStyle(.segmented)
+            .frame(minHeight: 44)
 
         }
     }
@@ -2442,7 +2443,7 @@ private struct EventTypeChipRow: View {
         case .stop:
             return String(format: "Hold %.1f s", event.holdSeconds ?? 0)
         case .cue:
-            return event.rehearsalMarkMode == .auto ? "Rehearsal mark: Auto" : "Rehearsal mark: Off"
+            return event.rehearsalMarkMode == .auto ? "Rehearsal mark: On" : "Rehearsal mark: Off"
         case .message:
             if case .message(let payload) = event.payload {
                 let text = payload.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2819,12 +2820,12 @@ private struct EventRow: View {
                 Spacer()
                 if event.kind == .cue {
                     Menu {
-                        Button("Auto") { event.rehearsalMarkMode = .auto }
+                        Button("On") { event.rehearsalMarkMode = .auto }
                         Button("Off") { event.rehearsalMarkMode = nil }
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: event.rehearsalMarkMode == .auto ? "a.circle.fill" : "a.circle")
-                            Text(event.rehearsalMarkMode == .auto ? "Mark Auto" : "Mark Off")
+                            Text(event.rehearsalMarkMode == .auto ? "Rehearsal Mark" : "Mark Off")
                                 .font(.custom("Roboto-Regular", size: 13))
                         }
                         .padding(.horizontal, 10)
@@ -2920,7 +2921,7 @@ private struct EventRow: View {
             if let hold = event.holdSeconds { return String(format: "Hold %.1fs", hold) }
             return nil
         case .cue:
-            return event.rehearsalMarkMode == .auto ? "Mark Auto" : nil
+            return event.rehearsalMarkMode == .auto ? "Rehearsal Mark On" : nil
         default:
             return nil
         }
