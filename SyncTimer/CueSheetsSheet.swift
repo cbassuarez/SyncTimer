@@ -542,22 +542,94 @@ private struct Wrap<Data: RandomAccessCollection, Content: View>: View where Dat
 }
 private struct AbsoluteEntry: View {
     @Binding var timeText: String
+    @State private var minutes: String = ""
+    @State private var seconds: String = ""
+    @State private var centiseconds: String = ""
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Time (HH:MM:SS.cc or MM:SS.cc)")
                             .font(.custom("Roboto-Regular", size: 13))
                             .foregroundStyle(.secondary)
 
-            TextField("00:00.00", text: $timeText)
-                .font(.custom("Roboto-Regular", size: 16))
-                .textFieldStyle(.roundedBorder)
-                .keyboardType(.numbersAndPunctuation)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+            HStack(spacing: 8) {
+                timeField(title: "MM", text: $minutes, max: 999)
+                Text(":")
+                    .font(.custom("Roboto-Regular", size: 15))
+                    .foregroundStyle(.secondary)
+                timeField(title: "SS", text: $seconds, max: 59, padTo: 2)
+                Text(".")
+                    .font(.custom("Roboto-Regular", size: 15))
+                    .foregroundStyle(.secondary)
+                timeField(title: "cc", text: $centiseconds, max: 99, padTo: 2)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .onChange(of: minutes) { _ in updateTimeText() }
+            .onChange(of: seconds) { _ in updateTimeText() }
+            .onChange(of: centiseconds) { _ in updateTimeText() }
+            .onChange(of: timeText) { _ in syncFieldsFromTimeText() }
+            .onAppear { syncFieldsFromTimeText() }
         }
     }
 
+    private func timeField(title: String, text: Binding<String>, max: Int, padTo: Int = 2) -> some View {
+        VStack(spacing: 4) {
+            Text(title)
+                .font(.custom("Roboto-Regular", size: 11))
+                .foregroundStyle(.secondary)
+            TextField("0", text: text)
+                .keyboardType(.numberPad)
+                .font(.custom("Roboto-Regular", size: 16)).monospacedDigit()
+                .multilineTextAlignment(.center)
+                .frame(minWidth: 40)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .onChange(of: text.wrappedValue) { newValue in
+                    let digits = newValue.filter { $0.isNumber }
+                    if let value = Int(digits) {
+                        let clamped = min(max(0, value), max)
+                        let padded = String(format: "%0\(padTo)d", clamped)
+                        if padded != text.wrappedValue { text.wrappedValue = padded }
+                    } else {
+                        text.wrappedValue = ""
+                    }
+                }
+        }
+    }
 
+    private func syncFieldsFromTimeText() {
+        let clean = timeText.replacingOccurrences(of: ",", with: ".")
+        let parts = clean.split(separator: ":")
+        var totalSeconds: Double = 0
+        if parts.count == 1 {
+            totalSeconds = Double(clean) ?? 0
+        } else if parts.count == 2 {
+            let m = Double(parts[0]) ?? 0
+            let s = Double(parts[1]) ?? 0
+            totalSeconds = m * 60 + s
+        } else if parts.count >= 3 {
+            let h = Double(parts[0]) ?? 0
+            let m = Double(parts[1]) ?? 0
+            let s = Double(parts[2]) ?? 0
+            totalSeconds = h * 3600 + m * 60 + s
+        }
+        let centiTotal = Int((totalSeconds * 100).rounded())
+        let mVal = centiTotal / 6000
+        let sVal = max(0, min(59, (centiTotal % 6000) / 100))
+        let cVal = max(0, min(99, centiTotal % 100))
+        minutes = String(format: "%02d", mVal)
+        seconds = String(format: "%02d", sVal)
+        centiseconds = String(format: "%02d", cVal)
+    }
+
+    private func updateTimeText() {
+        let mVal = Int(minutes) ?? 0
+        let sVal = min(max(Int(seconds) ?? 0, 0), 59)
+        let cVal = min(max(Int(centiseconds) ?? 0, 0), 99)
+        timeText = String(format: "%02d:%02d.%02d", mVal, sVal, cVal)
+    }
 }
 
 // MARK: - Large-detent editor (stable)
@@ -1382,6 +1454,35 @@ private struct MetaStrip: View {
 }
 
 // MARK: Events
+private func defaultLabel(for event: CueSheet.Event) -> String {
+    switch event.kind {
+    case .cue:
+        return event.rehearsalMarkMode == .auto ? "Cue (Mark Auto)" : "Cue"
+    case .stop:
+        return "Stop"
+    case .restart:
+        return "Restart"
+    case .message:
+        if case .message(let payload) = event.payload {
+            let text = payload.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let firstLine = text.split(separator: "\n").first {
+                let trimmed = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty && trimmed.count <= 24 { return String(trimmed) }
+            }
+        }
+        return "Message"
+    case .image:
+        if case .image(let payload) = event.payload,
+           let caption = payload.caption?.text.trimmingCharacters(in: .whitespacesAndNewlines),
+           !caption.isEmpty,
+           caption.count <= 24 {
+            return caption
+        }
+        return "Image"
+    default:
+        return "Event"
+    }
+}
 private struct EventsSection: View {
     @State private var messageDraft: String = ""
 
@@ -1414,6 +1515,7 @@ private struct EventsSection: View {
     @State private var hold: Double = 2.0
     // Show absolute time temporarily (1s) for tapped rows
     @State private var revealAbs: Set<Int> = []
+    @State private var showTimingDetails: Bool = false
 
     // ── TEMPO CONFIG (separate section) ─────────────────────────────
         @State private var tBar: Int = 1
@@ -1679,6 +1781,53 @@ private struct EventsSection: View {
                        .padding(12)
                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
+    private var timingSummaryStrip: some View {
+        let modeLabel = globalTiming == .musical ? "Metered" : "Absolute"
+        let detail: String = {
+            if globalTiming == .musical {
+                return "Start 0:00 • \(Int(sheet.bpm)) BPM • \(sheet.timeSigNum)/\(sheet.timeSigDen)"
+            } else {
+                return "Start 0:00 • Absolute timing"
+            }
+        }()
+
+        return HStack(alignment: .center, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "metronome.fill")
+                    .imageScale(.medium)
+                    .foregroundStyle(.primary)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text("Timing")
+                            .font(.custom("Roboto-SemiBold", size: 15))
+                        Text(modeLabel)
+                            .font(.custom("Roboto-Regular", size: 12))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.ultraThinMaterial, in: Capsule())
+                    }
+                    Text(detail)
+                        .font(.custom("Roboto-Regular", size: 13))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            Spacer()
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { showTimingDetails.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(showTimingDetails ? "Hide" : "Edit")
+                    Image(systemName: "chevron.down")
+                        .rotationEffect(.degrees(showTimingDetails ? 180 : 0))
+                }
+                .font(.custom("Roboto-SemiBold", size: 14))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .background(glassCardBackground())
+    }
     // MARK: - Composer (thin wrapper)
     @ViewBuilder private var composerCard: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1696,7 +1845,7 @@ private struct EventsSection: View {
 
         }
         .padding(12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .background(glassCardBackground())
     }
     @ViewBuilder private var composerPayloadSection: some View {
         switch kind {
@@ -1716,20 +1865,52 @@ private struct EventsSection: View {
             VStack(alignment: .leading, spacing: 10) {
                 sectionHeader("Image", "Pick an image asset. TimerCard overlays always width-fit the image.")
 
-                PhotosPicker(selection: $pickedImageItem, matching: .images) {
-                    Label(pickedImageAssetID == nil ? "Choose Image" : "Replace Image", systemImage: "photo")
+                if let preview = pickedImagePreview {
+                    preview
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity, minHeight: 120, maxHeight: 140)
+                        .clipped()
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(.ultraThinMaterial)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.white.opacity(0.18), lineWidth: 0.8)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.primary.opacity(0.15), lineWidth: 1.1)
+                        )
                 }
-                .onChange(of: pickedImageItem) { item in
-                    guard let item else { return }
-                    Task { @MainActor in
-                        defer { pickedImageItem = nil }
-                        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
-                        do {
-                            pickedImageAssetID = try CueLibraryStore.shared.ingestImage(data: data)
-                            kind = .image
-                        } catch {
-                            pickedImageAssetID = nil
+
+                HStack(spacing: 10) {
+                    PhotosPicker(selection: $pickedImageItem, matching: .images) {
+                        Label(pickedImageAssetID == nil ? "Choose Image" : "Replace Image", systemImage: "photo")
+                    }
+                    .onChange(of: pickedImageItem) { item in
+                        guard let item else { return }
+                        Task { @MainActor in
+                            defer { pickedImageItem = nil }
+                            guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+                            do {
+                                pickedImageAssetID = try CueLibraryStore.shared.ingestImage(data: data)
+                                kind = .image
+                            } catch {
+                                pickedImageAssetID = nil
+                            }
                         }
+                    }
+
+                    if pickedImageAssetID != nil {
+                        Button(role: .destructive) {
+                            pickedImageAssetID = nil
+                            pickedImageCaption = ""
+                        } label: {
+                            Label("Remove Image", systemImage: "trash")
+                        }
+                        .buttonStyle(.borderless)
                     }
                 }
 
@@ -1742,31 +1923,17 @@ private struct EventsSection: View {
         }
     }
 
+    private var pickedImagePreview: Image? {
+        guard let id = pickedImageAssetID,
+              let data = CueLibraryStore.shared.assetData(id: id),
+              let uiImage = UIImage(data: data) else { return nil }
+        return Image(uiImage: uiImage)
+    }
+
     private var composerEventTypeSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            sectionHeader("Event Type", "Choose Cue (flash), Stop (with hold), or Restart.")
-            Picker("", selection: $kind) {
-                Label("Cue", systemImage: "bolt.fill")
-                    .labelStyle(.iconOnly)
-                    .tag(CueSheet.Event.Kind.cue)
-
-                Label("Stop", systemImage: "hand.raised.fill")
-                    .labelStyle(.iconOnly)
-                    .tag(CueSheet.Event.Kind.stop)
-
-                Label("Restart", systemImage: "gobackward")
-                    .labelStyle(.iconOnly)
-                    .tag(CueSheet.Event.Kind.restart)
-
-                Label("Message", systemImage: "text.bubble")
-                    .labelStyle(.iconOnly)
-                    .tag(CueSheet.Event.Kind.message)
-
-                Label("Image", systemImage: "photo")
-                    .labelStyle(.iconOnly)
-                    .tag(CueSheet.Event.Kind.image)
-            }
-            .pickerStyle(.segmented)
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("Event Type", "Pick what fires. Hold applies to Stop; rehearsal marks to Cue.")
+            EventTypeChipRow(selection: $kind)
 
 
             if kind == .stop {
@@ -1872,20 +2039,91 @@ private struct EventsSection: View {
 
         }
     }
+
+private struct EventTypeChipRow: View {
+    @Binding var selection: CueSheet.Event.Kind
+
+    private struct Item: Identifiable {
+        var id: CueSheet.Event.Kind { kind }
+        let kind: CueSheet.Event.Kind
+        let title: String
+        let icon: String
+    }
+
+    private let items: [Item] = [
+        .init(kind: .cue, title: "Cue", icon: "bolt.fill"),
+        .init(kind: .stop, title: "Stop", icon: "hand.raised.fill"),
+        .init(kind: .restart, title: "Restart", icon: "gobackward"),
+        .init(kind: .message, title: "Message", icon: "text.bubble"),
+        .init(kind: .image, title: "Image", icon: "photo")
+    ]
+
+    var body: some View {
+        let columns = [GridItem(.adaptive(minimum: 120), spacing: 10)]
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+            ForEach(items) { item in
+                let isSelected = selection == item.kind
+                Button {
+                    selection = item.kind
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: item.icon)
+                            .imageScale(.medium)
+                        Text(item.title)
+                            .font(.custom("Roboto-Regular", size: 15))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(glassToggleBackground(radius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(isSelected ? Color.accentColor.opacity(0.8) : Color.white.opacity(0.14), lineWidth: isSelected ? 1.6 : 1)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                    )
+                    .shadow(color: Color.black.opacity(0.06), radius: 10, x: 0, y: 4)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
     private var composerPreviewAndAddRow: some View {
-        let previewText = String(format: "Will fire at %.2f s", previewSeconds())
-        return HStack {
-            Text(previewText)
-                .font(.custom("Roboto-Regular", size: 13))
-                .foregroundStyle(.secondary)
+        let previewEvent = composerPreviewEvent()
+        let previewLabel = previewEvent?.label ?? autoLabel(for: CueSheet.Event(kind: kind, at: 0, holdSeconds: nil, label: nil))
+        let timeLabel = String(format: "Fires at %.2f s", previewSeconds())
+        let detail = previewDetail(for: previewEvent)
+
+        return HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(previewLabel)
+                    .font(.custom("Roboto-SemiBold", size: 16))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                HStack(spacing: 8) {
+                    Text(timeLabel)
+                        .font(.custom("Roboto-Regular", size: 13))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.ultraThinMaterial, in: Capsule())
+                    if let detail {
+                        Text(detail)
+                            .font(.custom("Roboto-Regular", size: 13))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
             Spacer()
             Button { addEvent() } label: {
                 Label("Add", systemImage: "plus.circle.fill")
                     .font(.custom("Roboto-SemiBold", size: 15))
-                    .disabled(!canAddEvent)
-
             }
             .buttonStyle(.borderedProminent)
+            .disabled(!canAddEvent)
         }
     }
     private var canAddEvent: Bool {
@@ -1906,49 +2144,70 @@ private struct EventsSection: View {
 
     
     @ViewBuilder private var eventList: some View {
-        // List (safe indices loop; no drag reorder)
-        VStack(spacing: 0) {
-                            ForEach(Array(sheet.events.indices), id: \.self) { i in
-                                let showMusical = (globalTiming == .musical) && i < origins.count && origins[i] == .musical && anchors.indices.contains(i) && anchors[i] != nil && !revealAbsolute.contains(i)
-                                
-                                // Build a semantic musical label if available (and not revealing abs)
-                                                let label: String = {
-                                                    if showMusical, !revealAbs.contains(i), let a = anchors[i] {
-                                                        if a.slotsPerBeat > 1 {
-                                                            return "Bar \(a.bar), Beat \(a.beat), Subdivision \(a.slot)/\(a.slotsPerBeat)"
-                                                        } else {
-                                                            return "Bar \(a.bar), Beat \(a.beat)"
-                                                        }
-                                                    } else {
-                                                        return String(format: "@ %.2f s", sheet.events[i].at)
-                                                    }
-                                                }()
-                                                EventRow(
-                                                    event: $sheet.events[i],
-                                                    timeLabel: label,
-                                                    onTapTime: { revealAbsFor(i) },
-                                                    onDelete: {
-                                                        sheet.events.remove(at: i)
-                                                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                                    }
-                                                )
+        LazyVStack(spacing: 12) {
+            if sheet.events.isEmpty {
+                emptyStateCard
+            } else {
+                ForEach(Array(sheet.events.indices), id: \.self) { i in
+                    let showMusical = (globalTiming == .musical) && i < origins.count && origins[i] == .musical && anchors.indices.contains(i) && anchors[i] != nil && !revealAbsolute.contains(i)
 
-                                Divider().opacity(0.1)
+                    let label: String = {
+                        if showMusical, !revealAbs.contains(i), let a = anchors[i] {
+                            if a.slotsPerBeat > 1 {
+                                return "Bar \(a.bar), Beat \(a.beat), Subdivision \(a.slot)/\(a.slotsPerBeat)"
+                            } else {
+                                return "Bar \(a.bar), Beat \(a.beat)"
                             }
+                        } else {
+                            return String(format: "@ %.2f s", sheet.events[i].at)
                         }
+                    }()
+                    EventRow(
+                        event: $sheet.events[i],
+                        timeLabel: label,
+                        onTapTime: { revealAbsFor(i) },
+                        onDelete: {
+                            sheet.events.remove(at: i)
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        }
+                    )
+                }
+            }
+        }
+    }
 
-
+    private var emptyStateCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("No events yet")
+                .font(.custom("Roboto-SemiBold", size: 16))
+            Text("Add your first event above to start building the cue sheet.")
+                .font(.custom("Roboto-Regular", size: 13))
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(glassCardBackground())
     }
 
 
     var body: some View {
-        ScrollView {
+        ZStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 14) {
-                timingSection
+                timingSummaryStrip
+                if showTimingDetails {
+                    timingSection
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
                 composerCard
-                eventList
+                Divider().opacity(0.08)
+                ScrollView {
+                    eventList
+                        .padding(.vertical, 4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: .infinity, alignment: .top)
             }
-            
+            .padding(.vertical, 10)
         }
         // Edit existing meter change as a sheet using the same fraction control
         .overlay {
@@ -2021,40 +2280,13 @@ private struct EventsSection: View {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 revealAbs.remove(i)
-            }
+        }
         }
 
     private func addEvent() {
         let at: Double = (globalTiming == .absolute) ? parseTime(timeText) : musicalToSecondsNew()
-        var e = CueSheet.Event(kind: kind, at: max(0, at), holdSeconds: nil, label: nil)
-        switch kind {
-        case .stop:
-            e.holdSeconds = max(0, hold)
-
-        case .message:
-            let t = messageDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-            e.payload = .message(.init(text: t, spans: []))
-
-        case .image:
-            guard let id = pickedImageAssetID else {
-#if DEBUG
-                assertionFailure("Attempted to add an image event without an assetID")
-#endif
-                return
-            }
-            let cap = pickedImageCaption.trimmingCharacters(in: .whitespacesAndNewlines)
-            let captionPayload: CueSheet.MessagePayload? = cap.isEmpty ? nil : .init(text: cap, spans: [])
-            e.payload = .image(.init(assetID: id, caption: captionPayload))
-            
-        case .cue:
-                    e.rehearsalMarkMode = rehearsalMarkMode == .off ? nil : rehearsalMarkMode
-
-
-        default:
-            break
-        }
-
-        if kind == .stop { e.holdSeconds = max(0, hold) }
+        guard var e = makeEventDraft(at: at, allowMissingImage: false) else { return }
+        applyAutoLabel(to: &e)
         sheet.events.append(e)
                 if globalTiming == .musical {
                     // Store exact position metadata for this musical-origin event
@@ -2079,6 +2311,80 @@ private struct EventsSection: View {
         }
 
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    private func makeEventDraft(at time: Double, allowMissingImage: Bool) -> CueSheet.Event? {
+        var e = CueSheet.Event(kind: kind, at: max(0, time), holdSeconds: nil, label: nil)
+        switch kind {
+        case .stop:
+            e.holdSeconds = max(0, hold)
+
+        case .message:
+            let t = messageDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+            e.payload = .message(.init(text: t, spans: []))
+
+        case .image:
+            guard let id = pickedImageAssetID else {
+#if DEBUG
+                if !allowMissingImage { assertionFailure("Attempted to add an image event without an assetID") }
+#endif
+                if allowMissingImage { break } else { return nil }
+            }
+            let cap = pickedImageCaption.trimmingCharacters(in: .whitespacesAndNewlines)
+            let captionPayload: CueSheet.MessagePayload? = cap.isEmpty ? nil : .init(text: cap, spans: [])
+            e.payload = .image(.init(assetID: id, caption: captionPayload))
+
+        case .cue:
+            e.rehearsalMarkMode = rehearsalMarkMode == .off ? nil : rehearsalMarkMode
+
+        default:
+            break
+        }
+
+        if e.kind == .stop { e.holdSeconds = max(0, hold) }
+        return e
+    }
+
+    private func applyAutoLabel(to event: inout CueSheet.Event) {
+        let existing = event.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard existing.isEmpty else { return }
+        event.label = autoLabel(for: event)
+    }
+
+    private func autoLabel(for event: CueSheet.Event) -> String {
+        defaultLabel(for: event)
+    }
+
+    private func composerPreviewEvent() -> CueSheet.Event? {
+        guard var e = makeEventDraft(at: previewSeconds(), allowMissingImage: true) else { return nil }
+        applyAutoLabel(to: &e)
+        return e
+    }
+
+    private func previewDetail(for event: CueSheet.Event?) -> String? {
+        guard let event else { return nil }
+        switch event.kind {
+        case .stop:
+            return "Hold \(event.holdSeconds ?? 0, specifier: "%.1f") s"
+        case .cue:
+            return event.rehearsalMarkMode == .auto ? "Rehearsal mark: Auto" : "Rehearsal mark: Off"
+        case .message:
+            if case .message(let payload) = event.payload {
+                let text = payload.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let preview = text.split(separator: "\n").first.map(String.init) ?? ""
+                if !preview.isEmpty { return preview }
+            }
+            return nil
+        case .image:
+            if case .image(let payload) = event.payload,
+               let caption = payload.caption?.text.trimmingCharacters(in: .whitespacesAndNewlines),
+               !caption.isEmpty {
+                return caption
+            }
+            return nil
+        default:
+            return nil
+        }
     }
 
     // conversions (simple; your Kalman/engine still reigns for runtime)
@@ -2375,64 +2681,190 @@ private struct EventRow: View {
 
 
     var body: some View {
-        HStack(spacing: 10) {
-            let symbol: String = {
-                switch event.kind {
-                case .cue:     return "bolt.fill"
-                case .stop:    return "hand.raised.fill"
-                case .restart: return "gobackward"
-                case .message: return "text.bubble"
-                case .image:   return "photo"
-                default:       return "questionmark"
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center) {
+                HStack(spacing: 10) {
+                    Image(systemName: iconName)
+                        .imageScale(.large)
+                        .frame(width: 32, height: 32)
+                        .background(.ultraThinMaterial, in: Circle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(kindTitle)
+                            .font(.custom("Roboto-SemiBold", size: 15))
+                        if let pill = metadataPill {
+                            Text(pill)
+                                .font(.custom("Roboto-Regular", size: 12))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(.ultraThinMaterial, in: Capsule())
+                        }
+                    }
                 }
-            }()
-            Image(systemName: symbol).frame(width: 22)
+                Spacer()
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.body.weight(.semibold))
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Delete event")
+            }
 
-            TextField("Label", text: Binding(
+            TextField(defaultLabel(for: event), text: Binding(
                 get: { event.label ?? "" },
                 set: { event.label = $0.isEmpty ? nil : $0 }
             ))
-            .font(.custom("Roboto-Regular", size: 16))
-            Spacer()
-            Text(timeLabel)
-                .font(.custom("Roboto-Regular", size: 14))
-                            .foregroundStyle(.secondary)
-                            .onTapGesture(perform: onTapTime)
+            .font(.custom("Roboto-SemiBold", size: 17))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-            if event.kind == .stop {
-                Text("hold \(event.holdSeconds ?? 0, specifier: "%.2f")s")
-                                    .font(.custom("Roboto-Regular", size: 14))
-                                    .foregroundStyle(.secondary)
-
-            }
-            if event.kind == .cue {
-                Menu {
-                    Button("Auto") { event.rehearsalMarkMode = .auto }
-                    Button("Off") { event.rehearsalMarkMode = nil }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: event.rehearsalMarkMode == .auto ? "a.circle.fill" : "a.circle")
-                        Text(event.rehearsalMarkMode == .auto ? "Mark Auto" : "Mark Off")
-                            .font(.custom("Roboto-Regular", size: 13))
-                    }
-                }
-                .menuStyle(.borderlessButton)
-            }
-            Button(role: .destructive, action: onDelete) {
-                            Image(systemName: "trash")
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Button(action: onTapTime) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "clock")
+                                .imageScale(.medium)
+                            Text(timeLabel)
+                                .font(.custom("Roboto-Regular", size: 14))
                         }
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel("Delete event")
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    Text("Tap for seconds")
+                        .font(.custom("Roboto-Regular", size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if event.kind == .cue {
+                    Menu {
+                        Button("Auto") { event.rehearsalMarkMode = .auto }
+                        Button("Off") { event.rehearsalMarkMode = nil }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: event.rehearsalMarkMode == .auto ? "a.circle.fill" : "a.circle")
+                            Text(event.rehearsalMarkMode == .auto ? "Mark Auto" : "Mark Off")
+                                .font(.custom("Roboto-Regular", size: 13))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                    }
+                    .menuStyle(.borderlessButton)
+                } else if event.kind == .stop {
+                    Text("Hold \(event.holdSeconds ?? 0, specifier: "%.2f") s")
+                        .font(.custom("Roboto-Regular", size: 13))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                }
+            }
 
-        }
-        .padding(.vertical, 8)
-        // Optional: long-press as a secondary affordance
-                .contextMenu {
-                    Button(role: .destructive, action: onDelete) {
-                        Label("Delete", systemImage: "trash")
+            if let detail = detailText {
+                Text(detail)
+                    .font(.custom("Roboto-Regular", size: 13))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            if let imagePreview = imagePreview {
+                HStack(alignment: .center, spacing: 10) {
+                    imagePreview
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 72, height: 72)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(Color.white.opacity(0.14), lineWidth: 0.8)
+                        )
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let caption = imageCaption, !caption.isEmpty {
+                            Text(caption)
+                                .font(.custom("Roboto-Regular", size: 13))
+                                .lineLimit(2)
+                        } else {
+                            Text("Image payload")
+                                .font(.custom("Roboto-Regular", size: 13))
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
+            }
+        }
+        .padding(12)
+        .background(glassCardBackground())
+        .contextMenu {
+            Button(role: .destructive, action: onDelete) {
+                Label("Delete", systemImage: "trash")
+            }
+        }
 
+    }
+
+    private var iconName: String {
+        switch event.kind {
+        case .cue:     return "bolt.fill"
+        case .stop:    return "hand.raised.fill"
+        case .restart: return "gobackward"
+        case .message: return "text.bubble"
+        case .image:   return "photo"
+        default:       return "questionmark"
+        }
+    }
+
+    private var kindTitle: String {
+        switch event.kind {
+        case .cue: return "Cue"
+        case .stop: return "Stop"
+        case .restart: return "Restart"
+        case .message: return "Message"
+        case .image: return "Image"
+        default: return "Event"
+        }
+    }
+
+    private var metadataPill: String? {
+        switch event.kind {
+        case .stop:
+            if let hold = event.holdSeconds { return String(format: "Hold %.1fs", hold) }
+            return nil
+        case .cue:
+            return event.rehearsalMarkMode == .auto ? "Mark Auto" : nil
+        default:
+            return nil
+        }
+    }
+
+    private var detailText: String? {
+        switch event.kind {
+        case .message:
+            if case .message(let payload) = event.payload {
+                let text = payload.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let firstLine = text.split(separator: "\n").first.map(String.init) ?? ""
+                return firstLine.isEmpty ? nil : firstLine
+            }
+            return nil
+        default:
+            return nil
+        }
+    }
+
+    private var imageCaption: String? {
+        if case .image(let payload) = event.payload {
+            return payload.caption?.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
+    }
+
+    private var imagePreview: Image? {
+        if case .image(let payload) = event.payload,
+           let data = CueLibraryStore.shared.assetData(id: payload.assetID),
+           let uiImage = UIImage(data: data) {
+            return Image(uiImage: uiImage)
+        }
+        return nil
     }
 }
 // MARK: - Fraction Meter Control (Num / Den)
