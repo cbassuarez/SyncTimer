@@ -309,28 +309,28 @@ private struct CueSheetsInsetPlateStyle: ButtonStyle {
         let pressed = configuration.isPressed
 
         // White plate (not gray/muddy), with a clear pressed delta.
-        let baseWhite     = Color.white.opacity(pressed ? 0.14 : 0.22)
-        let pressedDim    = Color.black.opacity(pressed ? 0.10 : 0.00)   // tiny “down” darken
+        let baseWhite     = Color.white.opacity(pressed ? 0.14 : 0.2)
+        let pressedDim    = Color.black.opacity(pressed ? 0.40 : 0.00)   // tiny “down” darken
         let keylineTop    = Color.white.opacity(pressed ? 0.28 : 0.42)
         let keylineBottom = Color.black.opacity(pressed ? 0.22 : 0.14)
 
         // Lift vs recess
-        let outerOpacity  = pressed ? 0.10 : 0.26
+        let outerOpacity  = pressed ? 0.10 : 0.36
         let outerRadius   = pressed ? 4.0  : 14.0
         let outerY        = pressed ? 1.5  : 9.0
 
-        let innerOpacity  = pressed ? 0.55 : 0.18
-        let innerLine     = pressed ? 2.0  : 1.0
+        let innerOpacity  = pressed ? 0.65 : 0.18
+        let innerLine     = pressed ? 2.2  : 1.0
         let innerBlur     = pressed ? 2.0  : 2.8
-        let innerOffset   = pressed ? 2.0  : 0.8
+        let innerOffset   = pressed ? 2.2  : 0.8
 
-        let sheenOpacity  = pressed ? 0.12 : 0.26
+        let sheenOpacity  = pressed ? 0.12 : 0.36
 
         return configuration.label
             .environment(\.cueSheetsIsPressed, pressed)
             // micro motion: “goes down”
-            .scaleEffect(pressed ? 0.985 : 1.0)
-            .offset(y: pressed ? 1.0 : 0.0)
+            .scaleEffect(pressed ? 0.85 : 1.0)
+            .offset(y: pressed ? 1.5 : 0.0)
 
             // 1) White base plate (silhouette guarantee)
             .background(baseWhite, in: shape)
@@ -430,7 +430,7 @@ private struct CueSheetsIcon: View {
             // keep gradients ON, but boost saturation/contrast to avoid washout on materials
             .foregroundStyle(
                 accent.opacity(isPressed ? 0.5 : 1.0).gradient,
-                Color.black.opacity(isPressed ? 0.25 : 0.45)
+                Color.black.opacity(isPressed ? 0.35 : 0.65)
             )
             .saturation(1.2)
             .contrast(1.1)
