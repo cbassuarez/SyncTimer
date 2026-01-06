@@ -2367,7 +2367,7 @@ private struct EventsSection: View {
     private var composerRehearsalMarkSection: some View {
         let isOn = rehearsalMarkMode == .auto
         return VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("Rehearsal Mark", "Toggle to include a letter marker on this cue.")
+            sectionHeader("Markings", "Toggle to include a letter marker on this cue.")
             Button {
                 withAnimation(.easeInOut(duration: 0.18)) {
                     rehearsalMarkMode = isOn ? .off : .auto
