@@ -125,6 +125,8 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+				JoinClip/SyncTimerJoinClipApp.swift,
+				JoinClip/JoinClipRootView.swift,
 			);
 			target = 96DB420C2DE84D160027E9AA /* SyncTimer */;
 		};
