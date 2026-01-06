@@ -10474,11 +10474,14 @@ if WCSession.isSupported() {
                     .preferredColorScheme(appSettings.appTheme == .dark ? .dark : .light)
                     .dynamicTypeSize(.small ... .large)
             // “Open in SyncTimer” from Files/Share Sheet (XML only)
-                                .onOpenURL { url in
+                    .onOpenURL { url in
                                     handleOpenURL(url)
                                 }
 
                 }
+#if targetEnvironment(macCatalyst)
+                .defaultSize(width: 1054, height: 790)
+#endif
         
       
        
