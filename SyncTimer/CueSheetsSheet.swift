@@ -553,15 +553,15 @@ private struct AbsoluteEntry: View {
                             .foregroundStyle(.secondary)
 
             HStack(spacing: 8) {
-                timeField(title: "MM", text: $minutes, max: 999)
+                timeField(title: "MM", text: $minutes, limit: 999)
                 Text(":")
                     .font(.custom("Roboto-Regular", size: 15))
                     .foregroundStyle(.secondary)
-                timeField(title: "SS", text: $seconds, max: 59, padTo: 2)
+                timeField(title: "SS", text: $seconds, limit: 59, padTo: 2)
                 Text(".")
                     .font(.custom("Roboto-Regular", size: 15))
                     .foregroundStyle(.secondary)
-                timeField(title: "cc", text: $centiseconds, max: 99, padTo: 2)
+                timeField(title: "cc", text: $centiseconds, limit: 99, padTo: 2)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -574,7 +574,7 @@ private struct AbsoluteEntry: View {
         }
     }
 
-    private func timeField(title: String, text: Binding<String>, max: Int, padTo: Int = 2) -> some View {
+    private func timeField(title: String, text: Binding<String>, limit: Int, padTo: Int = 2) -> some View {
         VStack(spacing: 4) {
             Text(title)
                 .font(.custom("Roboto-Regular", size: 11))
@@ -589,7 +589,7 @@ private struct AbsoluteEntry: View {
                 .onChange(of: text.wrappedValue) { newValue in
                     let digits = newValue.filter { $0.isNumber }
                     if let value = Int(digits) {
-                        let clamped = min(max(0, value), max)
+                        let clamped = min(max(0, value), limit)
                         let padded = String(format: "%0\(padTo)d", clamped)
                         if padded != text.wrappedValue { text.wrappedValue = padded }
                     } else {
@@ -2365,7 +2365,7 @@ private struct EventTypeChipRow: View {
         guard let event else { return nil }
         switch event.kind {
         case .stop:
-            return "Hold \(event.holdSeconds ?? 0, specifier: "%.1f") s"
+            return String(format: "Hold %.1f s", event.holdSeconds ?? 0)
         case .cue:
             return event.rehearsalMarkMode == .auto ? "Rehearsal mark: Auto" : "Rehearsal mark: Off"
         case .message:
