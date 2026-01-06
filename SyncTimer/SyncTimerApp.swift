@@ -10480,7 +10480,7 @@ if WCSession.isSupported() {
 
                 }
 #if targetEnvironment(macCatalyst)
-                .defaultSize(width: 1054, height: 790)
+                .defaultSize(width: 1380, height: 1050)
 #endif
         
       
