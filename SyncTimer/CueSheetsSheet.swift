@@ -540,95 +540,281 @@ private struct Wrap<Data: RandomAccessCollection, Content: View>: View where Dat
         .frame(minHeight: 0, idealHeight: 0)
     }
 }
-private struct AbsoluteEntry: View {
+private struct AbsoluteDurationChipsField: View {
     @Binding var timeText: String
-    @State private var minutes: String = ""
-    @State private var seconds: String = ""
-    @State private var centiseconds: String = ""
+
+    @Namespace private var underlineNS
+    @FocusState private var focusedComponent: Component?
+
+    @State private var hours: Int = 0
+    @State private var minutes: Int = 0
+    @State private var seconds: Int = 0
+    @State private var centiseconds: Int = 0
+    @State private var activeComponent: Component = .seconds
+    @State private var lastEditedComponent: Component = .seconds
+    @State private var hasError: Bool = false
+    @State private var hasUserInteracted: Bool = false
+    @State private var isWritingTimeText: Bool = false
+    @State private var lastDragTranslation: CGFloat = 0
+
+    private enum Component: Hashable {
+        case hours, minutes, seconds, centiseconds
+
+        var label: String {
+            switch self {
+            case .hours: return "H"
+            case .minutes: return "M"
+            case .seconds: return "S"
+            case .centiseconds: return "cs"
+            }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Time (HH:MM:SS.cc or MM:SS.cc)")
-                            .font(.custom("Roboto-Regular", size: 13))
-                            .foregroundStyle(.secondary)
+            Text("Time (HH:MM:SS.cc)")
+                .font(.custom("Roboto-Regular", size: 13))
+                .foregroundStyle(.secondary)
 
-            HStack(spacing: 8) {
-                timeField(title: "MM", text: $minutes, limit: 999)
-                Text(":")
-                    .font(.custom("Roboto-Regular", size: 15))
-                    .foregroundStyle(.secondary)
-                timeField(title: "SS", text: $seconds, limit: 59, padTo: 2)
-                Text(".")
-                    .font(.custom("Roboto-Regular", size: 15))
-                    .foregroundStyle(.secondary)
-                timeField(title: "cc", text: $centiseconds, limit: 99, padTo: 2)
+            HStack(spacing: 6) {
+                chip(for: .hours, value: hours)
+                separator(":")
+                chip(for: .minutes, value: minutes)
+                separator(":")
+                chip(for: .seconds, value: seconds)
+                separator(".")
+                chip(for: .centiseconds, value: centiseconds)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .onChange(of: minutes) { _ in updateTimeText() }
-            .onChange(of: seconds) { _ in updateTimeText() }
-            .onChange(of: centiseconds) { _ in updateTimeText() }
-            .onChange(of: timeText) { _ in syncFieldsFromTimeText() }
-            .onAppear { syncFieldsFromTimeText() }
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                activate(lastEditedComponent, focus: true)
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(hasError ? Color.red.opacity(0.4) : .clear, lineWidth: hasError ? 1.2 : 0)
+            )
+            .animation(.snappy(duration: 0.22), value: activeComponent)
+        }
+        .onAppear { syncFromTimeText(source: timeText) }
+        .onChange(of: timeText) { newValue in
+            guard !isWritingTimeText else { return }
+            syncFromTimeText(source: newValue)
         }
     }
 
-    private func timeField(title: String, text: Binding<String>, limit: Int, padTo: Int = 2) -> some View {
-        VStack(spacing: 4) {
-            Text(title)
+    // MARK: - Chips
+    private func chip(for component: Component, value: Int) -> some View {
+        let isActive = activeComponent == component
+        let isGhosted = component == .hours && value == 0
+        let inactiveOpacity = isActive ? 1 : 0.72
+        let ghostOpacity = isGhosted ? 0.55 : 1
+
+        return VStack(spacing: 6) {
+            Text(component.label)
                 .font(.custom("Roboto-Regular", size: 11))
                 .foregroundStyle(.secondary)
-            TextField("0", text: text)
-                .keyboardType(.numberPad)
-                .font(.custom("Roboto-Regular", size: 16)).monospacedDigit()
-                .multilineTextAlignment(.center)
-                .frame(minWidth: 40)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .onChange(of: text.wrappedValue) { newValue in
-                    let digits = newValue.filter { $0.isNumber }
-                    if let value = Int(digits) {
-                        let clamped = min(max(0, value), limit)
-                        let padded = String(format: "%0\(padTo)d", clamped)
-                        if padded != text.wrappedValue { text.wrappedValue = padded }
-                    } else {
-                        text.wrappedValue = ""
-                    }
+
+            ZStack(alignment: .bottom) {
+                Text(displayString(for: component))
+                    .font(.custom("Roboto-Regular", size: 19)).monospacedDigit()
+                    .foregroundStyle(.primary)
+                    .opacity(inactiveOpacity * ghostOpacity)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.bottom, 6)
+                    .contentShape(Rectangle())
+
+                if isActive {
+                    Rectangle()
+                        .fill(Color.accentColor)
+                        .frame(height: 2)
+                        .matchedGeometryEffect(id: "activeUnderline", in: underlineNS)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .offset(y: 1)
                 }
+
+                TextField("", text: binding(for: component))
+                    .keyboardType(.numberPad)
+                    .focused($focusedComponent, equals: component)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .opacity(0.01)
+                    .frame(width: 1, height: 1)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .cueGlassChrome(minHeight: 48)
+        .contentShape(Rectangle())
+        .onTapGesture { activate(component, focus: true) }
+        .simultaneousGesture(scrubGesture(for: component))
+    }
+
+    private func separator(_ symbol: String) -> some View {
+        Text(symbol)
+            .font(.custom("Roboto-Regular", size: 16)).monospacedDigit()
+            .foregroundStyle(.secondary)
+            .frame(minWidth: 6)
+    }
+
+    // MARK: - Interaction
+    private func activate(_ component: Component, focus: Bool = false) {
+        activeComponent = component
+        lastEditedComponent = component
+        if focus {
+            focusedComponent = component
         }
     }
 
-    private func syncFieldsFromTimeText() {
-        let clean = timeText.replacingOccurrences(of: ",", with: ".")
+    private func binding(for component: Component) -> Binding<String> {
+        Binding<String> {
+            displayString(for: component)
+        } set: { newValue in
+            let digits = newValue.filter(\.isNumber)
+            let value = Int(digits) ?? 0
+            update(component: component, to: value, userInitiated: true)
+        }
+    }
+
+    private func displayString(for component: Component) -> String {
+        switch component {
+        case .hours:
+            return String(format: "%02d", max(0, hours))
+        case .minutes:
+            return String(format: "%02d", max(0, minutes))
+        case .seconds:
+            return String(format: "%02d", max(0, seconds))
+        case .centiseconds:
+            return String(format: "%02d", max(0, centiseconds))
+        }
+    }
+
+    private func scrubGesture(for component: Component) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                let translation = value.translation.height
+                let delta = translation - lastDragTranslation
+                let unit: CGFloat = 6
+                guard abs(delta) >= unit else { return }
+                let steps = Int(delta / unit)
+                let direction = steps < 0 ? 1 : -1
+                let magnitude = stepMagnitude(for: translation)
+                let totalChange = magnitude * abs(steps) * direction
+                lastDragTranslation += CGFloat(steps) * unit
+                apply(delta: totalChange, to: component)
+            }
+            .onEnded { _ in
+                lastDragTranslation = 0
+            }
+    }
+
+    private func stepMagnitude(for translation: CGFloat) -> Int {
+        let distance = abs(translation)
+        if distance < 18 { return 1 }
+        if distance < 48 { return 5 }
+        return 10
+    }
+
+    private func apply(delta: Int, to component: Component) {
+        guard delta != 0 else { return }
+        switch component {
+        case .hours:
+            update(component: .hours, to: hours + delta, userInitiated: true)
+        case .minutes:
+            update(component: .minutes, to: minutes + delta, userInitiated: true)
+        case .seconds:
+            update(component: .seconds, to: seconds + delta, userInitiated: true)
+        case .centiseconds:
+            update(component: .centiseconds, to: centiseconds + delta, userInitiated: true)
+        }
+    }
+
+    private func update(component: Component, to newValue: Int, userInitiated: Bool) {
+        var h = hours
+        var m = minutes
+        var s = seconds
+        var c = centiseconds
+
+        switch component {
+        case .hours: h = newValue
+        case .minutes: m = newValue
+        case .seconds: s = newValue
+        case .centiseconds: c = newValue
+        }
+
+        let normalized = normalize(hours: h, minutes: m, seconds: s, centiseconds: c)
+        hours = normalized.hours
+        minutes = normalized.minutes
+        seconds = normalized.seconds
+        centiseconds = normalized.centiseconds
+        writeTimeText(normalized)
+
+        if userInitiated {
+            hasUserInteracted = true
+            hasError = false
+            activate(component)
+        }
+    }
+
+    // MARK: - Parsing + Normalization
+    private func syncFromTimeText(source: String) {
+        let clean = source.replacingOccurrences(of: ",", with: ".")
         let parts = clean.split(separator: ":")
+
+        var success = true
         var totalSeconds: Double = 0
+
         if parts.count == 1 {
-            totalSeconds = Double(clean) ?? 0
+            if let raw = Double(clean) { totalSeconds = raw } else { success = false }
         } else if parts.count == 2 {
-            let m = Double(parts[0]) ?? 0
-            let s = Double(parts[1]) ?? 0
-            totalSeconds = m * 60 + s
+            if let m = Double(parts[0]), let s = Double(parts[1]) {
+                totalSeconds = m * 60 + s
+            } else {
+                success = false
+            }
         } else if parts.count >= 3 {
-            let h = Double(parts[0]) ?? 0
-            let m = Double(parts[1]) ?? 0
-            let s = Double(parts[2]) ?? 0
-            totalSeconds = h * 3600 + m * 60 + s
+            if let h = Double(parts[0]), let m = Double(parts[1]), let s = Double(parts[2]) {
+                totalSeconds = h * 3600 + m * 60 + s
+            } else {
+                success = false
+            }
         }
-        let centiTotal = Int((totalSeconds * 100).rounded())
-        let mVal = centiTotal / 6000
-        let sVal = max(0, min(59, (centiTotal % 6000) / 100))
-        let cVal = max(0, min(99, centiTotal % 100))
-        minutes = String(format: "%02d", mVal)
-        seconds = String(format: "%02d", sVal)
-        centiseconds = String(format: "%02d", cVal)
+
+        let totalCentiseconds = success ? Int((totalSeconds * 100).rounded()) : 0
+        let normalized = normalize(totalCentiseconds: max(0, totalCentiseconds))
+
+        hours = normalized.hours
+        minutes = normalized.minutes
+        seconds = normalized.seconds
+        centiseconds = normalized.centiseconds
+
+        hasError = !success && !hasUserInteracted
+
+        if !success {
+            writeTimeText(normalized)
+        }
     }
 
-    private func updateTimeText() {
-        let mVal = Int(minutes) ?? 0
-        let sVal = min(max(Int(seconds) ?? 0, 0), 59)
-        let cVal = min(max(Int(centiseconds) ?? 0, 0), 99)
-        timeText = String(format: "%02d:%02d.%02d", mVal, sVal, cVal)
+    private func normalize(hours: Int, minutes: Int, seconds: Int, centiseconds: Int) -> (hours: Int, minutes: Int, seconds: Int, centiseconds: Int) {
+        let totalCentiseconds = max(0, (max(0, hours) * 3600 + max(0, minutes) * 60 + max(0, seconds)) * 100 + max(0, centiseconds))
+        return normalize(totalCentiseconds: totalCentiseconds)
+    }
+
+    private func normalize(totalCentiseconds: Int) -> (hours: Int, minutes: Int, seconds: Int, centiseconds: Int) {
+        let clamped = max(0, totalCentiseconds)
+        let hours = clamped / 360000
+        let minutes = (clamped % 360000) / 6000
+        let seconds = (clamped % 6000) / 100
+        let centiseconds = clamped % 100
+        return (hours, minutes, seconds, centiseconds)
+    }
+
+    private func writeTimeText(_ components: (hours: Int, minutes: Int, seconds: Int, centiseconds: Int)) {
+        let totalMinutes = components.hours * 60 + components.minutes
+        let newValue = String(format: "%02d:%02d.%02d", totalMinutes, components.seconds, components.centiseconds)
+        guard newValue != timeText else { return }
+        isWritingTimeText = true
+        timeText = newValue
+        DispatchQueue.main.async { isWritingTimeText = false }
     }
 }
 
@@ -2095,7 +2281,7 @@ private struct EventsSection: View {
         VStack(alignment: .leading, spacing: 8) {
             let desc = (globalTiming == .musical)
             ? "Pick bar • beat • subdivision; tempo/meter will resolve the time."
-            : "Enter absolute time (MM:SS.cc). This never changes."
+            : "Enter absolute time (HH:MM:SS.cc). This never changes."
             sectionHeader("Time Entry", desc)
 
             if globalTiming == .musical {
@@ -2109,7 +2295,7 @@ private struct EventsSection: View {
                 )
                 .padding(.top, 6)
             } else {
-                AbsoluteEntry(timeText: $timeText)
+                AbsoluteDurationChipsField(timeText: $timeText)
             }
         }
     }
