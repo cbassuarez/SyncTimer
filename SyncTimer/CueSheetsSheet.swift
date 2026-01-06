@@ -1248,6 +1248,99 @@ private func glassToggleBackground(radius: CGFloat) -> some View {
     )
 }
 
+// Glass-styled two-option toggle (matches Notes Edit/Preview)
+fileprivate struct GlassTwoOptionTabs<Selection: Hashable>: View {
+    struct Option {
+        let value: Selection
+        let title: String
+        let systemImage: String
+    }
+
+    @Binding var selection: Selection
+    let options: (Option, Option)
+    let flashAccent: Color
+
+    @Namespace private var ns
+
+    var body: some View {
+        let radius: CGFloat = 12
+        return HStack(spacing: 6) {
+            tabButton(options.0, containerRadius: radius)
+            tabButton(options.1, containerRadius: radius)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 8)
+        .frame(height: 42)
+        .background(glassToggleBackground(radius: radius))
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .frame(minHeight: 32)
+    }
+
+    private func tabButton(_ option: Option, containerRadius: CGFloat) -> some View {
+        let isSelected = selection == option.value
+
+        return Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                selection = option.value
+            }
+        } label: {
+            ZStack {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: containerRadius - 3, style: .continuous)
+                        .fill(Color.primary.opacity(0.1))
+                        .matchedGeometryEffect(id: "pill", in: ns)
+                }
+                Label {
+                    Text(option.title)
+                        .font(.custom("Roboto-SemiBold", size: 13))
+                        .foregroundStyle(isSelected ? .primary : .secondary)
+                } icon: {
+                    Image(systemName: option.systemImage)
+                        .font(.system(size: 13, weight: .semibold))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(
+                            isSelected ? flashAccent : flashAccent.opacity(0.55),
+                            isSelected ? flashAccent.opacity(0.35) : flashAccent.opacity(0.18)
+                        )
+                        .contentTransition(.symbolEffect(.replace))
+                }
+                .labelStyle(.titleAndIcon)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 6)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+fileprivate struct GlassCheckCircle: View {
+    let isOn: Bool
+    let flashAccent: Color
+
+    var body: some View {
+        let shape = Circle()
+        return ZStack {
+            shape
+                .fill(.ultraThinMaterial)
+                .cueGlassIfAvailable()
+                .overlay(shape.stroke(Color.white.opacity(0.16), lineWidth: 0.6))
+            Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 17, weight: .semibold))
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(
+                    isOn ? flashAccent : Color.primary.opacity(0.60),
+                    isOn ? flashAccent.opacity(0.35) : Color.primary.opacity(0.22)
+                )
+                .overlay {
+                    if isOn {
+                        shape.stroke(flashAccent.opacity(0.14), lineWidth: 1)
+                    }
+                }
+        }
+        .frame(width: 30, height: 30)
+    }
+}
+
 private struct CueSheetNotesCard: View {
     @Binding var notes: String?
     let modified: Date
@@ -1728,6 +1821,7 @@ private func defaultLabel(for event: CueSheet.Event) -> String {
     }
 }
 private struct EventsSection: View {
+    @EnvironmentObject private var appSettings: AppSettings
     @State private var messageDraft: String = ""
 
     @State private var pickedImageItem: PhotosPickerItem? = nil
@@ -1808,11 +1902,14 @@ private struct EventsSection: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Timing").font(.custom("Roboto-SemiBold", size: 17))
             // Global timing selector
-            Picker("", selection: $globalTiming) {
-                Text("Absolute time").tag(EntryMode.absolute)
-                Text("Metered").tag(EntryMode.musical)
-            }
-            .pickerStyle(.segmented)
+            GlassTwoOptionTabs(
+                selection: $globalTiming,
+                options: (
+                    .init(value: .absolute, title: "Absolute", systemImage: "clock"),
+                    .init(value: .musical, title: "Metered", systemImage: "metronome.fill")
+                ),
+                flashAccent: flashColor
+            )
 
             // —— Global (only when Metered) ———————————————
             if globalTiming == .musical {
@@ -2268,15 +2365,33 @@ private struct EventsSection: View {
         }
     }
     private var composerRehearsalMarkSection: some View {
-            VStack(alignment: .leading, spacing: 6) {
-                sectionHeader("Rehearsal Mark", "Choose whether this cue shows a rehearsal mark.")
-                Picker("", selection: $rehearsalMarkMode) {
-                    Text("No").tag(CueSheet.RehearsalMarkMode.off)
-                    Text("Yes").tag(CueSheet.RehearsalMarkMode.auto)
+        let isOn = rehearsalMarkMode == .auto
+        return VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("Rehearsal Mark", "Toggle to include a letter marker on this cue.")
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    rehearsalMarkMode = isOn ? .off : .auto
                 }
-                .pickerStyle(.segmented)
+            } label: {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Rehearsal Mark")
+                            .font(.custom("Roboto-SemiBold", size: 15))
+                        Text("Show rehearsal letter on the timer card.")
+                            .font(.custom("Roboto-Regular", size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    GlassCheckCircle(isOn: isOn, flashAccent: flashColor)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.primary.opacity(0.1), lineWidth: 1))
             }
+            .buttonStyle(.plain)
         }
+    }
     private var composerTimeEntrySection: some View {
         VStack(alignment: .leading, spacing: 8) {
             let desc = (globalTiming == .musical)
@@ -2450,6 +2565,10 @@ private struct EventTypeChipRow: View {
         default:
             return true
         }
+    }
+
+    private var flashColor: Color {
+        appSettings.flashColor
     }
 
     @ViewBuilder private func sectionHeader(_ title: String, _ subtitle: String) -> some View {
