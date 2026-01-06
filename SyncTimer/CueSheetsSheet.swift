@@ -1077,7 +1077,7 @@ private struct CueEditorTabBar: View {
 // MARK: - Glass helper (real .glassEffect, safely gated at runtime)
 private extension View {
     @ViewBuilder func cueGlassIfAvailable() -> some View {
-        if #available(iOS 18.0, macOS 15.0, *) {
+        if #available(iOS 26.0, macOS 15.0, *) {
             self.glassEffect()
         } else {
             self
@@ -1164,7 +1164,6 @@ private func glassCardBackground() -> some View {
             shape
                 .fill(.clear)
                 .containerShape(shape)
-                .glassEffect()
                 .clipShape(shape)
         } else {
             shape
@@ -1191,7 +1190,6 @@ private func cueGlassBackground(shape: RoundedRectangle) -> some View {
             shape
                 .fill(.clear)
                 .containerShape(shape)
-                .glassEffect()
                 .clipShape(shape)
         } else {
             shape
@@ -1233,7 +1231,6 @@ private func glassToggleBackground(radius: CGFloat) -> some View {
             shape
                 .fill(.clear)
                 .containerShape(shape)
-                .glassEffect()
                 .clipShape(shape)
         } else {
             shape

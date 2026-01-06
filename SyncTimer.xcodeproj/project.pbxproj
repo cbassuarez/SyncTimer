@@ -10,7 +10,7 @@
 		961396C22E0D503800B847F3 /* StopEventWire.swift in Sources */ = {isa = PBXBuildFile; fileRef = 961396B22E0D503800B847F3 /* StopEventWire.swift */; };
 		961396D22E0D503800B847F3 /* StopEventWire.swift in Resources */ = {isa = PBXBuildFile; fileRef = 961396B22E0D503800B847F3 /* StopEventWire.swift */; };
 		9636A7392E79193100A062B6 /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9640DBA32DF695F0002688A4 /* WatchConnectivity.framework */; };
-		9636A7622E791DBD00A062B6 /* SyncTimerWatch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 9636A7422E791DBB00A062B6 /* SyncTimerWatch Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		9636A7622E791DBD00A062B6 /* SyncTimerWatch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 9636A7422E791DBB00A062B6 /* SyncTimerWatch Watch App.app */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		968E1B0C2E79357500F79392 /* StopEventWire.swift in Sources */ = {isa = PBXBuildFile; fileRef = 961396B22E0D503800B847F3 /* StopEventWire.swift */; };
 		968E1B102E79389800F79392 /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9640DBA32DF695F0002688A4 /* WatchConnectivity.framework */; };
 		96DF202A2E79311700FFB580 /* TimerMessage+Wire.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96DF20292E79311700FFB580 /* TimerMessage+Wire.swift */; };
@@ -83,7 +83,6 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		9600A59F2FF1E6E100AA0F8B /* GhostMarkdownEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhostMarkdownEditor.swift; sourceTree = "<group>"; };
 		961396B22E0D503800B847F3 /* StopEventWire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StopEventWire.swift; sourceTree = "<group>"; };
 		9636A7422E791DBB00A062B6 /* SyncTimerWatch Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "SyncTimerWatch Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		9636A74E2E791DBD00A062B6 /* SyncTimerWatch Watch AppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "SyncTimerWatch Watch AppTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -557,7 +556,6 @@
 				96DF202A2E79311700FFB580 /* TimerMessage+Wire.swift in Sources */,
 				96F296442E793F130039B071 /* ConnectivityManager.swift in Sources */,
 				96F296452E793F130039B071 /* ControlRequest.swift in Sources */,
-				9600A5A02FF1E6E100AA0F8B /* GhostMarkdownEditor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -590,6 +588,7 @@
 		};
 		9636A7612E791DBD00A062B6 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
+			platformFilter = ios;
 			target = 9636A7412E791DBB00A062B6 /* SyncTimerWatch Watch App */;
 			targetProxy = 9636A7602E791DBD00A062B6 /* PBXContainerItemProxy */;
 		};
@@ -918,9 +917,8 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_UISupportsDocumentBrowser = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				"IPHONEOS_DEPLOYMENT_TARGET[sdk=iphoneos*]" = 26.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				"IPHONEOS_DEPLOYMENT_TARGET[sdk=iphoneos*]" = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = $inhereted;
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
@@ -928,13 +926,14 @@
 					"$(SRCROOT)",
 					"$(PROJECT_DIR)",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 0.9;
 				OTHER_LDFLAGS = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.StageDevices.SyncTimer;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SKIP_INSTALL = NO;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = YES;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
@@ -983,7 +982,6 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_UISupportsDocumentBrowser = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				"IPHONEOS_DEPLOYMENT_TARGET[sdk=iphoneos*]" = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = $inhereted;
 				LIBRARY_SEARCH_PATHS = (
@@ -992,6 +990,7 @@
 					"$(SRCROOT)",
 					"$(PROJECT_DIR)",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 0.9;
 				ONLY_ACTIVE_ARCH = NO;
 				OTHER_LDFLAGS = "";
@@ -999,7 +998,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SKIP_INSTALL = NO;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = YES;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
