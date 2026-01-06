@@ -15,6 +15,7 @@
 		968E1B102E79389800F79392 /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9640DBA32DF695F0002688A4 /* WatchConnectivity.framework */; };
 		96DF202A2E79311700FFB580 /* TimerMessage+Wire.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96DF20292E79311700FFB580 /* TimerMessage+Wire.swift */; };
 		96DF202B2E79312800FFB580 /* TimerMessage+Wire.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96DF20292E79311700FFB580 /* TimerMessage+Wire.swift */; };
+		96E956722F0DD038009EFC34 /* SyncTimer - Join A Room.app in Embed App Clips */ = {isa = PBXBuildFile; fileRef = 96E9564B2F0DD037009EFC34 /* SyncTimer - Join A Room.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		96F296442E793F130039B071 /* ConnectivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96F296122E793F130039B071 /* ConnectivityManager.swift */; };
 		96F296452E793F130039B071 /* ControlRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96F296132E793F130039B071 /* ControlRequest.swift */; };
 		96F2965D2E793F130039B071 /* ConnectivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96F296122E793F130039B071 /* ConnectivityManager.swift */; };
@@ -57,6 +58,27 @@
 			remoteGlobalIDString = 96DB420C2DE84D160027E9AA;
 			remoteInfo = SyncTimer;
 		};
+		96E9565F2F0DD038009EFC34 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 96DB42052DE84D160027E9AA /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 96E9564A2F0DD037009EFC34;
+			remoteInfo = "SyncTimer - Join A Room";
+		};
+		96E956692F0DD038009EFC34 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 96DB42052DE84D160027E9AA /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 96E9564A2F0DD037009EFC34;
+			remoteInfo = "SyncTimer - Join A Room";
+		};
+		96E956702F0DD038009EFC34 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 96DB42052DE84D160027E9AA /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 96E9564A2F0DD037009EFC34;
+			remoteInfo = "SyncTimer - Join A Room";
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -80,6 +102,17 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		96E956732F0DD038009EFC34 /* Embed App Clips */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/AppClips";
+			dstSubfolderSpec = 16;
+			files = (
+				96E956722F0DD038009EFC34 /* SyncTimer - Join A Room.app in Embed App Clips */,
+			);
+			name = "Embed App Clips";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -93,6 +126,9 @@
 		96DB421D2DE84D190027E9AA /* SyncTimerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SyncTimerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		96DB42272DE84D190027E9AA /* SyncTimerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SyncTimerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		96DF20292E79311700FFB580 /* TimerMessage+Wire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TimerMessage+Wire.swift"; sourceTree = "<group>"; };
+		96E9564B2F0DD037009EFC34 /* SyncTimer - Join A Room.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "SyncTimer - Join A Room.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		96E9565E2F0DD038009EFC34 /* SyncTimer - Join A RoomTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "SyncTimer - Join A RoomTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		96E956682F0DD038009EFC34 /* SyncTimer - Join A RoomUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "SyncTimer - Join A RoomUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		96F296122E793F130039B071 /* ConnectivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectivityManager.swift; sourceTree = "<group>"; };
 		96F296132E793F130039B071 /* ControlRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlRequest.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -121,12 +157,19 @@
 			);
 			target = 9636A7412E791DBB00A062B6 /* SyncTimerWatch Watch App */;
 		};
+		96E9567B2F0DD038009EFC34 /* Exceptions for "SyncTimer - Join A Room" folder in "SyncTimer - Join A Room" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 96E9564A2F0DD037009EFC34 /* SyncTimer - Join A Room */;
+		};
 		96F6611B2E0D304B00F78CC3 /* Exceptions for "SyncTimer" folder in "SyncTimer" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
-				JoinClip/SyncTimerJoinClipApp.swift,
 				JoinClip/JoinClipRootView.swift,
+				JoinClip/SyncTimerJoinClipApp.swift,
 			);
 			target = 96DB420C2DE84D160027E9AA /* SyncTimer */;
 		};
@@ -176,6 +219,24 @@
 			path = SyncTimerUITests;
 			sourceTree = "<group>";
 		};
+		96E9564C2F0DD037009EFC34 /* SyncTimer - Join A Room */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				96E9567B2F0DD038009EFC34 /* Exceptions for "SyncTimer - Join A Room" folder in "SyncTimer - Join A Room" target */,
+			);
+			path = "SyncTimer - Join A Room";
+			sourceTree = "<group>";
+		};
+		96E956612F0DD038009EFC34 /* SyncTimer - Join A RoomTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "SyncTimer - Join A RoomTests";
+			sourceTree = "<group>";
+		};
+		96E9566B2F0DD038009EFC34 /* SyncTimer - Join A RoomUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "SyncTimer - Join A RoomUITests";
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -223,6 +284,27 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		96E956482F0DD037009EFC34 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		96E9565B2F0DD038009EFC34 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		96E956652F0DD038009EFC34 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -246,6 +328,9 @@
 				9636A7432E791DBB00A062B6 /* SyncTimerWatch Watch App */,
 				9636A7512E791DBD00A062B6 /* SyncTimerWatch Watch AppTests */,
 				9636A75B2E791DBD00A062B6 /* SyncTimerWatch Watch AppUITests */,
+				96E9564C2F0DD037009EFC34 /* SyncTimer - Join A Room */,
+				96E956612F0DD038009EFC34 /* SyncTimer - Join A RoomTests */,
+				96E9566B2F0DD038009EFC34 /* SyncTimer - Join A RoomUITests */,
 				96E33BE82DEBEB6600244D10 /* Frameworks */,
 				96DB420E2DE84D160027E9AA /* Products */,
 				966A133E2DF6F11500C2ADF2 /* Shared */,
@@ -263,6 +348,9 @@
 				9636A7422E791DBB00A062B6 /* SyncTimerWatch Watch App.app */,
 				9636A74E2E791DBD00A062B6 /* SyncTimerWatch Watch AppTests.xctest */,
 				9636A7582E791DBD00A062B6 /* SyncTimerWatch Watch AppUITests.xctest */,
+				96E9564B2F0DD037009EFC34 /* SyncTimer - Join A Room.app */,
+				96E9565E2F0DD038009EFC34 /* SyncTimer - Join A RoomTests.xctest */,
+				96E956682F0DD038009EFC34 /* SyncTimer - Join A RoomUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -355,11 +443,13 @@
 				96DB420B2DE84D160027E9AA /* Resources */,
 				9633A7042DF6CCFD00875623 /* CopyFiles */,
 				962A5F1B2E0D53AE005A36E9 /* Embed Watch Content */,
+				96E956732F0DD038009EFC34 /* Embed App Clips */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				9636A7612E791DBD00A062B6 /* PBXTargetDependency */,
+				96E956712F0DD038009EFC34 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				968E1B082E79328D00F79392 /* Watch */,
@@ -418,6 +508,74 @@
 			productReference = 96DB42272DE84D190027E9AA /* SyncTimerUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		96E9564A2F0DD037009EFC34 /* SyncTimer - Join A Room */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 96E9567A2F0DD038009EFC34 /* Build configuration list for PBXNativeTarget "SyncTimer - Join A Room" */;
+			buildPhases = (
+				96E956472F0DD037009EFC34 /* Sources */,
+				96E956482F0DD037009EFC34 /* Frameworks */,
+				96E956492F0DD037009EFC34 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				96E9564C2F0DD037009EFC34 /* SyncTimer - Join A Room */,
+			);
+			name = "SyncTimer - Join A Room";
+			packageProductDependencies = (
+			);
+			productName = "SyncTimer - Join A Room";
+			productReference = 96E9564B2F0DD037009EFC34 /* SyncTimer - Join A Room.app */;
+			productType = "com.apple.product-type.application.on-demand-install-capable";
+		};
+		96E9565D2F0DD038009EFC34 /* SyncTimer - Join A RoomTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 96E9567C2F0DD038009EFC34 /* Build configuration list for PBXNativeTarget "SyncTimer - Join A RoomTests" */;
+			buildPhases = (
+				96E9565A2F0DD038009EFC34 /* Sources */,
+				96E9565B2F0DD038009EFC34 /* Frameworks */,
+				96E9565C2F0DD038009EFC34 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				96E956602F0DD038009EFC34 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				96E956612F0DD038009EFC34 /* SyncTimer - Join A RoomTests */,
+			);
+			name = "SyncTimer - Join A RoomTests";
+			packageProductDependencies = (
+			);
+			productName = "SyncTimer - Join A RoomTests";
+			productReference = 96E9565E2F0DD038009EFC34 /* SyncTimer - Join A RoomTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		96E956672F0DD038009EFC34 /* SyncTimer - Join A RoomUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 96E9567D2F0DD038009EFC34 /* Build configuration list for PBXNativeTarget "SyncTimer - Join A RoomUITests" */;
+			buildPhases = (
+				96E956642F0DD038009EFC34 /* Sources */,
+				96E956652F0DD038009EFC34 /* Frameworks */,
+				96E956662F0DD038009EFC34 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				96E9566A2F0DD038009EFC34 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				96E9566B2F0DD038009EFC34 /* SyncTimer - Join A RoomUITests */,
+			);
+			name = "SyncTimer - Join A RoomUITests";
+			packageProductDependencies = (
+			);
+			productName = "SyncTimer - Join A RoomUITests";
+			productReference = 96E956682F0DD038009EFC34 /* SyncTimer - Join A RoomUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -450,6 +608,17 @@
 						CreatedOnToolsVersion = 16.2;
 						TestTargetID = 96DB420C2DE84D160027E9AA;
 					};
+					96E9564A2F0DD037009EFC34 = {
+						CreatedOnToolsVersion = 26.0.1;
+					};
+					96E9565D2F0DD038009EFC34 = {
+						CreatedOnToolsVersion = 26.0.1;
+						TestTargetID = 96E9564A2F0DD037009EFC34;
+					};
+					96E956672F0DD038009EFC34 = {
+						CreatedOnToolsVersion = 26.0.1;
+						TestTargetID = 96E9564A2F0DD037009EFC34;
+					};
 				};
 			};
 			buildConfigurationList = 96DB42082DE84D160027E9AA /* Build configuration list for PBXProject "SyncTimer" */;
@@ -474,6 +643,9 @@
 				9636A7412E791DBB00A062B6 /* SyncTimerWatch Watch App */,
 				9636A74D2E791DBD00A062B6 /* SyncTimerWatch Watch AppTests */,
 				9636A7572E791DBD00A062B6 /* SyncTimerWatch Watch AppUITests */,
+				96E9564A2F0DD037009EFC34 /* SyncTimer - Join A Room */,
+				96E9565D2F0DD038009EFC34 /* SyncTimer - Join A RoomTests */,
+				96E956672F0DD038009EFC34 /* SyncTimer - Join A RoomUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -516,6 +688,27 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		96DB42252DE84D190027E9AA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		96E956492F0DD037009EFC34 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		96E9565C2F0DD038009EFC34 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		96E956662F0DD038009EFC34 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -575,6 +768,27 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		96E956472F0DD037009EFC34 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		96E9565A2F0DD038009EFC34 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		96E956642F0DD038009EFC34 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -603,6 +817,21 @@
 			isa = PBXTargetDependency;
 			target = 96DB420C2DE84D160027E9AA /* SyncTimer */;
 			targetProxy = 96DB42282DE84D190027E9AA /* PBXContainerItemProxy */;
+		};
+		96E956602F0DD038009EFC34 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 96E9564A2F0DD037009EFC34 /* SyncTimer - Join A Room */;
+			targetProxy = 96E9565F2F0DD038009EFC34 /* PBXContainerItemProxy */;
+		};
+		96E9566A2F0DD038009EFC34 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 96E9564A2F0DD037009EFC34 /* SyncTimer - Join A Room */;
+			targetProxy = 96E956692F0DD038009EFC34 /* PBXContainerItemProxy */;
+		};
+		96E956712F0DD038009EFC34 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 96E9564A2F0DD037009EFC34 /* SyncTimer - Join A Room */;
+			targetProxy = 96E956702F0DD038009EFC34 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -1087,6 +1316,166 @@
 			};
 			name = Release;
 		};
+		96E956742F0DD038009EFC34 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "SyncTimer - Join A Room/SyncTimer___Join_A_Room.entitlements";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S74572Q65M;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "SyncTimer - Join A Room/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = SyncTimer;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.StageDevices.SyncTimer.Clip;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		96E956752F0DD038009EFC34 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "SyncTimer - Join A Room/SyncTimer___Join_A_Room.entitlements";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S74572Q65M;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "SyncTimer - Join A Room/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = SyncTimer;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.StageDevices.SyncTimer.Clip;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		96E956762F0DD038009EFC34 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S74572Q65M;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.StageDevices.SyncTimer.SyncTimer---Join-A-RoomTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SyncTimer - Join A Room.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SyncTimer - Join A Room";
+			};
+			name = Debug;
+		};
+		96E956772F0DD038009EFC34 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S74572Q65M;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.StageDevices.SyncTimer.SyncTimer---Join-A-RoomTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SyncTimer - Join A Room.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SyncTimer - Join A Room";
+			};
+			name = Release;
+		};
+		96E956782F0DD038009EFC34 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S74572Q65M;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.StageDevices.SyncTimer.SyncTimer---Join-A-RoomUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "SyncTimer - Join A Room";
+			};
+			name = Debug;
+		};
+		96E956792F0DD038009EFC34 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S74572Q65M;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.StageDevices.SyncTimer.SyncTimer---Join-A-RoomUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "SyncTimer - Join A Room";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1149,6 +1538,33 @@
 			buildConfigurations = (
 				96DB42382DE84D190027E9AA /* Debug */,
 				96DB42392DE84D190027E9AA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		96E9567A2F0DD038009EFC34 /* Build configuration list for PBXNativeTarget "SyncTimer - Join A Room" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				96E956742F0DD038009EFC34 /* Debug */,
+				96E956752F0DD038009EFC34 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		96E9567C2F0DD038009EFC34 /* Build configuration list for PBXNativeTarget "SyncTimer - Join A RoomTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				96E956762F0DD038009EFC34 /* Debug */,
+				96E956772F0DD038009EFC34 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		96E9567D2F0DD038009EFC34 /* Build configuration list for PBXNativeTarget "SyncTimer - Join A RoomUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				96E956782F0DD038009EFC34 /* Debug */,
+				96E956792F0DD038009EFC34 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
