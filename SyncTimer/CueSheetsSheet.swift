@@ -668,7 +668,7 @@ private struct CueSheetEditorSheet: View {
                                 onSave(sheet)
                                 isDirty = false
                             } label: { Text("Save").font(.custom("Roboto-SemiBold", size: 16)) }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(CueGlassActionButtonStyle())
                         }
                         .padding(.horizontal, 16)
                         .padding(.top, 18)     // moved down by 8pt
@@ -932,7 +932,7 @@ private struct DetailsSection: View {
                 )
             }
             .padding(.vertical, 6)
-            .padding(.bottom, 12)
+            .safeAreaPadding(.bottom, 12)
         }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
@@ -982,6 +982,36 @@ private func glassCardBackground() -> some View {
         RoundedRectangle(cornerRadius: radius, style: .continuous)
             .stroke(Color.primary.opacity(0.12), lineWidth: 1.1)
     )
+}
+
+private struct CueGlassActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        return configuration.label
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(minHeight: 36)
+            .background {
+                if #available(iOS 26.0, macOS 15.0, *) {
+                    shape
+                        .fill(.clear)
+                        .glassEffect(.regular, in: shape)
+                } else if #available(iOS 18.0, macOS 15.0, *) {
+                    shape
+                        .fill(.clear)
+                        .containerShape(shape)
+                        .glassEffect()
+                        .clipShape(shape)
+                } else {
+                    shape
+                        .fill(.thinMaterial)
+                }
+            }
+            .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 0.7))
+            .overlay(shape.stroke(Color.primary.opacity(0.12), lineWidth: 1))
+            .opacity(configuration.isPressed ? 0.92 : 1)
+            .contentShape(shape)
+    }
 }
 
 private func glassToggleBackground(radius: CGFloat) -> some View {
@@ -1404,7 +1434,7 @@ private struct TagEditor: View {
                     Label("Add", systemImage: "plus.circle.fill")
                         .font(.custom("Roboto-SemiBold", size: 15))
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(CueGlassActionButtonStyle())
             }
             .padding(.horizontal, 10).padding(.vertical, 8)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -1501,6 +1531,7 @@ private struct EventsSection: View {
     enum EntryMode { case musical, absolute }
         // Global timing selector (drives all sub-sections)
         @State private var globalTiming: EntryMode = .absolute
+    @Namespace private var eventTypeAuxNamespace
 
     @State private var kind: CueSheet.Event.Kind = .cue
         @State private var cueColorIndex: Int = 0
@@ -1940,19 +1971,32 @@ private struct EventsSection: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader("Event Type", "Pick what fires. Hold applies to Stop; rehearsal marks to Cue.")
             EventTypeChipRow(selection: $kind)
-
-
-            if kind == .stop {
-                Stepper(value: $hold, in: 0...30, step: 0.1) {
-                    Text("Hold \(hold, specifier: "%.2f") s")
-                        .font(.custom("Roboto-Regular", size: 15))
+            ZStack(alignment: .topLeading) {
+                if kind == .stop {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Stepper(value: $hold, in: 0...30, step: 0.1) {
+                            Text("Hold \(hold, specifier: "%.2f") s")
+                                .font(.custom("Roboto-Regular", size: 15))
+                        }
+                    }
+                    .matchedGeometryEffect(id: "eventTypeAux", in: eventTypeAuxNamespace)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                } else if kind == .cue {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Hold controls message/image only; rehearsal marks auto-clear via defaults.")
+                            .font(.custom("Roboto-Regular", size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                    .matchedGeometryEffect(id: "eventTypeAux", in: eventTypeAuxNamespace)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                } else {
+                    Color.clear
+                        .frame(height: 0)
+                        .matchedGeometryEffect(id: "eventTypeAux", in: eventTypeAuxNamespace)
                 }
-            } else if kind == .cue {
-                            Text("Hold controls message/image only; rehearsal marks auto-clear via defaults.")
-                                .font(.custom("Roboto-Regular", size: 12))
-                                .foregroundStyle(.secondary)
             }
         }
+        .animation(.snappy(duration: 0.25), value: kind)
     }
     private var composerFlashColorSection: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -2051,8 +2095,8 @@ private struct EventTypeChipRow: View {
     }
 
     private let items: [Item] = [
-        .init(kind: .cue, title: "Cue", icon: "bolt.fill"),
         .init(kind: .stop, title: "Stop", icon: "hand.raised.fill"),
+        .init(kind: .cue, title: "Cue", icon: "bolt.fill"),
         .init(kind: .restart, title: "Restart", icon: "gobackward"),
         .init(kind: .message, title: "Message", icon: "text.bubble"),
         .init(kind: .image, title: "Image", icon: "photo")
@@ -2122,7 +2166,7 @@ private struct EventTypeChipRow: View {
                 Label("Add", systemImage: "plus.circle.fill")
                     .font(.custom("Roboto-SemiBold", size: 15))
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(CueGlassActionButtonStyle())
             .disabled(!canAddEvent)
         }
     }
@@ -2215,7 +2259,7 @@ private struct EventTypeChipRow: View {
                 .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 18) } // Extra scrollable inset to lift the last card above the rounded sheet mask.
                 .scrollDismissesKeyboard(.interactively)
             }
-            .padding(.vertical, 10)
+            .padding(.top, 10)
         }
         // Edit existing meter change as a sheet using the same fraction control
         .overlay {
