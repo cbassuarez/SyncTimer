@@ -695,7 +695,6 @@ private struct CueSheetEditorSheet: View {
             .onChange(of: sheet) { _ in isDirty = true }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .padding(.horizontal, 16)
-            .padding(.bottom, 12)
         }
     }
 }
@@ -2198,9 +2197,12 @@ private struct EventTypeChipRow: View {
                         Divider().opacity(0.08)
                         eventList
                             .padding(.vertical, 4)
+                        // Bottom inset lives inside the scroll content so the sheet can extend fully without a dead zone.
+                                                    .padding(.bottom, 14)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding(.vertical, 10)
+                    .padding(.top, 10)
+                    .padding(.bottom, 14)
                 }
                 .scrollDismissesKeyboard(.interactively)
             }
