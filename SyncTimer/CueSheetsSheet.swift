@@ -1676,10 +1676,7 @@ private struct EventsSection: View {
                                        
                                        // Grid + Tuplet (bold x:y) + BeatGridPad (no Beat/Index badges)
                                        HStack(spacing: 10) {
-                                           Picker("Grid", selection: $tGrid) {
-                                               ForEach(NoteGrid.subdivisionsOnly) { g in NoteGlyph(g, height: 32, vpad: 5).tag(g) }
-                                           }
-                                           .pickerStyle(.segmented)
+                                           NoteGridSegmented(selection: $tGrid)
 
                                            Menu {
                                                Button("x:y") { tTuplet = .off; tNormalizeIndex() }
@@ -2095,7 +2092,7 @@ private struct EventsSection: View {
             Picker("Grid", selection: $selection) {
                 ForEach(NoteGrid.subdivisionsOnly) { g in NoteGlyph(g, height: 32, vpad: 5).tag(g) }
                 }
-                .pickerStyle(.segmented)
+            .pickerStyle(.segmented)
 
         }
     }
@@ -2735,8 +2732,8 @@ private enum NoteGrid: String, CaseIterable, Identifiable {
 @ViewBuilder
 private func NoteGlyph(_ grid: NoteGrid, height: CGFloat = 14, vpad: CGFloat = 5) -> some View {
     if let ui = UIImage(named: grid.assetName) {
-        let scaleY: CGFloat = 2.0
-        let targetHeight = height * 1.1
+        let scaleY: CGFloat = 3.0
+        let targetHeight = height * 2.0
         Image(uiImage: ui)
             .renderingMode(.original)
             .resizable()
