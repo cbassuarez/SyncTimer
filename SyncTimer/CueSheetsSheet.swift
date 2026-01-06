@@ -877,64 +877,59 @@ private struct DetailsSection: View {
     }
 }
 
-private func glassCardBackground(isEditing: Bool) -> some View {
+private func glassCardBackground() -> some View {
     let radius: CGFloat = 16
     let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-    return shape
-        .fill(.clear)
-        .background {
-            if #available(iOS 26.0, macOS 15.0, *) {
-                shape
-                    .fill(.clear)
-                    .glassEffect(.regular, in: shape)
-            } else if #available(iOS 18.0, macOS 15.0, *) {
-                shape
-                    .fill(.clear)
-                    .containerShape(shape)
-                    .glassEffect()
-                    .clipShape(shape)
-            } else {
-                shape
-                    .fill(.ultraThinMaterial)
-            }
+    return Group {
+        if #available(iOS 26.0, macOS 15.0, *) {
+            shape
+                .fill(.clear)
+                .glassEffect(.regular, in: shape)
+        } else if #available(iOS 18.0, macOS 15.0, *) {
+            shape
+                .fill(.clear)
+                .containerShape(shape)
+                .glassEffect()
+                .clipShape(shape)
+        } else {
+            shape
+                .fill(.ultraThinMaterial)
         }
-        .overlay(
-            RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .stroke(Color.white.opacity(0.16), lineWidth: 0.75)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .stroke(Color.primary.opacity(0.12), lineWidth: 1.1)
-        )
-        .shadow(color: Color.black.opacity(isEditing ? 0.08 : 0.16), radius: isEditing ? 6 : 12, x: 0, y: isEditing ? 3 : 8)
+    }
+    .overlay(
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .stroke(Color.white.opacity(0.16), lineWidth: 0.75)
+    )
+    .overlay(
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .stroke(Color.primary.opacity(0.12), lineWidth: 1.1)
+    )
 }
 
 private func glassToggleBackground(radius: CGFloat) -> some View {
     let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-    return shape
-        .fill(.clear)
-        .background {
-            if #available(iOS 26.0, macOS 15.0, *) {
-                shape
-                    .fill(.clear)
-                    .glassEffect(.regular, in: shape)
-            } else if #available(iOS 18.0, macOS 15.0, *) {
-                shape
-                    .fill(.clear)
-                    .containerShape(shape)
-                    .glassEffect()
-                    .clipShape(shape)
-            } else {
-                shape
-                    .fill(.ultraThinMaterial)
-            }
+    return Group {
+        if #available(iOS 26.0, macOS 15.0, *) {
+            shape
+                .fill(.clear)
+                .glassEffect(.regular, in: shape)
+        } else if #available(iOS 18.0, macOS 15.0, *) {
+            shape
+                .fill(.clear)
+                .containerShape(shape)
+                .glassEffect()
+                .clipShape(shape)
+        } else {
+            shape
+                .fill(.ultraThinMaterial)
         }
-        .overlay(
-            shape.stroke(Color.white.opacity(0.16), lineWidth: 0.6)
-        )
-        .overlay(
-            shape.stroke(Color.primary.opacity(0.1), lineWidth: 1)
-        )
+    }
+    .overlay(
+        shape.stroke(Color.white.opacity(0.16), lineWidth: 0.6)
+    )
+    .overlay(
+        shape.stroke(Color.primary.opacity(0.1), lineWidth: 1)
+    )
 }
 
 private struct CueSheetNotesCard: View {
@@ -959,8 +954,10 @@ private struct CueSheetNotesCard: View {
         )
     }
 
+    private var hasText: Bool { !binding.wrappedValue.isEmpty }
+
     private var isCollapsedPreview: Bool {
-        !notesFocused && !(isExpanded) && !(binding.wrappedValue.isEmpty)
+        !isExpanded && hasText
     }
 
     var body: some View {
@@ -979,11 +976,8 @@ private struct CueSheetNotesCard: View {
                 mode = .edit
             } else if focus.wrappedValue == .notes {
                 focus.wrappedValue = nil
-                if !binding.wrappedValue.isEmpty {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        isExpanded = false
-                        mode = .preview
-                    }
+                if hasText && mode == .edit {
+                    withAnimation(.easeInOut(duration: 0.18)) { mode = .preview }
                 }
             }
         }
@@ -991,7 +985,9 @@ private struct CueSheetNotesCard: View {
 
     private var header: some View {
         HStack {
-            FieldHeader("Notes").font(.custom("Roboto-SemiBold", size: 15))
+            Text("NOTES")
+                .font(.custom("Roboto-SemiBold", size: 17))
+                .foregroundStyle(.primary)
             Spacer(minLength: 8)
             HStack(spacing: 8) {
                 toggle
@@ -1007,9 +1003,9 @@ private struct CueSheetNotesCard: View {
             toggleButton(.edit, systemImage: "square.and.pencil", title: "Edit", containerRadius: toggleRadius)
             toggleButton(.preview, systemImage: "eye", title: "Preview", containerRadius: toggleRadius)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 6)
-        .frame(height: 36)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 8)
+        .frame(height: 42)
         .background(glassToggleBackground(radius: toggleRadius))
         .clipShape(RoundedRectangle(cornerRadius: toggleRadius, style: .continuous))
     }
@@ -1084,19 +1080,20 @@ private struct CueSheetNotesCard: View {
     }
 
     private var card: some View {
-        let editing = mode == .edit
         return VStack(alignment: .leading, spacing: 10) {
             content
             footer
         }
         .padding(14)
-        .frame(maxWidth: .infinity, minHeight: editing || isExpanded ? 240 : 160, alignment: .topLeading)
-        .background(glassCardBackground(isEditing: notesFocused))
+        .frame(maxWidth: .infinity, minHeight: isExpanded ? 240 : 160, alignment: .topLeading)
+        .background(glassCardBackground())
         .overlay(
             RoundedRectangle(cornerRadius: radius, style: .continuous)
                 .stroke(Color.white.opacity(notesFocused ? 0.12 : 0.18), lineWidth: 0.4)
         )
         .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .padding(.horizontal, 2)
+        .shadow(color: Color.black.opacity(notesFocused ? 0.08 : 0.16), radius: notesFocused ? 6 : 12, x: 0, y: notesFocused ? 3 : 8)
         .onTapGesture {
             if isCollapsedPreview {
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -1108,11 +1105,15 @@ private struct CueSheetNotesCard: View {
         }
     }
 
-    @ViewBuilder private var content: some View {
-        if (mode == .preview || isCollapsedPreview) && !binding.wrappedValue.isEmpty {
+    private var content: some View {
+        let showingPreview = (mode == .preview || isCollapsedPreview) && hasText
+        return ZStack(alignment: .topLeading) {
             preview
-        } else {
+                .opacity(showingPreview ? 1 : 0)
+                .allowsHitTesting(showingPreview)
             editor
+                .opacity(showingPreview ? 0 : 1)
+                .allowsHitTesting(!showingPreview)
         }
     }
 
@@ -1233,38 +1234,16 @@ private struct CueSheetNotesCard: View {
 
     private func renderMarkdownPreview(_ source: String) -> AttributedString {
         guard !source.isEmpty else { return AttributedString("") }
-        var attributed = (try? AttributedString(
+        if let attributed = try? AttributedString(
             markdown: source,
             options: .init(
                 interpretedSyntax: .full,
                 failurePolicy: .returnPartiallyParsedIfPossible
             )
-        )) ?? AttributedString(source)
-        for run in attributed.runs {
-                    let intents = run.inlinePresentationIntent ?? []
-            let hasEmphasis = intents.contains(.emphasized)
-                        let hasStrong = intents.contains(.stronglyEmphasized)
-            let font: Font
-            switch (hasStrong, hasEmphasis) {
-            case (true, true):
-                font = Font.custom("Roboto-SemiBold", size: 16).italic()
-            case (true, false):
-                font = Font.custom("Roboto-SemiBold", size: 16)
-            case (false, true):
-                font = Font.custom("Roboto-Regular", size: 16).italic()
-            default:
-                font = Font.custom("Roboto-Regular", size: 16)
-            }
-            var slice = attributed[run.range]
-                       slice.font = font
-                       attributed[run.range] = slice
+        ) {
+            return attributed
         }
-
-        if attributed.runs.isEmpty {
-            attributed.font = Font.custom("Roboto-Regular", size: 16)
-        }
-
-        return attributed
+        return AttributedString(source)
     }
 }
 
