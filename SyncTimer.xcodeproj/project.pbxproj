@@ -161,6 +161,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+				SyncTimer___Join_A_RoomApp.swift,
 			);
 			target = 96E9564A2F0DD037009EFC34 /* SyncTimer - Join A Room */;
 		};
@@ -207,6 +208,16 @@
 				96E952D52F0B5071009EFC34 /* Exceptions for "SyncTimer" folder in "SyncTimerWatch Watch App" target */,
 			);
 			path = SyncTimer;
+			sourceTree = "<group>";
+		};
+		97A214A92F1E644E00C2EA6F /* SyncTimer/JoinClip */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SyncTimer/JoinClip;
+			sourceTree = "<group>";
+		};
+		97A214AA2F1E644E00C2EA6F /* SyncTimer/Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SyncTimer/Shared;
 			sourceTree = "<group>";
 		};
 		96DB42202DE84D190027E9AA /* SyncTimerTests */ = {
@@ -335,6 +346,8 @@
 				96DB420E2DE84D160027E9AA /* Products */,
 				966A133E2DF6F11500C2ADF2 /* Shared */,
 				968E1B082E79328D00F79392 /* Watch */,
+				97A214A92F1E644E00C2EA6F /* SyncTimer/JoinClip */,
+				97A214AA2F1E644E00C2EA6F /* SyncTimer/Shared */,
 			);
 			sourceTree = "<group>";
 		};
@@ -522,6 +535,8 @@
 			);
 			fileSystemSynchronizedGroups = (
 				96E9564C2F0DD037009EFC34 /* SyncTimer - Join A Room */,
+				97A214A92F1E644E00C2EA6F /* SyncTimer/JoinClip */,
+				97A214AA2F1E644E00C2EA6F /* SyncTimer/Shared */,
 			);
 			name = "SyncTimer - Join A Room";
 			packageProductDependencies = (
@@ -1120,6 +1135,7 @@
 				BUILD_LIBRARY_FOR_DISTRIBUTION = YES;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_ENTITLEMENTS = SyncTimer/SyncTimer.entitlements;
 				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_ASSET_PATHS = "\"SyncTimer/Preview Content\"";
 				DEVELOPMENT_TEAM = S74572Q65M;
@@ -1184,6 +1200,7 @@
 				BUILD_LIBRARY_FOR_DISTRIBUTION = YES;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_ENTITLEMENTS = SyncTimer/SyncTimer.entitlements;
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_ASSET_PATHS = "\"SyncTimer/Preview Content\"";
 				DEVELOPMENT_TEAM = S74572Q65M;
