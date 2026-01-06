@@ -1,3 +1,4 @@
+#if canImport(CoreMotion) && !targetEnvironment(macCatalyst)
 import SwiftUI
 import Foundation
 import CoreMotion
@@ -46,3 +47,34 @@ extension View {
     modifier(ParallaxEffect(magnitude: magnitude))
   }
 }
+#else
+import SwiftUI
+import Foundation
+import Combine
+
+/// Publishes device pitch & roll (in radians) – stubbed for Mac Catalyst.
+final class MotionManager: ObservableObject {
+  static let shared = MotionManager()
+  @Published var pitch: Double = 0
+  @Published var roll:  Double = 0
+
+  private init() {}
+}
+
+struct ParallaxEffect: ViewModifier {
+  @StateObject private var motion = MotionManager.shared
+  /// how “strong” the tilt is, in degrees
+  let magnitude: Double
+
+  func body(content: Content) -> some View {
+    content
+  }
+}
+
+extension View {
+  /// Simple parallax: rolls & pitches the view by device motion.
+  func parallax(magnitude: Double = 5) -> some View {
+    modifier(ParallaxEffect(magnitude: magnitude))
+  }
+}
+#endif

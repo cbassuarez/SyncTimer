@@ -1,3 +1,29 @@
+#if targetEnvironment(macCatalyst)
+import Foundation
+
+final class TapPairingManager: NSObject {
+  enum Role { case parent, child }
+  enum State { case idle, advertising, browsing, tokenExchange, verifying, ready, failed(Error) }
+  struct ResolvedEndpoint: Codable { let host: String; let port: UInt16 }
+
+  var endpointProvider: (() -> ResolvedEndpoint?)?
+  var onResolved: ((ResolvedEndpoint) -> Void)?
+  var onState: ((State) -> Void)?
+
+  private let role: Role
+
+  init(role: Role) { self.role = role; super.init() }
+
+  func start(ephemeral: [String:String]) {
+    struct UnsupportedPlatformError: Error {}
+    onState?(.failed(UnsupportedPlatformError()))
+  }
+
+  func cancel() {
+    onState?(.idle)
+  }
+}
+#else
 //
 //  TapPairingManager.swift
 //  SyncTimer
@@ -5,11 +31,12 @@
 //  Created by seb on 9/11/25.
 //
 
- import Foundation
- import MultipeerConnectivity
- import NearbyInteraction
+import Foundation
+import MultipeerConnectivity
+import NearbyInteraction
+import UIKit
 
- final class TapPairingManager: NSObject {
+final class TapPairingManager: NSObject {
    enum Role { case parent, child }
    enum State { case idle, advertising, browsing, tokenExchange, verifying, ready, failed(Error) }
    struct ResolvedEndpoint: Codable { let host: String; let port: UInt16 }
@@ -108,3 +135,4 @@
    func sessionWasSuspended(_ ni: NISession) {}
    func sessionSuspensionEnded(_ ni: NISession) {}
  }
+#endif

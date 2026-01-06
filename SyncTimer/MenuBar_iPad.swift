@@ -90,7 +90,11 @@ final class AppActions: ObservableObject {
                 if sync.role == .parent { sync.startParent() } else { sync.startChild() }
             case .bluetooth:
                 if sync.role == .parent { sync.startParent() } else { sync.startChild() }
-                sync.beginTapPairing()
+                if sync.tapPairingAvailable {
+                    sync.beginTapPairing()
+                } else {
+                    sync.tapStateText = "Not available on Mac"
+                }
             case .bonjour:
                 break // you’re not using Bonjour in the UI
             }

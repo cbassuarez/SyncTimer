@@ -10,7 +10,9 @@ import AudioToolbox
 import CoreText
 import Network
 import SystemConfiguration
+#if canImport(WatchConnectivity)
 import WatchConnectivity
+#endif
 import CoreImage.CIFilterBuiltins
 import CoreBluetooth
 import SpriteKit
@@ -736,11 +738,22 @@ final class SyncSettings: ObservableObject {
     @Published var parentPort:      UInt16?
     
     // Tap pairing glue
-        private var tapMgr: TapPairingManager?
-        @Published var tapStateText: String = "Ready"
+    var tapPairingAvailable: Bool {
+        #if targetEnvironment(macCatalyst)
+        return false
+        #else
+        return true
+        #endif
+    }
+    private var tapMgr: TapPairingManager?
+    @Published var tapStateText: String = "Ready"
     
     // SyncTimerApp.swift
     func beginTapPairing() {
+        guard tapPairingAvailable else {
+            tapStateText = "Not available on Mac"
+            return
+        }
         let mgr = TapPairingManager(role: (role == .parent) ? .parent : .child)
         self.tapMgr = mgr
 
@@ -4046,7 +4059,11 @@ struct MainScreen: View {
                 if syncSettings.role == .parent { syncSettings.startParent() }
                 else                           { syncSettings.startChild() }
                 // kick off Tap-to-Pair immediately after Bluetooth sync starts
-                                syncSettings.beginTapPairing()
+                if syncSettings.tapPairingAvailable {
+                    syncSettings.beginTapPairing()
+                } else {
+                    syncSettings.tapStateText = "Not available on Mac"
+                }
             case .bonjour:
                 if syncSettings.role == .parent {
                     syncSettings.startParent()
@@ -8185,7 +8202,11 @@ struct ConnectionPage: View {
             case .bluetooth:
                 if syncSettings.role == .parent { syncSettings.startParent() }
                 else                           { syncSettings.startChild() }
-                syncSettings.beginTapPairing()
+                if syncSettings.tapPairingAvailable {
+                    syncSettings.beginTapPairing()
+                } else {
+                    syncSettings.tapStateText = "Not available on Mac"
+                }
 
             case .bonjour:
                 if syncSettings.role == .parent {
