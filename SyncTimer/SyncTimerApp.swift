@@ -5023,6 +5023,7 @@ struct MainScreen: View {
                             cueBadge.set(label, broadcast: true)
                         }
                     )
+                    .environmentObject(settings)
                 }
                 .sheet(isPresented: $showPresetEditor) {
                                     // Provide your available cue sheet identifiers/titles
@@ -6197,6 +6198,7 @@ struct MainScreen: View {
                                                             cueBadge.set(label, broadcast: true)
                                                         }
                                                     )
+                                                    .environmentObject(settings)
                                                     .padding(16)
                                                 }
                                                 .navigationTitle("Cue Sheets")

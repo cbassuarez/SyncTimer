@@ -77,6 +77,7 @@ extension URL: Identifiable { public var id: String { absoluteString } }
 
 // MARK: - Cue Sheets medium-detent
 struct CueSheetsSheet: View {
+    @EnvironmentObject private var appSettings: AppSettings
     @Binding var isPresented: Bool
     var canBroadcast: () -> Bool = { false }
     let onLoad: (CueSheet) -> Void
@@ -262,6 +263,7 @@ struct CueSheetsSheet: View {
                 },
                 onCancel: { editingSheet = nil }
             )
+            .environmentObject(appSettings)
             .presentationDetents([.large])                // <- consistent, focused editor
             .presentationDragIndicator(.visible)
             .presentationBackground(.ultraThinMaterial)
