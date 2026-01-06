@@ -943,6 +943,9 @@ private struct CueSheetNotesCard: View {
     @Namespace private var toggleNS
     @FocusState private var notesFocused: Bool
     private let limit = 10_000
+    private let collapsedCardMinHeight: CGFloat = 150
+    private let expandedCardMinHeight: CGFloat = 240
+    private let collapsedPreviewHeight: CGFloat = 132
     private let radius: CGFloat = 16
 
     private var binding: Binding<String> {
@@ -957,7 +960,7 @@ private struct CueSheetNotesCard: View {
     private var hasText: Bool { !binding.wrappedValue.isEmpty }
 
     private var isCollapsedPreview: Bool {
-        !isExpanded && hasText
+        mode == .preview && !isExpanded && hasText
     }
 
     var body: some View {
@@ -991,6 +994,9 @@ private struct CueSheetNotesCard: View {
             Spacer(minLength: 8)
             HStack(spacing: 8) {
                 toggle
+                if mode == .preview && hasText {
+                    expandCollapseButton
+                }
                 templateMenu
                 clearButton
             }
@@ -1003,11 +1009,12 @@ private struct CueSheetNotesCard: View {
             toggleButton(.edit, systemImage: "square.and.pencil", title: "Edit", containerRadius: toggleRadius)
             toggleButton(.preview, systemImage: "eye", title: "Preview", containerRadius: toggleRadius)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 8)
-        .frame(height: 42)
-        .background(glassToggleBackground(radius: toggleRadius))
-        .clipShape(RoundedRectangle(cornerRadius: toggleRadius, style: .continuous))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 8)
+                .frame(height: 42)
+                .background(glassToggleBackground(radius: toggleRadius))
+                .clipShape(RoundedRectangle(cornerRadius: toggleRadius, style: .continuous))
+        .frame(minHeight: 32)
     }
 
     private func toggleButton(_ target: Mode, systemImage: String, title: String, containerRadius: CGFloat) -> some View {
@@ -1035,6 +1042,23 @@ private struct CueSheetNotesCard: View {
                     .padding(.horizontal, 6)
                     .contentTransition(.symbolEffect(.replace))
             }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var expandCollapseButton: some View {
+        let label = isExpanded ? "Collapse" : "Expand"
+        let systemImage = isExpanded ? "chevron.up" : "chevron.down"
+        return Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isExpanded.toggle()
+            }
+        } label: {
+            Label(label, systemImage: systemImage)
+                .font(.custom("Roboto-Regular", size: 13))
+                .labelStyle(.titleAndIcon)
+                .padding(.horizontal, 8)
+                .frame(minHeight: 30)
         }
         .buttonStyle(.plain)
     }
@@ -1085,7 +1109,11 @@ private struct CueSheetNotesCard: View {
             footer
         }
         .padding(14)
-        .frame(maxWidth: .infinity, minHeight: isExpanded ? 240 : 160, alignment: .topLeading)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: mode == .preview && !isExpanded ? collapsedCardMinHeight : expandedCardMinHeight,
+            alignment: .topLeading
+        )
         .background(glassCardBackground())
         .overlay(
             RoundedRectangle(cornerRadius: radius, style: .continuous)
@@ -1149,33 +1177,12 @@ private struct CueSheetNotesCard: View {
             Text(renderMarkdownPreview(binding.wrappedValue))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .lineLimit(isCollapsedPreview ? 4 : nil)
+                .frame(
+                    maxHeight: isCollapsedPreview ? collapsedPreviewHeight : .infinity,
+                    alignment: .topLeading
+                )
+                .clipped()
                 .animation(.none, value: binding.wrappedValue)
-
-            if isCollapsedPreview {
-                HStack {
-                    Spacer()
-                    Label("Expand", systemImage: "chevron.down")
-                        .font(.custom("Roboto-Regular", size: 13))
-                        .labelStyle(.titleAndIcon)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.top, 2)
-                .opacity(0.8)
-            } else if !notesFocused {
-                HStack {
-                    Spacer()
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            isExpanded = false
-                        }
-                    } label: {
-                        Label("Collapse", systemImage: "chevron.up")
-                            .font(.custom("Roboto-Regular", size: 13))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
         }
         .overlay(alignment: .bottom) {
             if isCollapsedPreview {
@@ -1233,9 +1240,10 @@ private struct CueSheetNotesCard: View {
     }
 
     private func renderMarkdownPreview(_ source: String) -> AttributedString {
-        guard !source.isEmpty else { return AttributedString("") }
+        let preprocessed = preprocessMarkdownPreview(source)
+        guard !preprocessed.isEmpty else { return AttributedString("") }
         if let attributed = try? AttributedString(
-            markdown: source,
+            markdown: preprocessed,
             options: .init(
                 interpretedSyntax: .full,
                 failurePolicy: .returnPartiallyParsedIfPossible
@@ -1243,7 +1251,32 @@ private struct CueSheetNotesCard: View {
         ) {
             return attributed
         }
-        return AttributedString(source)
+        return AttributedString(preprocessed)
+    }
+
+    private func preprocessMarkdownPreview(_ source: String) -> String {
+        guard !source.isEmpty else { return "" }
+        let normalized = source
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+
+        let lines = normalized.split(omittingEmptySubsequences: false, whereSeparator: { $0 == "\n" })
+        var out = ""
+
+        for idx in lines.indices {
+            let line = lines[idx]
+            out.append(contentsOf: line)
+
+            guard idx < lines.count - 1 else { continue }
+            let nextLine = lines[idx + 1]
+            if line.isEmpty || nextLine.isEmpty {
+                out.append("\n")
+            } else {
+                out.append("  \n")
+            }
+        }
+
+        return out
     }
 }
 
