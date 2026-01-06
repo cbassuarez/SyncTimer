@@ -634,6 +634,7 @@ private struct AbsoluteEntry: View {
 
 // MARK: - Large-detent editor (stable)
 private struct CueSheetEditorSheet: View {
+    @EnvironmentObject private var appSettings: AppSettings
     @State var sheet: CueSheet
     var onSave: (CueSheet) -> Void
     var onCancel: () -> Void
@@ -654,7 +655,7 @@ private struct CueSheetEditorSheet: View {
                                     .truncationMode(.tail)
                                 if isDirty {
                                     Circle()
-                                        .fill(Color.accentColor) // uses global app tint/flash color if you theme accent
+                                        .fill(flashColor) // uses global app tint/flash color if you theme accent
                                         .frame(width: 8, height: 8)
                                         .accessibilityLabel("Unsaved changes")
                                 }
@@ -700,9 +701,13 @@ private struct CueSheetEditorSheet: View {
         .background {
             // extend sheet material through the bottom-safe-area region.
             Rectangle()
-                            .fill(.ultraThinMaterial)
-                            .ignoresSafeArea()
-                    }
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
+        }
+    }
+
+    private var flashColor: Color {
+        appSettings.flashColor
     }
 }
 // Simple identifiable wrapper for .sheet(item:)
@@ -717,6 +722,7 @@ private struct CueEditorTabBar: View {
     @Binding var selection: CueSheetEditorSheet.Tab
     let isDirty: Bool
     let eventsCount: Int
+    @EnvironmentObject private var appSettings: AppSettings
 
     @Namespace private var ns
 
@@ -758,7 +764,7 @@ private struct CueEditorTabBar: View {
                 Image(systemName: symbolName(for: selection, selected: true))
                     .font(.system(size: 15, weight: .semibold))
                     .symbolRenderingMode(.palette)
-                    .foregroundStyle(Color.primary, Color.accentColor.opacity(0.65))
+                    .foregroundStyle(flashColor, flashColor.opacity(0.45))
                     .contentTransition(.symbolEffect(.replace))
                 Text(selection.rawValue)
                     .font(.custom("Roboto-SemiBold", size: 15))
@@ -798,6 +804,7 @@ private struct CueEditorTabBar: View {
 
     private func tabButton(_ tab: CueSheetEditorSheet.Tab, mode: LabelMode) -> some View {
         let selected = (selection == tab)
+        let flash = flashColor
 
         return Button {
             select(tab)
@@ -806,10 +813,10 @@ private struct CueEditorTabBar: View {
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: symbolName(for: tab, selected: selected))
                         .font(.system(size: 15, weight: .semibold))
-                        .symbolRenderingMode(selected ? .palette : .hierarchical)
+                        .symbolRenderingMode(.palette)
                         .foregroundStyle(
-                            selected ? Color.primary : Color.secondary,
-                            selected ? Color.accentColor.opacity(0.65) : Color.clear
+                            selected ? flash : flash.opacity(0.55),
+                            selected ? flash.opacity(0.45) : flash.opacity(0.18)
                         )
                         .contentTransition(.symbolEffect(.replace))
                         .symbolEffect(.bounce, value: selection) // motion without being “toy”
@@ -836,7 +843,7 @@ private struct CueEditorTabBar: View {
 
                 if selected, isDirty {
                     Circle()
-                        .fill(Color.accentColor)
+                        .fill(flash)
                         .frame(width: 6, height: 6)
                         .accessibilityHidden(true)
                 }
@@ -874,6 +881,10 @@ private struct CueEditorTabBar: View {
         case .events:
             return selected ? "list.bullet.rectangle.fill" : "list.bullet.rectangle"
         }
+    }
+
+    private var flashColor: Color {
+        appSettings.flashColor
     }
 }
 
@@ -2729,6 +2740,8 @@ private struct EventRow: View {
     var timeLabel: String
     var onTapTime: () -> Void
     var onDelete: () -> Void
+    @State private var messagePreview: String = ""
+    @State private var previewWorkItem: DispatchWorkItem?
 
 
 
@@ -2852,6 +2865,15 @@ private struct EventRow: View {
                 Label("Delete", systemImage: "trash")
             }
         }
+        .onAppear {
+            syncMessagePreview()
+        }
+        .onChange(of: messageSourceText) { newValue in
+            schedulePreviewUpdate(with: newValue)
+        }
+        .onDisappear {
+            previewWorkItem?.cancel()
+        }
 
     }
 
@@ -2892,12 +2914,8 @@ private struct EventRow: View {
     private var detailText: String? {
         switch event.kind {
         case .message:
-            if case .message(let payload) = event.payload {
-                let text = payload.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                let firstLine = text.split(separator: "\n").first.map(String.init) ?? ""
-                return firstLine.isEmpty ? nil : firstLine
-            }
-            return nil
+            let preview = messagePreview.isEmpty ? trimmedFirstLine(from: messageSourceText) : messagePreview
+            return preview.isEmpty ? nil : preview
         default:
             return nil
         }
@@ -2917,6 +2935,32 @@ private struct EventRow: View {
             return Image(uiImage: uiImage)
         }
         return nil
+    }
+
+    private var messageSourceText: String {
+        if case .message(let payload)? = event.payload {
+            return payload.text
+        }
+        return ""
+    }
+
+    private func trimmedFirstLine(from text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let firstLine = trimmed.split(separator: "\n").first.map(String.init) ?? ""
+        return firstLine
+    }
+
+    private func syncMessagePreview() {
+        messagePreview = trimmedFirstLine(from: messageSourceText)
+    }
+
+    private func schedulePreviewUpdate(with text: String) {
+        previewWorkItem?.cancel()
+        let item = DispatchWorkItem {
+            messagePreview = trimmedFirstLine(from: text)
+        }
+        previewWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22, execute: item)
     }
 }
 // MARK: - Fraction Meter Control (Num / Den)

@@ -3526,12 +3526,6 @@ struct TimerCard: View {
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .center)
-
-                            if let caption = payload.caption {
-                                Text(attributedText(from: caption))
-                                    .frame(maxWidth: containerWidth, alignment: .leading)
-                                    .padding(.bottom, 8)
-                            }
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, horizontalPadding)
@@ -3569,7 +3563,7 @@ struct TimerCard: View {
         
         private var accessibilityValue: String {
             if let payload = message { return payload.text }
-            if let payload = image { return payload.caption?.text ?? "Image" }
+            if image != nil { return "Image" }
             if let mark = rehearsalMark { return "Rehearsal mark \(mark)" }
             return ""
         }
