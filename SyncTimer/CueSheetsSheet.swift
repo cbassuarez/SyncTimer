@@ -1833,12 +1833,12 @@ private struct EventsSection: View {
         VStack(alignment: .leading, spacing: 12) {
             composerEventTypeSection
             Divider().opacity(0.12)
-            composerFlashColorSection
             if kind == .cue {
-                            Divider().opacity(0.12)
-                            composerRehearsalMarkSection
-                        }
-            Divider().opacity(0.12)
+                composerFlashColorSection
+                Divider().opacity(0.12)
+                composerRehearsalMarkSection
+                Divider().opacity(0.12)
+            }
             composerTimeEntrySection
             composerPayloadSection
             composerPreviewAndAddRow
@@ -1951,13 +1951,7 @@ private struct EventsSection: View {
     private var composerFlashColorSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             sectionHeader("Flash Color", "Color used when the event is a Cue.")
-            if kind == .cue {
-                CueColorDots(selectedIndex: $cueColorIndex)
-            } else {
-                Text("Not applicable for Stop/Restart.")
-                    .foregroundStyle(.secondary)
-                    .font(.custom("Roboto-Regular", size: 13))
-            }
+            CueColorDots(selectedIndex: $cueColorIndex)
         }
     }
     private var composerRehearsalMarkSection: some View {
@@ -2194,18 +2188,21 @@ private struct EventTypeChipRow: View {
         ZStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 14) {
                 timingSummaryStrip
-                if showTimingDetails {
-                    timingSection
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-                composerCard
-                Divider().opacity(0.08)
                 ScrollView {
-                    eventList
-                        .padding(.vertical, 4)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 14) {
+                        if showTimingDetails {
+                            timingSection
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                        composerCard
+                        Divider().opacity(0.08)
+                        eventList
+                            .padding(.vertical, 4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.vertical, 10)
                 }
-                .frame(maxHeight: .infinity, alignment: .top)
+                .scrollDismissesKeyboard(.interactively)
             }
             .padding(.vertical, 10)
         }
