@@ -995,33 +995,44 @@ private func glassCardBackground() -> some View {
     )
 }
 
+private func cueGlassBackground(shape: RoundedRectangle) -> some View {
+    Group {
+        if #available(iOS 26.0, macOS 15.0, *) {
+            shape
+                .fill(.clear)
+                .glassEffect(.regular, in: shape)
+        } else if #available(iOS 18.0, macOS 15.0, *) {
+            shape
+                .fill(.clear)
+                .containerShape(shape)
+                .glassEffect()
+                .clipShape(shape)
+        } else {
+            shape
+                .fill(.thinMaterial)
+        }
+    }
+}
+
+private extension View {
+    func cueGlassChrome(shape: RoundedRectangle = .init(cornerRadius: 12, style: .continuous), minHeight: CGFloat = 36) -> some View {
+        self
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(minHeight: minHeight)
+            .background { cueGlassBackground(shape: shape) }
+            .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 0.7))
+            .overlay(shape.stroke(Color.primary.opacity(0.12), lineWidth: 1))
+            .contentShape(shape)
+    }
+}
+
 private struct CueGlassActionButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
         return configuration.label
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(minHeight: 36)
-            .background {
-                if #available(iOS 26.0, macOS 15.0, *) {
-                    shape
-                        .fill(.clear)
-                        .glassEffect(.regular, in: shape)
-                } else if #available(iOS 18.0, macOS 15.0, *) {
-                    shape
-                        .fill(.clear)
-                        .containerShape(shape)
-                        .glassEffect()
-                        .clipShape(shape)
-                } else {
-                    shape
-                        .fill(.thinMaterial)
-                }
-            }
-            .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 0.7))
-            .overlay(shape.stroke(Color.primary.opacity(0.12), lineWidth: 1))
+            .cueGlassChrome(shape: shape)
             .opacity(configuration.isPressed ? 0.92 : 1)
-            .contentShape(shape)
     }
 }
 
@@ -1676,10 +1687,7 @@ private struct EventsSection: View {
                                                Button("5:4 (Quintuplet)") { tTuplet = .quintuplet; tNormalizeIndex() }
                                                Button("7:4 (Septuplet)") { tTuplet = .septuplet; tNormalizeIndex() }
                                            } label: {
-                                               Text(tTuplet.label)
-                                                   .font(.custom("Roboto-SemiBold", size: 15))
-                                                   .padding(.horizontal, 10).padding(.vertical, 6)
-                                                   .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                                               TupletMenuLabel(tTuplet.label)
                                            }
                                        }
                                        BeatGridPad(
@@ -2072,10 +2080,7 @@ private struct EventsSection: View {
                 Button("7:4 (Septuplet)") { tuplet = .septuplet; normalizeIndex() }
                 Button("Custom…") { showTupletCustom = true }
             } label: {
-                Text(tuplet.label)
-                    .font(.custom("Roboto-Bold", size: 15))
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                TupletMenuLabel(tuplet.label)
             }
 
             Text("Index \(index)/\(max(1, totalSlotsPerBeat))")
@@ -2093,6 +2098,16 @@ private struct EventsSection: View {
                 .pickerStyle(.segmented)
 
         }
+    }
+    private func TupletMenuLabel(_ text: String) -> some View {
+        HStack(spacing: 8) {
+            Text(text)
+                .font(.custom("Roboto-SemiBold", size: 15))
+            Image(systemName: "chevron.down")
+                .font(.system(size: 13, weight: .semibold))
+        }
+        .frame(minHeight: 44)
+        .cueGlassChrome(minHeight: 44)
     }
 
 private struct EventTypeChipRow: View {
@@ -2720,12 +2735,15 @@ private enum NoteGrid: String, CaseIterable, Identifiable {
 @ViewBuilder
 private func NoteGlyph(_ grid: NoteGrid, height: CGFloat = 14, vpad: CGFloat = 5) -> some View {
     if let ui = UIImage(named: grid.assetName) {
+        let scaleY: CGFloat = 1.17
+        let targetHeight = height * 1.1
         Image(uiImage: ui)
             .renderingMode(.original)
             .resizable()
             .scaledToFit()
-            .frame(height: height)
-            .padding(.vertical, vpad) // makes segmented control a bit taller
+            .frame(height: targetHeight)
+            .scaleEffect(x: 1, y: scaleY, anchor: .center)
+            .padding(.vertical, vpad + 1) // makes segmented control a bit taller
             .accessibilityLabel(Text(grid.fallback))
     } else {
         Text(grid.fallback)
