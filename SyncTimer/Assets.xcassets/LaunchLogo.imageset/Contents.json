@@ -1,17 +1,17 @@
 {
   "images" : [
     {
-      "filename" : "weblogo-2.png",
+      "filename" : "LaunchLogoSyncTimer.png",
       "idiom" : "universal",
       "scale" : "1x"
     },
     {
-      "filename" : "weblogo-2 1.png",
+      "filename" : "LaunchLogoSyncTimer 1.png",
       "idiom" : "universal",
       "scale" : "2x"
     },
     {
-      "filename" : "weblogo-2 2.png",
+      "filename" : "LaunchLogoSyncTimer 2.png",
       "idiom" : "universal",
       "scale" : "3x"
     }
