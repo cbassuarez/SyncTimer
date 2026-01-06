@@ -1798,6 +1798,12 @@ struct SyncBar: View {
         let activeColor   = isDark ? Color.white : Color.black
         let inactiveColor = Color.gray
         let allowMainViewChanges = settings.allowSyncChangesInMainView
+        let roleAccessibilityHint = allowMainViewChanges
+            ? "Tap to toggle. Long-press for settings."
+            : "Long-press to toggle between child and parent"
+        let syncAccessibilityHint = allowMainViewChanges
+            ? "Tap to toggle. Long-press for settings."
+            : "Long-press to toggle sync mode"
         let roleGesture = LongPressGesture(minimumDuration: 0.5)
             .exclusively(before: TapGesture())
         let syncGesture = LongPressGesture(minimumDuration: 0.5)
@@ -1820,26 +1826,31 @@ struct SyncBar: View {
             .lineLimit(1)
             .layoutPriority(1)
             .accessibilityLabel("Switch role")
-            .accessibilityHint("Long-press to toggle between child and parent")
+            .accessibilityHint(roleAccessibilityHint)
             .contentShape(Rectangle())
             .gesture(roleGesture.onEnded { value in
                 switch value {
                 case .first(true):
-                    guard !isCounting else {
+                    if allowMainViewChanges {
+                        suppressNextOpenSettingsTap = false
+                        onOpenSyncSettings()
+                    } else {
+                        guard !isCounting else {
+                            suppressNextOpenSettingsTap = true
+                            return
+                        }
                         suppressNextOpenSettingsTap = true
-                        return
+                        let newRole: SyncSettings.Role = (syncSettings.role == .parent ? .child : .parent)
+                        onRoleConfirmed(newRole)
                     }
-                    suppressNextOpenSettingsTap = true
-                    let newRole: SyncSettings.Role = (syncSettings.role == .parent ? .child : .parent)
-                    onRoleConfirmed(newRole)
                 case .second:
                     if allowMainViewChanges {
-                    guard !isCounting else { return }
-                    let newRole: SyncSettings.Role = (syncSettings.role == .parent ? .child : .parent)
-                    onRoleConfirmed(newRole)
-                } else {
-                    onOpenSyncSettings()
-                }
+                        guard !isCounting else { return }
+                        let newRole: SyncSettings.Role = (syncSettings.role == .parent ? .child : .parent)
+                        onRoleConfirmed(newRole)
+                    } else {
+                        onOpenSyncSettings()
+                    }
                 default:
                     break
                 }
@@ -1866,17 +1877,23 @@ struct SyncBar: View {
 
             }
             .contentShape(Rectangle())
+            .accessibilityHint(syncAccessibilityHint)
             .gesture(syncGesture.onEnded { value in
                 switch value {
                 case .first(true):
-                    suppressNextOpenSettingsTap = true
-                    onToggleSyncMode()
+                    if allowMainViewChanges {
+                        suppressNextOpenSettingsTap = false
+                        onOpenSyncSettings()
+                    } else {
+                        suppressNextOpenSettingsTap = true
+                        onToggleSyncMode()
+                    }
                 case .second:
                     if allowMainViewChanges {
-                    onToggleSyncMode()
-                } else {
-                    onOpenSyncSettings()
-                }
+                        onToggleSyncMode()
+                    } else {
+                        onOpenSyncSettings()
+                    }
                 default:
                     break
                 }
