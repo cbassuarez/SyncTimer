@@ -68,7 +68,12 @@ final class BonjourSyncManager: NSObject {
         print("[AD] \(settings.role == .parent ? "Parent" : "Child") calling startAdvertising()")
         
         // Always advertise on port 50000
-        let port: Int32 = 50000
+        let port: Int32 = {
+            if let parsed = Int32(settings.listenPort), parsed > 0 {
+                return parsed
+            }
+            return 50000
+        }()
 
         // Service name: "SyncTimer Parent – <DeviceName>"
         let peerName = UIDevice.current.name ?? "Unknown"
@@ -143,6 +148,7 @@ final class BonjourSyncManager: NSObject {
     // 2️⃣ Only the *child* opens the TCP connection
     private func maybeConnectTo(_ service: NetService) {
         guard let ss = syncSettings, ss.role == .child else { return }
+        if ss.connectionMethod == .bonjour { return }
         connectTo(service: service)          // ← your existing method
     }
     /// Update TXT with the very latest phase/remaining/events. Call this whenever the timer changes.
@@ -191,6 +197,10 @@ final class BonjourSyncManager: NSObject {
         
         // Add your own mnemonic:
             dict["name"] = Data(settings.localNickname.utf8)
+            dict["hostUUID"] = Data(settings.localPeerID.uuidString.utf8)
+            if let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
+                dict["build"] = Data(build.utf8)
+            }
         
         //  ── NEW: include your own mnemonic & RSSI
             dict["name"] = Data(settings.localNickname.utf8)
@@ -347,6 +357,13 @@ extension BonjourSyncManager: NetServiceDelegate {
       
       guard let txtData = sender.txtRecordData() else { return }
       let txtDict = NetService.dictionary(fromTXTRecord: txtData)
+      let peerHostUUID: UUID? = {
+          if let uuidData = txtDict["hostUUID"],
+             let uuidString = String(data: uuidData, encoding: .utf8) {
+              return UUID(uuidString: uuidString)
+          }
+          return nil
+      }()
         
     // 1) Lobby‐filter & UI update
     syncSettings?.handleResolvedService(sender, txt: txtDict)
@@ -356,7 +373,7 @@ extension BonjourSyncManager: NetServiceDelegate {
        let rssiString = String(data: rssiData, encoding: .utf8),
        let rssi       = Int(rssiString)
     {
-      let peerID = uuid(from: sender.name)
+      let peerID = peerHostUUID ?? uuid(from: sender.name)
       DispatchQueue.main.async {
         self.syncSettings?.updateSignalStrength(peerID: peerID, to: rssi)
       }
