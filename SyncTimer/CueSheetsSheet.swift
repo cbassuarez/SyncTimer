@@ -696,9 +696,16 @@ private struct CueSheetEditorSheet: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .padding(.horizontal, 16)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background {
+            // extend sheet material through the bottom-safe-area region.
+            Rectangle()
+                            .fill(.ultraThinMaterial)
+                            .ignoresSafeArea()
+                    }
     }
 }
-// Simple identifiable wrapper for `.sheet(item:)`
+// Simple identifiable wrapper for .sheet(item:)
 private struct IdentifiableIndex: Identifiable {
     let id = UUID()
     let value: Int
@@ -2204,6 +2211,8 @@ private struct EventTypeChipRow: View {
                     .padding(.top, 10)
                     .padding(.bottom, 14)
                 }
+                .safeAreaPadding(.bottom, 16) // allow the last card to clear the home indicator without clipping.
+                .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 18) } // Extra scrollable inset to lift the last card above the rounded sheet mask.
                 .scrollDismissesKeyboard(.interactively)
             }
             .padding(.vertical, 10)
