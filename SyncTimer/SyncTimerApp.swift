@@ -8558,9 +8558,6 @@ struct ConnectionPage: View {
                 deviceName: hostDeviceName,
                 hostUUIDString: hostUUIDString,
                 hostShareURL: hostShareURL,
-                connectionMethod: syncSettings.connectionMethod,
-                role: syncSettings.role,
-                isSyncEnabled: syncSettings.isEnabled,
                 onRequestEnableSync: {
                     guard !syncSettings.isEnabled else { return }
                     toggleSyncMode()
@@ -8759,24 +8756,15 @@ private struct GenerateJoinQRSheet: View {
     let deviceName: String
     let hostUUIDString: String
     let hostShareURL: URL
-    let connectionMethod: SyncSettings.SyncConnectionMethod
-    let role: SyncSettings.Role
-    let isSyncEnabled: Bool
     let onRequestEnableSync: (() -> Void)?
 
     init(deviceName: String,
          hostUUIDString: String,
          hostShareURL: URL,
-         connectionMethod: SyncSettings.SyncConnectionMethod,
-         role: SyncSettings.Role,
-         isSyncEnabled: Bool,
          onRequestEnableSync: (() -> Void)? = nil) {
         self.deviceName = deviceName
         self.hostUUIDString = hostUUIDString
         self.hostShareURL = hostShareURL
-        self.connectionMethod = connectionMethod
-        self.role = role
-        self.isSyncEnabled = isSyncEnabled
         self.onRequestEnableSync = onRequestEnableSync
     }
 #if canImport(UIKit)
@@ -8805,7 +8793,26 @@ private func printJoinQR() {
     @State private var revealIP = false
     @State private var showQRPreview = false
     @State private var toastText: String = "Copied"
-    @State private var selectedTab: Int = 0
+    private enum JoinQRTab: CaseIterable {
+        case create
+        case rooms
+
+        var title: String {
+            switch self {
+            case .create: return "Create"
+            case .rooms: return "Rooms"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .create: return "qrcode"
+            case .rooms: return "tray.full"
+            }
+        }
+    }
+
+    @State private var selectedTab: JoinQRTab = .create
     @State private var showPortWarning = false
     @State private var pendingPortChange: PortChangeAction? = nil
     @StateObject private var roomsStore = RoomsStore()
@@ -8822,7 +8829,7 @@ private func printJoinQR() {
     private var uuidSuffix: String { String(hostUUIDString.suffix(8)).uppercased() }
 
     private var transportLabel: String {
-        switch connectionMethod {
+        switch syncSettings.connectionMethod {
         case .network:   return "Wi-Fi"
         case .bluetooth: return "Nearby"
         case .bonjour:   return "Bonjour"
@@ -8830,7 +8837,7 @@ private func printJoinQR() {
     }
 
     private var transportSymbol: String {
-        switch connectionMethod {
+        switch syncSettings.connectionMethod {
         case .network:   return "wifi"
         case .bluetooth: return "antenna.radiowaves.left.and.right"
         case .bonjour:   return "network"
@@ -8838,7 +8845,7 @@ private func printJoinQR() {
     }
 
     private var subtitleLine2: String {
-        switch connectionMethod {
+        switch syncSettings.connectionMethod {
         case .network:   return "Same network required."
         case .bluetooth: return "Works nearby over Bluetooth."
         case .bonjour:   return "Finds hosts on the local network."
@@ -8920,15 +8927,38 @@ private func printJoinQR() {
         pendingPortChange = nil
     }
 
-    private func applyRoom(_ room: Room) {
+    private func loadRoom(_ room: Room) {
+        let wasEnabled = syncSettings.isEnabled
+        let currentRole = syncSettings.role
+
+        if wasEnabled {
+            if currentRole == .parent { syncSettings.stopParent() }
+            else { syncSettings.stopChild() }
+        }
+
         syncSettings.connectionMethod = room.connectionMethod
         syncSettings.role = room.role
-        syncSettings.listenPort = room.listenPort
+        if room.connectionMethod == .network {
+            syncSettings.listenPort = room.listenPort
+        }
+
+        syncSettings.isEnabled = true
+        if room.role == .parent { syncSettings.startParent() }
+        else { syncSettings.startChild() }
+
         roomsStore.updateLastUsed(room)
 
-        if syncSettings.isEnabled, syncSettings.role == .parent, syncSettings.connectionMethod == .network {
-            syncSettings.stopParent()
-            syncSettings.startParent()
+        showQRPreview = false
+        revealIP = false
+        showCopiedToast = false
+        lastCopied = nil
+
+        if reduceMotion {
+            selectedTab = .create
+        } else {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                selectedTab = .create
+            }
         }
     }
 
@@ -8942,7 +8972,7 @@ private func printJoinQR() {
             listenPort: newPort
         )
         roomsStore.add(newRoom)
-        applyRoom(newRoom)
+        loadRoom(newRoom)
     }
 
     // MARK: - QR image
@@ -9010,7 +9040,7 @@ private func printJoinQR() {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(reduceTransparency
                           ? AnyShapeStyle(Color(.systemBackground))
-                          : AnyShapeStyle(.ultraThinMaterial))
+                          : AnyShapeStyle(Color.clear))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -9108,40 +9138,68 @@ private func printJoinQR() {
         .accessibilityLabel(label)
     }
 
-    private func glassSegmentedPicker(selection: Binding<Int>, options: [String]) -> some View {
-        HStack(spacing: 0) {
-            ForEach(options.indices, id: \.self) { index in
-                let isSelected = selection.wrappedValue == index
+    private func glassToggleBackground(radius: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        return Group {
+            if reduceTransparency {
+                shape.fill(Color(.systemBackground))
+            } else if #available(iOS 26.0, macOS 15.0, *) {
+                shape
+                    .fill(.clear)
+                    .glassEffect(.regular, in: shape)
+            } else if #available(iOS 18.0, macOS 15.0, *) {
+                shape
+                    .fill(.clear)
+                    .containerShape(shape)
+                    .clipShape(shape)
+            } else {
+                shape
+                    .fill(.ultraThinMaterial)
+            }
+        }
+        .overlay(
+            shape.stroke(Color.white.opacity(0.16), lineWidth: 0.6)
+        )
+    }
+
+    private var joinTabsPicker: some View {
+        let radius: CGFloat = 12
+        return HStack(spacing: 6) {
+            ForEach(JoinQRTab.allCases, id: \.self) { tab in
+                let isSelected = selectedTab == tab
                 Button {
-                    withAnimation(.easeOut(duration: 0.25)) {
-                        selection.wrappedValue = index
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        selectedTab = tab
                     }
                 } label: {
-                    Text(options[index])
-                        .font(.custom("Roboto-SemiBold", size: 15))
-                        .foregroundColor(isSelected ? .white : .primary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .contentShape(Rectangle())
-                        .background(
-                            Group {
-                                if isSelected {
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .fill(settings.flashColor)
-                                        .matchedGeometryEffect(id: "joinQrTab", in: tabNamespace)
-                                }
-                            }
-                        )
+                    ZStack {
+                        if isSelected {
+                            RoundedRectangle(cornerRadius: radius - 3, style: .continuous)
+                                .fill(Color.primary.opacity(0.1))
+                                .matchedGeometryEffect(id: "joinQrTab", in: tabNamespace)
+                        }
+                        ViewThatFits(in: .horizontal) {
+                            Label(tab.title, systemImage: tab.systemImage)
+                                .font(.custom("Roboto-SemiBold", size: 13))
+                                .labelStyle(.titleAndIcon)
+                                .contentTransition(.symbolEffect(.replace))
+                            Image(systemName: tab.systemImage)
+                                .font(.custom("Roboto-SemiBold", size: 13))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                    }
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(4)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
+        .padding(.horizontal, 8)
+        .padding(.vertical, 8)
+        .frame(height: 42)
+        .background(glassToggleBackground(radius: radius))
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .frame(minHeight: 32)
     }
 
     private func advancedRow(title: String,
@@ -9252,7 +9310,7 @@ private func printJoinQR() {
                         .accessibilityLabel("Copy Host ID")
                     }
 
-                    if connectionMethod == .network {
+                    if syncSettings.connectionMethod == .network {
                         Divider().opacity(0.12)
 
                         HStack(spacing: 10) {
@@ -9346,12 +9404,12 @@ private func printJoinQR() {
                     }
                     syncSettings.role = (syncSettings.role == .parent) ? .child : .parent
                 } label: {
-                    chip(systemImage: role == .parent ? "arrow.up.circle" : "arrow.down.circle",
-                         text: role == .parent ? "Parent" : "Child")
+                    chip(systemImage: syncSettings.role == .parent ? "arrow.up.circle" : "arrow.down.circle",
+                         text: syncSettings.role == .parent ? "Parent" : "Child")
                 }
                 .buttonStyle(.plain)
 
-                if isSyncEnabled {
+                if syncSettings.isEnabled {
                     chip(systemImage: "checkmark.circle", text: "Ready to Join", emphasis: true)
                 } else {
                     chip(systemImage: "bolt.slash", text: "Enable SYNC", emphasis: true)
@@ -9360,7 +9418,7 @@ private func printJoinQR() {
             .padding(.top, 2)
 
             // Actionable SYNC enable (only when it can help)
-            if !isSyncEnabled, let onRequestEnableSync {
+            if !syncSettings.isEnabled, let onRequestEnableSync {
                 glassSecondaryButton(label: "Turn SYNC On", systemImage: "bolt.fill") {
                     onRequestEnableSync()
                 }
@@ -9371,7 +9429,7 @@ private func printJoinQR() {
             VStack(spacing: 10) {
                 glassPrimaryButton(label: showQRPreview ? "Hide QR" : "Show QR",
                                    systemImage: "qrcode",
-                                   disabled: (role != .parent)) {
+                                   disabled: (syncSettings.role != .parent)) {
                     if !reduceMotion {
                         withAnimation(.snappy(duration: 0.26, extraBounce: 0.12)) {
                             showQRPreview.toggle()
@@ -9398,31 +9456,31 @@ private func printJoinQR() {
                         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.primary.opacity(0.08), lineWidth: 1))
                     }
                     .buttonStyle(.plain)
-                    .disabled(role != .parent)
-                    .opacity(role != .parent ? 0.55 : 1.0)
+                    .disabled(syncSettings.role != .parent)
+                    .opacity(syncSettings.role != .parent ? 0.55 : 1.0)
 
                     #if canImport(UIKit)
                     glassSecondaryButton(label: "Print", systemImage: "printer") {
                         printJoinQR()
                     }
-                    .disabled(role != .parent)
-                    .opacity(role != .parent ? 0.55 : 1.0)
+                    .disabled(syncSettings.role != .parent)
+                    .opacity(syncSettings.role != .parent ? 0.55 : 1.0)
                     #endif
                 }
 
                 .buttonStyle(.plain)
-                .disabled(role != .parent)
-                .opacity(role != .parent ? 0.55 : 1.0)
+                .disabled(syncSettings.role != .parent)
+                .opacity(syncSettings.role != .parent ? 0.55 : 1.0)
             }
 
             glassPrimaryButton(label: "Save Room",
                                systemImage: "tray.and.arrow.down",
-                               disabled: role != .parent) {
+                               disabled: syncSettings.role != .parent) {
                 let room = Room(
                     name: deviceName,
                     hostUUID: hostUUIDString,
-                    connectionMethod: connectionMethod,
-                    role: role,
+                    connectionMethod: syncSettings.connectionMethod,
+                    role: syncSettings.role,
                     listenPort: syncSettings.listenPort
                 )
                 roomsStore.add(room)
@@ -9468,7 +9526,7 @@ private func printJoinQR() {
                         .font(.custom("Roboto-Regular", size: 13))
                         .foregroundColor(.secondary)
 
-                    if connectionMethod == .network {
+                    if syncSettings.connectionMethod == .network {
                         Button {
                             requestPortChange(.regenerateCurrent(copyToClipboard: true))
                         } label: {
@@ -9496,12 +9554,12 @@ private func printJoinQR() {
             }
             .padding(.top, 4)
 
-            if connectionMethod == .network {
+            if syncSettings.connectionMethod == .network {
                 glassSecondaryButton(label: "New Room (New Port)", systemImage: "plus.circle") {
                     requestPortChange(.regenerateCurrent(copyToClipboard: false))
                 }
-                .disabled(role != .parent)
-                .opacity(role != .parent ? 0.55 : 1.0)
+                .disabled(syncSettings.role != .parent)
+                .opacity(syncSettings.role != .parent ? 0.55 : 1.0)
             }
 
             // Advanced (collapsed): utilities + “open in browser”
@@ -9521,7 +9579,7 @@ private func printJoinQR() {
                         copyToPasteboard(hostUUIDString, key: .hostID, toast: "Host ID copied")
                     }
 
-                    if connectionMethod == .network, ipString != "Not on Wi-Fi" {
+                    if syncSettings.connectionMethod == .network, ipString != "Not on Wi-Fi" {
                         advancedRow(title: "Copy IP",
                                     detail: ipString,
                                     leadingSymbol: "wifi",
@@ -9530,7 +9588,7 @@ private func printJoinQR() {
                         }
                     }
 
-                    if connectionMethod == .network, !isUnsetPort(syncSettings.listenPort) {
+                    if syncSettings.connectionMethod == .network, !isUnsetPort(syncSettings.listenPort) {
                         advancedRow(title: "Copy Port",
                                     detail: syncSettings.listenPort,
                                     leadingSymbol: "circle.grid.cross",
@@ -9584,7 +9642,7 @@ private func printJoinQR() {
                     .font(.custom("Roboto-Regular", size: 14))
                     .foregroundColor(.secondary)
                 glassPrimaryButton(label: "Create a Room", systemImage: "plus") {
-                    selectedTab = 0
+                    selectedTab = .create
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -9592,14 +9650,9 @@ private func printJoinQR() {
         } else {
             List {
                 ForEach(roomsStore.rooms) { room in
-                    Button {
-                        applyRoom(room)
-                    } label: {
-                        glassCard {
-                            roomRow(room)
-                        }
+                    glassCard {
+                        roomRow(room)
                     }
-                    .buttonStyle(.plain)
                     .contextMenu {
                         Button {
                             requestPortChange(.cloneRoom(room))
@@ -9625,43 +9678,70 @@ private func printJoinQR() {
     }
 
     private func roomRow(_ room: Room) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(room.name)
-                    .font(.custom("Roboto-SemiBold", size: 16))
-                Spacer()
-                Text(connectionLabel(for: room.connectionMethod))
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(room.name)
+                        .font(.custom("Roboto-SemiBold", size: 16))
+                    Spacer()
+                    Text(connectionLabel(for: room.connectionMethod))
+                        .font(.custom("Roboto-Regular", size: 12))
+                        .foregroundColor(.secondary)
+                }
+                Text("Port \(room.listenPort) • \(room.lastUsed.formatted(date: .numeric, time: .shortened))")
                     .font(.custom("Roboto-Regular", size: 12))
                     .foregroundColor(.secondary)
             }
-            Text("Port \(room.listenPort) • \(room.lastUsed.formatted(date: .numeric, time: .shortened))")
-                .font(.custom("Roboto-Regular", size: 12))
-                .foregroundColor(.secondary)
+            Spacer()
+            Button {
+                loadRoom(room)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.system(size: 13, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                    Text("Load Room")
+                        .font(.custom("Roboto-Medium", size: 13))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(Color.primary.opacity(0.08), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
     }
 
     var body: some View {
-        ZStack {
-            // Single, consistent glass surface
-            Rectangle()
-                .fill(reduceTransparency
-                      ? AnyShapeStyle(Color(.systemBackground))
-                      : AnyShapeStyle(.ultraThinMaterial))
-                .ignoresSafeArea()
+        let showTabs = !roomsStore.rooms.isEmpty
+        return ZStack {
+            if reduceTransparency {
+                Color(.systemBackground)
+                    .ignoresSafeArea()
+            } else if #available(iOS 26.0, macOS 15.0, *) {
+                Rectangle()
+                    .fill(.clear)
+                    .glassEffect()
+                    .ignoresSafeArea()
+            } else {
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .ignoresSafeArea()
+            }
 
             VStack(spacing: 0) {
                 headerView
                     .padding(.horizontal, 20)
                     .padding(.top, 20)
 
-                glassSegmentedPicker(selection: $selectedTab,
-                                     options: ["Create", "Rooms"])
-                    .padding(.horizontal, 20)
-                    .padding(.top, 12)
+                if showTabs {
+                    joinTabsPicker
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
+                }
 
-                if selectedTab == 0 {
+                if selectedTab == .create || !showTabs {
                     ScrollView {
                         createRoomTab
                             .padding(.horizontal, 20)
@@ -9696,6 +9776,16 @@ private func printJoinQR() {
             }
         } message: {
             Text("This will break the current room for anyone using the old join info.")
+        }
+        .onChange(of: roomsStore.rooms.count) { newValue in
+            guard newValue == 0, selectedTab == .rooms else { return }
+            if reduceMotion {
+                selectedTab = .create
+            } else {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    selectedTab = .create
+                }
+            }
         }
     }
 }
