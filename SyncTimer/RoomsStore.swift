@@ -24,6 +24,45 @@ struct Room: Identifiable, Codable, Equatable {
         self.role = role
         self.listenPort = listenPort
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case createdAt
+        case lastUsed
+        case name
+        case hostUUID
+        case connectionMethod
+        case role
+        case listenPort
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        lastUsed = try container.decode(Date.self, forKey: .lastUsed)
+        name = try container.decode(String.self, forKey: .name)
+        hostUUID = try container.decode(String.self, forKey: .hostUUID)
+        listenPort = try container.decode(String.self, forKey: .listenPort)
+
+        let connectionRaw = try container.decode(String.self, forKey: .connectionMethod)
+        connectionMethod = SyncSettings.SyncConnectionMethod(rawValue: connectionRaw) ?? .network
+
+        let roleRaw = try container.decode(String.self, forKey: .role)
+        role = roleRaw == "child" ? .child : .parent
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(lastUsed, forKey: .lastUsed)
+        try container.encode(name, forKey: .name)
+        try container.encode(hostUUID, forKey: .hostUUID)
+        try container.encode(listenPort, forKey: .listenPort)
+        try container.encode(connectionMethod.rawValue, forKey: .connectionMethod)
+        try container.encode(role == .child ? "child" : "parent", forKey: .role)
+    }
 }
 
 @MainActor
