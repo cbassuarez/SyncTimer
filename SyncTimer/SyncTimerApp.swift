@@ -8852,9 +8852,9 @@ private func printJoinQR() {
     }
     private var subtitleLine2: String {
         switch normalizedConnectionMethod {
-        case .network:   return "Same network and port # required."
+        case .network:   return "Same network and port required."
         case .bluetooth: return "Works nearby over Bluetooth."
-        case .bonjour:   return "Same network and port # required."
+        case .bonjour:   return "Same network and port required."
         }
     }
 
@@ -9356,10 +9356,7 @@ private func printJoinQR() {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Join QR")
                     .font(.custom("Roboto-SemiBold", size: 26))
-                Text("Share a session with multiple people quickly through a specialized QR.")
-                    .font(.custom("Roboto-Regular", size: 14))
-                    .foregroundColor(.secondary)
-                Text(subtitleLine2)
+                Text("Share a configured session with multiple people quickly through custom QRs.")
                     .font(.custom("Roboto-Regular", size: 14))
                     .foregroundColor(.secondary)
             }
@@ -9368,9 +9365,9 @@ private func printJoinQR() {
 
             Button { dismiss() } label: {
                 ZStack {
-                    LiquidGlassCircle(diameter: 36, tint: settings.flashColor)
+                    LiquidGlassCircle(diameter: 44, tint: settings.flashColor)
                     Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(settings.flashColor)
                         .symbolRenderingMode(.hierarchical)
                 }
@@ -9553,6 +9550,29 @@ private func printJoinQR() {
                 }
                 .accessibilityHint("Enables SYNC so children can connect.")
             }
+            
+            Divider().opacity(0.95)
+
+            
+            
+            glassPrimaryButton(label: "Save Room",
+                               systemImage: "tray.and.arrow.down",
+                               disabled: syncSettings.role != .parent) {
+                let room = Room(
+                    name: deviceName,
+                    hostUUID: hostUUIDString,
+                    connectionMethod: normalizedConnectionMethod,
+                    role: syncSettings.role,
+                    listenPort: syncSettings.listenPort
+                )
+                roomsStore.add(room)
+            }
+            
+            Text("Save rooms to keep connection presets handy or print QR codes for easy scanning. \(subtitleLine2)")
+                .font(.custom("Roboto-Light", size: 12))
+                .foregroundColor(.secondary)
+            
+            Divider().opacity(0.95)
 
             // Primary + Secondary actions (reduced above-the-fold weight)
             VStack(spacing: 10) {
@@ -9565,6 +9585,36 @@ private func printJoinQR() {
                         }
                     } else {
                         showQRPreview.toggle()
+                    }
+                }
+                
+                // QR preview (inline; avoids the “tool” framing)
+                if showQRPreview {
+                    glassCard(cornerRadius: 20) {
+                        VStack(alignment: .center, spacing: 10) {
+                            #if canImport(UIKit)
+                            if let img = makeQRCodeUIImage(from: hostShareURLString) {
+                                Image(uiImage: img)
+                                    .interpolation(.none)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(maxWidth: .infinity)
+                                    .accessibilityLabel("Join QR code")
+                            } else {
+                                Text("Unable to generate QR.")
+                                    .font(.custom("Roboto-Regular", size: 14))
+                                    .foregroundColor(.secondary)
+                            }
+                            #else
+                            Text("QR preview is not available on this platform.")
+                                .font(.custom("Roboto-Regular", size: 14))
+                                .foregroundColor(.secondary)
+                            #endif
+
+                            Text("Child will auto-enable SYNC when scanning.")
+                                .font(.custom("Roboto-Light", size: 12))
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
 
@@ -9601,49 +9651,9 @@ private func printJoinQR() {
                 .disabled(syncSettings.role != .parent)
                 .opacity(syncSettings.role != .parent ? 0.55 : 1.0)
             }
-
-            glassPrimaryButton(label: "Save Room",
-                               systemImage: "tray.and.arrow.down",
-                               disabled: syncSettings.role != .parent) {
-                let room = Room(
-                    name: deviceName,
-                    hostUUID: hostUUIDString,
-                    connectionMethod: normalizedConnectionMethod,
-                    role: syncSettings.role,
-                    listenPort: syncSettings.listenPort
-                )
-                roomsStore.add(room)
-            }
-
-            // QR preview (inline; avoids the “tool” framing)
-            if showQRPreview {
-                glassCard(cornerRadius: 20) {
-                    VStack(alignment: .center, spacing: 10) {
-                        #if canImport(UIKit)
-                        if let img = makeQRCodeUIImage(from: hostShareURLString) {
-                            Image(uiImage: img)
-                                .interpolation(.none)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(maxWidth: .infinity)
-                                .accessibilityLabel("Join QR code")
-                        } else {
-                            Text("Unable to generate QR.")
-                                .font(.custom("Roboto-Regular", size: 14))
-                                .foregroundColor(.secondary)
-                        }
-                        #else
-                        Text("QR preview is not available on this platform.")
-                            .font(.custom("Roboto-Regular", size: 14))
-                            .foregroundColor(.secondary)
-                        #endif
-
-                        Text("Child will auto-enable SYNC when scanning.")
-                            .font(.custom("Roboto-Light", size: 12))
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
+            
+            
+            Divider().opacity(0.95)
 
             // Troubleshooting (collapsed)
             DisclosureGroup {
