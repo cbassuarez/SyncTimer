@@ -8565,6 +8565,8 @@ struct ConnectionPage: View {
             )
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+            .presentationBackground(.clear)
+                    .presentationCornerRadius(28)
         }
     }
     
@@ -8828,29 +8830,34 @@ private func printJoinQR() {
     private var hostShareURLString: String { hostShareURL.absoluteString }
     private var uuidSuffix: String { String(hostUUIDString.suffix(8)).uppercased() }
 
-    private var transportLabel: String {
+    private var normalizedConnectionMethod: SyncSettings.SyncConnectionMethod {
         switch syncSettings.connectionMethod {
+        case .bonjour: return .network   // bonjour deprecated → treat as Wi-Fi in this sheet
+        default:       return syncSettings.connectionMethod
+        }
+    }
+    private var transportLabel: String {
+        switch normalizedConnectionMethod {
         case .network:   return "Wi-Fi"
         case .bluetooth: return "Nearby"
-        case .bonjour:   return "Bonjour"
+        case .bonjour:   return "Wi-Fi" // unreachable via normalized, but keeps switch future-proof
         }
     }
-
     private var transportSymbol: String {
-        switch syncSettings.connectionMethod {
+        switch normalizedConnectionMethod {
         case .network:   return "wifi"
         case .bluetooth: return "antenna.radiowaves.left.and.right"
-        case .bonjour:   return "network"
+        case .bonjour:   return "wifi"
+        }
+    }
+    private var subtitleLine2: String {
+        switch normalizedConnectionMethod {
+        case .network:   return "Same network and port # required."
+        case .bluetooth: return "Works nearby over Bluetooth."
+        case .bonjour:   return "Same network and port # required."
         }
     }
 
-    private var subtitleLine2: String {
-        switch syncSettings.connectionMethod {
-        case .network:   return "Same network required."
-        case .bluetooth: return "Works nearby over Bluetooth."
-        case .bonjour:   return "Finds hosts on the local network."
-        }
-    }
 
     // Treat default/sentinel ports as "unset" for display-only (mirrors ConnectionPage)
     private func isUnsetPort(_ s: String) -> Bool {
@@ -8863,11 +8870,12 @@ private func printJoinQR() {
 
     private func connectionLabel(for method: SyncSettings.SyncConnectionMethod) -> String {
         switch method {
-        case .network: return "Wi-Fi"
+        case .network:   return "Wi-Fi"
         case .bluetooth: return "Nearby"
-        case .bonjour: return "Bonjour"
+        case .bonjour:   return "Wi-Fi" // deprecated
         }
     }
+
 
     private var ipString: String {
         getLocalIPAddress() ?? "Not on Wi-Fi"
@@ -8936,7 +8944,7 @@ private func printJoinQR() {
             else { syncSettings.stopChild() }
         }
 
-        syncSettings.connectionMethod = room.connectionMethod
+        syncSettings.connectionMethod = (room.connectionMethod == .bonjour) ? .network : room.connectionMethod
         syncSettings.role = room.role
         if room.connectionMethod == .network {
             syncSettings.listenPort = room.listenPort
@@ -8967,7 +8975,7 @@ private func printJoinQR() {
         let newRoom = Room(
             name: room.name,
             hostUUID: room.hostUUID,
-            connectionMethod: room.connectionMethod,
+            connectionMethod: (room.connectionMethod == .bonjour) ? .network : room.connectionMethod,
             role: room.role,
             listenPort: newPort
         )
@@ -9048,21 +9056,147 @@ private func printJoinQR() {
             )
     }
 
-    private func chip(systemImage: String, text: String, emphasis: Bool = false) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: systemImage)
-                .font(.system(size: 12, weight: .semibold))
-                .symbolRenderingMode(.hierarchical)
-            Text(text)
-                .font(.custom(emphasis ? "Roboto-Medium" : "Roboto-Regular", size: 12))
+    private struct QuickChipButtonStyle: ButtonStyle {
+        var reduceMotion: Bool
+        var isEmphasized: Bool = false
+
+        func makeBody(configuration: Configuration) -> some View {
+            let pressed = configuration.isPressed
+            let strokeOpacity: Double = pressed ? 0.22 : 0.10
+            let shadowOpacity: Double = pressed ? 0.10 : 0.06
+            let shadowRadius: CGFloat = pressed ? 10 : 8
+            let shadowY: CGFloat = pressed ? 6 : 5
+
+            return configuration.label
+                .scaleEffect(pressed ? 0.98 : 1.0)
+                .brightness(pressed ? 0.03 : 0.0)
+                .overlay {
+                    Capsule()
+                        .stroke(Color.white.opacity(strokeOpacity), lineWidth: 0.8)
+                        .padding(0.5)
+                }
+                .shadow(color: .black.opacity(shadowOpacity),
+                        radius: shadowRadius,
+                        x: 0, y: shadowY)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: pressed)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().stroke(Color.primary.opacity(0.08), lineWidth: 1))
-        .foregroundColor(.secondary)
+
+    }
+
+    private func quickChip(
+        leading: String,
+        text: String,
+        trailing: String,
+        isActive: Bool,
+        isEmphasized: Bool = false,
+        disabled: Bool = false
+    ) -> some View {
+        let shape = Capsule()
+
+        // Precompute styles (dramatically reduces SwiftUI type-check complexity)
+        let leadingColor: Color = disabled
+            ? .secondary
+            : (isActive ? settings.flashColor : .primary.opacity(0.85))
+
+        let textColor: Color = disabled ? .secondary : .primary
+        let trailingColor: Color = disabled ? .secondary.opacity(0.7) : .secondary
+
+        let ringColor: Color = disabled
+            ? Color.white.opacity(0.10)
+            : (isActive
+                ? settings.flashColor.opacity(isEmphasized ? 0.40 : 0.26)
+                : Color.white.opacity(0.18))
+
+        return HStack(spacing: 8) {
+            Image(systemName: leading)
+                .font(.system(size: 13, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(leadingColor)
+                .ifAvailableSymbolReplace()
+
+            Text(text)
+                .font(.custom(isEmphasized ? "Roboto-SemiBold" : "Roboto-Medium", size: 13))
+                .foregroundStyle(textColor)
+
+            Image(systemName: trailing)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(trailingColor)
+                .contentTransition(.symbolEffect(.replace))
+                .ifAvailableSymbolReplace()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(minHeight: 36)
+        .background { quickChipBackground(in: shape) }
+        .overlay { shape.stroke(ringColor, lineWidth: 1) }
+        .overlay { shape.stroke(Color.white.opacity(0.10), lineWidth: 0.6).padding(1) }
+        .opacity(disabled ? 0.60 : 1.0)
         .accessibilityElement(children: .combine)
     }
+
+
+    private func stopSyncIfRunning() {
+        guard syncSettings.isEnabled else { return }
+        if syncSettings.role == .parent { syncSettings.stopParent() }
+        else { syncSettings.stopChild() }
+        syncSettings.isEnabled = false
+    }
+
+    private func setConnectionMethod(_ method: SyncSettings.SyncConnectionMethod) {
+        let desired: SyncSettings.SyncConnectionMethod = (method == .bonjour) ? .network : method
+        guard syncSettings.connectionMethod != desired else { return }
+        stopSyncIfRunning()
+        syncSettings.connectionMethod = desired
+    }
+
+
+    private func cycleConnectionMethod() {
+        let next: SyncSettings.SyncConnectionMethod
+        switch normalizedConnectionMethod {
+        case .network:   next = .bluetooth
+        case .bluetooth: next = .network
+        case .bonjour:   next = .network
+        }
+        setConnectionMethod(next)
+    }
+
+    @ViewBuilder
+    private func quickChipBackground(in shape: Capsule) -> some View {
+        if reduceTransparency {
+            shape.fill(Color(.systemBackground))
+        } else if #available(iOS 26.0, *) {
+            Color.clear.glassEffect(.regular, in: shape)
+        } else {
+            shape.fill(.ultraThinMaterial)
+        }
+    }
+
+
+    private func setRole(_ role: SyncSettings.Role) {
+        guard syncSettings.role != role else { return }
+        stopSyncIfRunning()
+        syncSettings.role = role
+    }
+
+    private func toggleRole() {
+        let next: SyncSettings.Role = (syncSettings.role == .parent) ? .child : .parent
+        setRole(next)
+    }
+
+    private func setSyncEnabled(_ enabled: Bool) {
+        if enabled {
+            // Prefer the sheet’s “blessed” enable path if provided (keeps parity with main UX).
+            if let onRequestEnableSync { onRequestEnableSync(); return }
+
+            // Safe fallback if the closure is nil.
+            syncSettings.isEnabled = true
+            if syncSettings.role == .parent { syncSettings.startParent() }
+            else { syncSettings.startChild() }
+        } else {
+            stopSyncIfRunning()
+        }
+    }
+
 
     private func glassPrimaryButton(label: String,
                                     systemImage: String,
@@ -9147,6 +9281,7 @@ private func printJoinQR() {
                 shape
                     .fill(.clear)
                     .glassEffect(.regular, in: shape)
+                
             } else if #available(iOS 18.0, macOS 15.0, *) {
                 shape
                     .fill(.clear)
@@ -9256,7 +9391,7 @@ private func printJoinQR() {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Join QR")
                     .font(.custom("Roboto-SemiBold", size: 26))
-                Text("Let a child join this session instantly.")
+                Text("Share a session with multiple people quickly through a specialized QR.")
                     .font(.custom("Roboto-Regular", size: 14))
                     .foregroundColor(.secondary)
                 Text(subtitleLine2)
@@ -9382,39 +9517,79 @@ private func printJoinQR() {
             }
 
             // Glass chips (meaningful state)
-            HStack(spacing: 8) {
-                Button {
-                    // mirror ConnectionPage safety: switching transport while running should stop
-                    if syncSettings.isEnabled {
-                        if syncSettings.role == .parent { syncSettings.stopParent() }
-                        else { syncSettings.stopChild() }
-                        syncSettings.isEnabled = false
-                    }
-                    syncSettings.connectionMethod = (syncSettings.connectionMethod == .network) ? .bluetooth : .network
-                } label: {
-                    chip(systemImage: transportSymbol, text: transportLabel)
-                }
-                .buttonStyle(.plain)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Quick settings")
+                    .font(.custom("Roboto-Regular", size: 12))
+                    .foregroundColor(.secondary)
 
-                Button {
-                    if syncSettings.isEnabled {
-                        if syncSettings.role == .parent { syncSettings.stopParent() }
-                        else { syncSettings.stopChild() }
-                        syncSettings.isEnabled = false
+                HStack(spacing: 10) {
+                    // Transport (tap cycles; long-press shows explicit choices)
+                    Button {
+                        if reduceMotion { cycleConnectionMethod() }
+                        else { withAnimation(.easeInOut(duration: 0.18)) { cycleConnectionMethod() } }
+                    } label: {
+                        quickChip(
+                            leading: transportSymbol,
+                            text: transportLabel,
+                            trailing: "arrow.triangle.2.circlepath",
+                            isActive: true
+                        )
                     }
-                    syncSettings.role = (syncSettings.role == .parent) ? .child : .parent
-                } label: {
-                    chip(systemImage: syncSettings.role == .parent ? "arrow.up.circle" : "arrow.down.circle",
-                         text: syncSettings.role == .parent ? "Parent" : "Child")
-                }
-                .buttonStyle(.plain)
+                    .buttonStyle(QuickChipButtonStyle(reduceMotion: reduceMotion))
+                    .contextMenu {
+                        Button { setConnectionMethod(.network) } label: { Label("Wi-Fi", systemImage: "wifi") }
+                        Button { setConnectionMethod(.bluetooth) } label: { Label("Nearby", systemImage: "antenna.radiowaves.left.and.right") }
+                    }
+                    .accessibilityHint("Tap to cycle. Touch and hold for choices.")
 
-                if syncSettings.isEnabled {
-                    chip(systemImage: "checkmark.circle", text: "Ready to Join", emphasis: true)
-                } else {
-                    chip(systemImage: "bolt.slash", text: "Enable SYNC", emphasis: true)
+                    // Role (tap toggles; long-press shows explicit choices)
+                    Button {
+                        if reduceMotion { toggleRole() }
+                        else { withAnimation(.easeInOut(duration: 0.18)) { toggleRole() } }
+                    } label: {
+                        quickChip(
+                            leading: (syncSettings.role == .parent ? "arrow.up.circle" : "arrow.down.circle"),
+                            text: (syncSettings.role == .parent ? "Parent" : "Child"),
+                            trailing: "arrow.triangle.swap",
+                            isActive: true
+                        )
+                    }
+                    .buttonStyle(QuickChipButtonStyle(reduceMotion: reduceMotion))
+                    .contextMenu {
+                        Button { setRole(.parent) } label: { Label("Parent", systemImage: "arrow.up.circle") }
+                        Button { setRole(.child) } label: { Label("Child", systemImage: "arrow.down.circle") }
+                    }
+                    .accessibilityHint("Tap to toggle. Touch and hold for choices.")
+
+                    // SYNC (primary in row)
+                    Button {
+                        if reduceMotion { setSyncEnabled(!syncSettings.isEnabled) }
+                        else { withAnimation(.easeInOut(duration: 0.18)) { setSyncEnabled(!syncSettings.isEnabled) } }
+                    } label: {
+                        if syncSettings.isEnabled {
+                            quickChip(
+                                leading: "checkmark.circle.fill",
+                                text: "Ready to Join",
+                                trailing: "power",
+                                isActive: true,
+                                isEmphasized: true
+                            )
+                        } else {
+                            quickChip(
+                                leading: "bolt.fill",
+                                text: "Enable SYNC",
+                                trailing: "power",
+                                isActive: false,
+                                isEmphasized: true
+                            )
+                        }
+                    }
+                    .buttonStyle(QuickChipButtonStyle(reduceMotion: reduceMotion, isEmphasized: true))
+                    .accessibilityHint(syncSettings.isEnabled ? "Tap to turn SYNC off." : "Tap to turn SYNC on.")
                 }
             }
+            .padding(.top, 2)
+
             .padding(.top, 2)
 
             // Actionable SYNC enable (only when it can help)
@@ -9479,7 +9654,7 @@ private func printJoinQR() {
                 let room = Room(
                     name: deviceName,
                     hostUUID: hostUUIDString,
-                    connectionMethod: syncSettings.connectionMethod,
+                    connectionMethod: normalizedConnectionMethod,
                     role: syncSettings.role,
                     listenPort: syncSettings.listenPort
                 )
@@ -9720,10 +9895,13 @@ private func printJoinQR() {
                 Color(.systemBackground)
                     .ignoresSafeArea()
             } else if #available(iOS 26.0, macOS 15.0, *) {
-                Rectangle()
-                    .fill(.clear)
-                    .glassEffect()
+                let sheetShape = RoundedRectangle(cornerRadius: 28, style: .continuous)
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .glassEffect(.regular, in: sheetShape)
                     .ignoresSafeArea()
+                    .containerShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+
             } else {
                 Rectangle()
                     .fill(.ultraThinMaterial)
@@ -9787,6 +9965,12 @@ private func printJoinQR() {
                 }
             }
         }
+        // iOS 16+ (works on iOS 26): remove default sheet material background
+        .presentationBackground(.clear)
+
+        // optional: keep system dimming but prevent weird “card” feel
+        .presentationBackgroundInteraction(.enabled)
+
     }
 }
 
