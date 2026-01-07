@@ -8803,8 +8803,18 @@ private func printJoinQR() {
     @State private var revealIP = false
     @State private var showQRPreview = false
     @State private var toastText: String = "Copied"
+    @State private var selectedTab: Int = 0
+    @State private var showPortWarning = false
+    @State private var pendingPortChange: PortChangeAction? = nil
+    @StateObject private var roomsStore = RoomsStore()
+    @Namespace private var tabNamespace
 
     private enum CopyKey { case link, hostID, ip, port }
+
+    private enum PortChangeAction {
+        case regenerateCurrent(copyToClipboard: Bool)
+        case cloneRoom(Room)
+    }
 
     private var hostShareURLString: String { hostShareURL.absoluteString }
     private var uuidSuffix: String { String(hostUUIDString.suffix(8)).uppercased() }
@@ -8841,6 +8851,14 @@ private func printJoinQR() {
     }
 
     private func generateEphemeralPort() -> UInt16 { UInt16.random(in: 49153...65534) }
+
+    private func connectionLabel(for method: SyncSettings.SyncConnectionMethod) -> String {
+        switch method {
+        case .network: return "Wi-Fi"
+        case .bluetooth: return "Nearby"
+        case .bonjour: return "Bonjour"
+        }
+    }
 
     private var ipString: String {
         getLocalIPAddress() ?? "Not on Wi-Fi"
@@ -8879,6 +8897,50 @@ private func printJoinQR() {
             }
             lastCopied = nil
         }
+    }
+
+    private func requestPortChange(_ action: PortChangeAction) {
+        pendingPortChange = action
+        showPortWarning = true
+    }
+
+    private func handlePortChange() {
+        guard let action = pendingPortChange else { return }
+        switch action {
+        case .regenerateCurrent(let copyToClipboard):
+            syncSettings.listenPort = String(generateEphemeralPort())
+            if copyToClipboard {
+                copyToPasteboard(syncSettings.listenPort, key: .port, toast: "New port generated")
+            }
+        case .cloneRoom(let room):
+            cloneRoomWithNewPort(room)
+        }
+        pendingPortChange = nil
+    }
+
+    private func applyRoom(_ room: Room) {
+        syncSettings.connectionMethod = room.connectionMethod
+        syncSettings.role = room.role
+        syncSettings.listenPort = room.listenPort
+        roomsStore.updateLastUsed(room)
+
+        if syncSettings.isEnabled, syncSettings.role == .parent, syncSettings.connectionMethod == .network {
+            syncSettings.stopParent()
+            syncSettings.startParent()
+        }
+    }
+
+    private func cloneRoomWithNewPort(_ room: Room) {
+        let newPort = String(generateEphemeralPort())
+        let newRoom = Room(
+            name: room.name,
+            hostUUID: room.hostUUID,
+            connectionMethod: room.connectionMethod,
+            role: room.role,
+            listenPort: newPort
+        )
+        roomsStore.add(newRoom)
+        applyRoom(newRoom)
     }
 
     // MARK: - QR image
@@ -9029,6 +9091,42 @@ private func printJoinQR() {
         .accessibilityLabel(label)
     }
 
+    private func glassSegmentedPicker(selection: Binding<Int>, options: [String]) -> some View {
+        HStack(spacing: 0) {
+            ForEach(options.indices, id: \.self) { index in
+                let isSelected = selection.wrappedValue == index
+                Button {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        selection.wrappedValue = index
+                    }
+                } label: {
+                    Text(options[index])
+                        .font(.custom("Roboto-SemiBold", size: 15))
+                        .foregroundColor(isSelected ? .white : .primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
+                        .background(
+                            Group {
+                                if isSelected {
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(settings.flashColor)
+                                        .matchedGeometryEffect(id: "joinQrTab", in: tabNamespace)
+                                }
+                            }
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(4)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+    }
+
     private func advancedRow(title: String,
                              detail: String? = nil,
                              leadingSymbol: String,
@@ -9076,6 +9174,457 @@ private func printJoinQR() {
         .buttonStyle(.plain)
     }
 
+    private var headerView: some View {
+        HStack(alignment: .top, spacing: 12) {
+            headerIcon
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Join QR")
+                    .font(.custom("Roboto-SemiBold", size: 26))
+                Text("Let a child join this session instantly.")
+                    .font(.custom("Roboto-Regular", size: 14))
+                    .foregroundColor(.secondary)
+                Text(subtitleLine2)
+                    .font(.custom("Roboto-Regular", size: 14))
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            Button { dismiss() } label: {
+                ZStack {
+                    LiquidGlassCircle(diameter: 36, tint: settings.flashColor)
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(settings.flashColor)
+                        .symbolRenderingMode(.hierarchical)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss")
+        }
+    }
+
+    @ViewBuilder
+    private var createRoomTab: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            // Compact payload summary (does real work)
+            glassCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(deviceName)
+                            .font(.custom("Roboto-SemiBold", size: 18))
+                        Spacer()
+                        Button {
+                            copyToPasteboard(hostUUIDString, key: .hostID, toast: "Host ID copied")
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text("…\(uuidSuffix)")
+                                    .font(.system(.caption, design: .monospaced))
+                                Image(systemName: (lastCopied == .hostID) ? "checkmark" : "doc.on.doc")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.secondary)
+                                    .ifAvailableSymbolReplace()
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .overlay(Capsule().stroke(Color.primary.opacity(0.08), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Copy Host ID")
+                    }
+
+                    if connectionMethod == .network {
+                        Divider().opacity(0.12)
+
+                        HStack(spacing: 10) {
+                            Text("IP")
+                                .font(.custom("Roboto-Medium", size: 13))
+                                .foregroundColor(.secondary)
+                                .frame(width: 26, alignment: .leading)
+
+                            Button {
+                                if !reduceMotion { withAnimation(.easeInOut(duration: 0.18)) { revealIP.toggle() } }
+                                else { revealIP.toggle() }
+                            } label: {
+                                Text(revealIP ? ipString : "Tap to reveal")
+                                    .font(.custom("Roboto-Regular", size: 14))
+                                    .foregroundColor(revealIP ? .primary : .secondary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
+                            }
+                            .buttonStyle(.plain)
+
+                            Spacer()
+
+                            if revealIP, ipString != "Not on Wi-Fi" {
+                                Button {
+                                    copyToPasteboard(ipString, key: .ip, toast: "IP copied")
+                                } label: {
+                                    Image(systemName: (lastCopied == .ip) ? "checkmark" : "doc.on.doc")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(.secondary)
+                                        .ifAvailableSymbolReplace()
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Copy IP")
+                            }
+                        }
+
+                        HStack(spacing: 10) {
+                            Text("Port")
+                                .font(.custom("Roboto-Medium", size: 13))
+                                .foregroundColor(.secondary)
+                                .frame(width: 26, alignment: .leading)
+
+                            Button {
+                                requestPortChange(.regenerateCurrent(copyToClipboard: false))
+                            } label: {
+                                Text(isUnsetPort(syncSettings.listenPort) ? "Tap to generate" : syncSettings.listenPort)
+                                    .font(.custom("Roboto-Regular", size: 14))
+                                    .foregroundColor(isUnsetPort(syncSettings.listenPort) ? .secondary : .primary)
+                            }
+                            .buttonStyle(.plain)
+
+                            Spacer()
+
+                            if !isUnsetPort(syncSettings.listenPort) {
+                                Button {
+                                    copyToPasteboard(syncSettings.listenPort, key: .port, toast: "Port copied")
+                                } label: {
+                                    Image(systemName: (lastCopied == .port) ? "checkmark" : "doc.on.doc")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(.secondary)
+                                        .ifAvailableSymbolReplace()
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Copy Port")
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Glass chips (meaningful state)
+            HStack(spacing: 8) {
+                Button {
+                    // mirror ConnectionPage safety: switching transport while running should stop
+                    if syncSettings.isEnabled {
+                        if syncSettings.role == .parent { syncSettings.stopParent() }
+                        else { syncSettings.stopChild() }
+                        syncSettings.isEnabled = false
+                    }
+                    syncSettings.connectionMethod = (syncSettings.connectionMethod == .network) ? .bluetooth : .network
+                } label: {
+                    chip(systemImage: transportSymbol, text: transportLabel)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    if syncSettings.isEnabled {
+                        if syncSettings.role == .parent { syncSettings.stopParent() }
+                        else { syncSettings.stopChild() }
+                        syncSettings.isEnabled = false
+                    }
+                    syncSettings.role = (syncSettings.role == .parent) ? .child : .parent
+                } label: {
+                    chip(systemImage: role == .parent ? "arrow.up.circle" : "arrow.down.circle",
+                         text: role == .parent ? "Parent" : "Child")
+                }
+                .buttonStyle(.plain)
+
+                if isSyncEnabled {
+                    chip(systemImage: "checkmark.circle", text: "Ready to Join", emphasis: true)
+                } else {
+                    chip(systemImage: "bolt.slash", text: "Enable SYNC", emphasis: true)
+                }
+            }
+            .padding(.top, 2)
+
+            // Actionable SYNC enable (only when it can help)
+            if !isSyncEnabled, let onRequestEnableSync {
+                glassSecondaryButton(label: "Turn SYNC On", systemImage: "bolt.fill") {
+                    onRequestEnableSync()
+                }
+                .accessibilityHint("Enables SYNC so children can connect.")
+            }
+
+            // Primary + Secondary actions (reduced above-the-fold weight)
+            VStack(spacing: 10) {
+                glassPrimaryButton(label: showQRPreview ? "Hide QR" : "Show QR",
+                                   systemImage: "qrcode",
+                                   disabled: (role != .parent)) {
+                    if !reduceMotion {
+                        withAnimation(.snappy(duration: 0.26, extraBounce: 0.12)) {
+                            showQRPreview.toggle()
+                        }
+                    } else {
+                        showQRPreview.toggle()
+                    }
+                }
+
+                HStack(spacing: 10) {
+                    ShareLink(item: hostShareURL) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 15, weight: .semibold))
+                                .symbolRenderingMode(.hierarchical)
+                            Text("Share")
+                                .font(.custom("Roboto-Medium", size: 16))
+                            Spacer()
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .frame(maxWidth: .infinity)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.primary.opacity(0.08), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(role != .parent)
+                    .opacity(role != .parent ? 0.55 : 1.0)
+
+                    #if canImport(UIKit)
+                    glassSecondaryButton(label: "Print", systemImage: "printer") {
+                        printJoinQR()
+                    }
+                    .disabled(role != .parent)
+                    .opacity(role != .parent ? 0.55 : 1.0)
+                    #endif
+                }
+
+                .buttonStyle(.plain)
+                .disabled(role != .parent)
+                .opacity(role != .parent ? 0.55 : 1.0)
+            }
+
+            glassPrimaryButton(label: "Save Room",
+                               systemImage: "tray.and.arrow.down",
+                               disabled: role != .parent) {
+                let room = Room(
+                    name: deviceName,
+                    hostUUID: hostUUIDString,
+                    connectionMethod: connectionMethod,
+                    role: role,
+                    listenPort: syncSettings.listenPort
+                )
+                roomsStore.add(room)
+            }
+
+            // QR preview (inline; avoids the “tool” framing)
+            if showQRPreview {
+                glassCard(cornerRadius: 20) {
+                    VStack(alignment: .center, spacing: 10) {
+                        #if canImport(UIKit)
+                        if let img = makeQRCodeUIImage(from: hostShareURLString) {
+                            Image(uiImage: img)
+                                .interpolation(.none)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: .infinity)
+                                .accessibilityLabel("Join QR code")
+                        } else {
+                            Text("Unable to generate QR.")
+                                .font(.custom("Roboto-Regular", size: 14))
+                                .foregroundColor(.secondary)
+                        }
+                        #else
+                        Text("QR preview is not available on this platform.")
+                            .font(.custom("Roboto-Regular", size: 14))
+                            .foregroundColor(.secondary)
+                        #endif
+
+                        Text("Child will auto-enable SYNC when scanning.")
+                            .font(.custom("Roboto-Light", size: 12))
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            // Troubleshooting (collapsed)
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("• Confirm both devices are on the same Wi-Fi.")
+                        .font(.custom("Roboto-Regular", size: 13))
+                        .foregroundColor(.secondary)
+                    Text("• Try Nearby mode.")
+                        .font(.custom("Roboto-Regular", size: 13))
+                        .foregroundColor(.secondary)
+
+                    if connectionMethod == .network {
+                        Button {
+                            requestPortChange(.regenerateCurrent(copyToClipboard: true))
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(.secondary)
+                                Text("Regenerate port")
+                                    .font(.custom("Roboto-Medium", size: 14))
+                                Spacer()
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.primary.opacity(0.08), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 8)
+            } label: {
+                Text("Troubleshooting")
+                    .font(.custom("Roboto-Medium", size: 14))
+                    .foregroundColor(.secondary)
+            }
+            .padding(.top, 4)
+
+            if connectionMethod == .network {
+                glassSecondaryButton(label: "New Room (New Port)", systemImage: "plus.circle") {
+                    requestPortChange(.regenerateCurrent(copyToClipboard: false))
+                }
+                .disabled(role != .parent)
+                .opacity(role != .parent ? 0.55 : 1.0)
+            }
+
+            // Advanced (collapsed): utilities + “open in browser”
+            DisclosureGroup {
+                VStack(spacing: 10) {
+                    advancedRow(title: "Copy link",
+                                detail: nil,
+                                leadingSymbol: "link",
+                                key: .link) {
+                        copyToPasteboard(hostShareURLString, key: .link, toast: "Link copied")
+                    }
+
+                    advancedRow(title: "Copy Host ID",
+                                detail: "…\(uuidSuffix)",
+                                leadingSymbol: "number",
+                                key: .hostID) {
+                        copyToPasteboard(hostUUIDString, key: .hostID, toast: "Host ID copied")
+                    }
+
+                    if connectionMethod == .network, ipString != "Not on Wi-Fi" {
+                        advancedRow(title: "Copy IP",
+                                    detail: ipString,
+                                    leadingSymbol: "wifi",
+                                    key: .ip) {
+                            copyToPasteboard(ipString, key: .ip, toast: "IP copied")
+                        }
+                    }
+
+                    if connectionMethod == .network, !isUnsetPort(syncSettings.listenPort) {
+                        advancedRow(title: "Copy Port",
+                                    detail: syncSettings.listenPort,
+                                    leadingSymbol: "circle.grid.cross",
+                                    key: .port) {
+                            copyToPasteboard(syncSettings.listenPort, key: .port, toast: "Port copied")
+                        }
+                    }
+
+                    Button {
+                        openURL(hostShareURL)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "safari")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.secondary)
+                                .frame(width: 18)
+                            Text("Open in browser")
+                                .font(.custom("Roboto-Medium", size: 14))
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Image(systemName: "arrow.up.right.square")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.primary.opacity(0.08), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
+                    Text("Anyone with this link can generate Join QRs for this host.")
+                        .font(.custom("Roboto-Light", size: 12))
+                        .foregroundColor(.secondary)
+                        .padding(.top, 2)
+                }
+                .padding(.top, 8)
+            } label: {
+                Text("Advanced")
+                    .font(.custom("Roboto-Medium", size: 14))
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var roomsLibraryTab: some View {
+        if roomsStore.rooms.isEmpty {
+            VStack(spacing: 10) {
+                Text("No saved rooms yet.")
+                    .font(.custom("Roboto-Regular", size: 14))
+                    .foregroundColor(.secondary)
+                glassPrimaryButton(label: "Create a Room", systemImage: "plus") {
+                    selectedTab = 0
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .padding(.horizontal, 20)
+        } else {
+            List {
+                ForEach(roomsStore.rooms) { room in
+                    Button {
+                        applyRoom(room)
+                    } label: {
+                        glassCard {
+                            roomRow(room)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            requestPortChange(.cloneRoom(room))
+                        } label: {
+                            Label("Load New Port", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                    }
+                    .swipeActions {
+                        Button(role: .destructive) {
+                            roomsStore.delete(room)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                    .listRowInsets(EdgeInsets(top: 6, leading: 20, bottom: 6, trailing: 20))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+        }
+    }
+
+    private func roomRow(_ room: Room) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(room.name)
+                    .font(.custom("Roboto-SemiBold", size: 16))
+                Spacer()
+                Text(connectionLabel(for: room.connectionMethod))
+                    .font(.custom("Roboto-Regular", size: 12))
+                    .foregroundColor(.secondary)
+            }
+            Text("Port \(room.listenPort) • \(room.lastUsed.formatted(date: .numeric, time: .shortened))")
+                .font(.custom("Roboto-Regular", size: 12))
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
     var body: some View {
         ZStack {
             // Single, consistent glass surface
@@ -9085,368 +9634,26 @@ private func printJoinQR() {
                       : AnyShapeStyle(.ultraThinMaterial))
                 .ignoresSafeArea()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    // Header (icon morph analogue + dismiss)
-                    HStack(alignment: .top, spacing: 12) {
-                        headerIcon
+            VStack(spacing: 0) {
+                headerView
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
 
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Join QR")
-                                .font(.custom("Roboto-SemiBold", size: 26))
-                            Text("Let a child join this session instantly.")
-                                .font(.custom("Roboto-Regular", size: 14))
-                                .foregroundColor(.secondary)
-                            Text(subtitleLine2)
-                                .font(.custom("Roboto-Regular", size: 14))
-                                .foregroundColor(.secondary)
-                        }
+                glassSegmentedPicker(selection: $selectedTab,
+                                     options: ["Create", "Rooms"])
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
 
-                        Spacer()
-
-                        Button { dismiss() } label: {
-                            ZStack {
-                                LiquidGlassCircle(diameter: 36, tint: settings.flashColor)
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(settings.flashColor)
-                                    .symbolRenderingMode(.hierarchical)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Dismiss")
+                if selectedTab == 0 {
+                    ScrollView {
+                        createRoomTab
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 20)
                     }
-
-                    // Compact payload summary (does real work)
-                    glassCard {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(deviceName)
-                                    .font(.custom("Roboto-SemiBold", size: 18))
-                                Spacer()
-                                Button {
-                                    copyToPasteboard(hostUUIDString, key: .hostID, toast: "Host ID copied")
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Text("…\(uuidSuffix)")
-                                            .font(.system(.caption, design: .monospaced))
-                                        Image(systemName: (lastCopied == .hostID) ? "checkmark" : "doc.on.doc")
-                                            .font(.system(size: 12, weight: .semibold))
-                                            .foregroundColor(.secondary)
-                                            .ifAvailableSymbolReplace()
-                                    }
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(.ultraThinMaterial, in: Capsule())
-                                    .overlay(Capsule().stroke(Color.primary.opacity(0.08), lineWidth: 1))
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("Copy Host ID")
-                            }
-
-                            if connectionMethod == .network {
-                                Divider().opacity(0.12)
-
-                                HStack(spacing: 10) {
-                                    Text("IP")
-                                        .font(.custom("Roboto-Medium", size: 13))
-                                        .foregroundColor(.secondary)
-                                        .frame(width: 26, alignment: .leading)
-
-                                    Button {
-                                        if !reduceMotion { withAnimation(.easeInOut(duration: 0.18)) { revealIP.toggle() } }
-                                        else { revealIP.toggle() }
-                                    } label: {
-                                        Text(revealIP ? ipString : "Tap to reveal")
-                                            .font(.custom("Roboto-Regular", size: 14))
-                                            .foregroundColor(revealIP ? .primary : .secondary)
-                                            .lineLimit(1)
-                                            .minimumScaleFactor(0.85)
-                                    }
-                                    .buttonStyle(.plain)
-
-                                    Spacer()
-
-                                    if revealIP, ipString != "Not on Wi-Fi" {
-                                        Button {
-                                            copyToPasteboard(ipString, key: .ip, toast: "IP copied")
-                                        } label: {
-                                            Image(systemName: (lastCopied == .ip) ? "checkmark" : "doc.on.doc")
-                                                .font(.system(size: 14, weight: .semibold))
-                                                .foregroundColor(.secondary)
-                                                .ifAvailableSymbolReplace()
-                                        }
-                                        .buttonStyle(.plain)
-                                        .accessibilityLabel("Copy IP")
-                                    }
-                                }
-
-                                HStack(spacing: 10) {
-                                    Text("Port")
-                                        .font(.custom("Roboto-Medium", size: 13))
-                                        .foregroundColor(.secondary)
-                                        .frame(width: 26, alignment: .leading)
-
-                                    Button {
-                                        syncSettings.listenPort = String(generateEphemeralPort())
-                                    } label: {
-                                        Text(isUnsetPort(syncSettings.listenPort) ? "Tap to generate" : syncSettings.listenPort)
-                                            .font(.custom("Roboto-Regular", size: 14))
-                                            .foregroundColor(isUnsetPort(syncSettings.listenPort) ? .secondary : .primary)
-                                    }
-                                    .buttonStyle(.plain)
-
-                                    Spacer()
-
-                                    if !isUnsetPort(syncSettings.listenPort) {
-                                        Button {
-                                            copyToPasteboard(syncSettings.listenPort, key: .port, toast: "Port copied")
-                                        } label: {
-                                            Image(systemName: (lastCopied == .port) ? "checkmark" : "doc.on.doc")
-                                                .font(.system(size: 14, weight: .semibold))
-                                                .foregroundColor(.secondary)
-                                                .ifAvailableSymbolReplace()
-                                        }
-                                        .buttonStyle(.plain)
-                                        .accessibilityLabel("Copy Port")
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Glass chips (meaningful state)
-                    HStack(spacing: 8) {
-                        Button {
-                            // mirror ConnectionPage safety: switching transport while running should stop
-                            if syncSettings.isEnabled {
-                                if syncSettings.role == .parent { syncSettings.stopParent() }
-                                else { syncSettings.stopChild() }
-                                syncSettings.isEnabled = false
-                            }
-                            syncSettings.connectionMethod = (syncSettings.connectionMethod == .network) ? .bluetooth : .network
-                        } label: {
-                            chip(systemImage: transportSymbol, text: transportLabel)
-                        }
-                        .buttonStyle(.plain)
-
-                        Button {
-                            if syncSettings.isEnabled {
-                                if syncSettings.role == .parent { syncSettings.stopParent() }
-                                else { syncSettings.stopChild() }
-                                syncSettings.isEnabled = false
-                            }
-                            syncSettings.role = (syncSettings.role == .parent) ? .child : .parent
-                        } label: {
-                            chip(systemImage: role == .parent ? "arrow.up.circle" : "arrow.down.circle",
-                                 text: role == .parent ? "Parent" : "Child")
-                        }
-                        .buttonStyle(.plain)
-
-                        if isSyncEnabled {
-                            chip(systemImage: "checkmark.circle", text: "Ready to Join", emphasis: true)
-                        } else {
-                            chip(systemImage: "bolt.slash", text: "Enable SYNC", emphasis: true)
-                        }
-                    }
-                    .padding(.top, 2)
-
-                    // Actionable SYNC enable (only when it can help)
-                    if !isSyncEnabled, let onRequestEnableSync {
-                        glassSecondaryButton(label: "Turn SYNC On", systemImage: "bolt.fill") {
-                            onRequestEnableSync()
-                        }
-                        .accessibilityHint("Enables SYNC so children can connect.")
-                    }
-
-                    // Primary + Secondary actions (reduced above-the-fold weight)
-                    VStack(spacing: 10) {
-                        glassPrimaryButton(label: showQRPreview ? "Hide QR" : "Show QR",
-                                           systemImage: "qrcode",
-                                           disabled: (role != .parent)) {
-                            if !reduceMotion {
-                                withAnimation(.snappy(duration: 0.26, extraBounce: 0.12)) {
-                                    showQRPreview.toggle()
-                                }
-                            } else {
-                                showQRPreview.toggle()
-                            }
-                        }
-
-                        HStack(spacing: 10) {
-                            ShareLink(item: hostShareURL) {
-                                HStack(spacing: 10) {
-                                    Image(systemName: "square.and.arrow.up")
-                                        .font(.system(size: 15, weight: .semibold))
-                                        .symbolRenderingMode(.hierarchical)
-                                    Text("Share")
-                                        .font(.custom("Roboto-Medium", size: 16))
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 12)
-                                .frame(maxWidth: .infinity)
-                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.primary.opacity(0.08), lineWidth: 1))
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(role != .parent)
-                            .opacity(role != .parent ? 0.55 : 1.0)
-
-                            #if canImport(UIKit)
-                            glassSecondaryButton(label: "Print", systemImage: "printer") {
-                                printJoinQR()
-                            }
-                            .disabled(role != .parent)
-                            .opacity(role != .parent ? 0.55 : 1.0)
-                            #endif
-                        }
-
-                        .buttonStyle(.plain)
-                        .disabled(role != .parent)
-                        .opacity(role != .parent ? 0.55 : 1.0)
-                    }
-
-                    // QR preview (inline; avoids the “tool” framing)
-                    if showQRPreview {
-                        glassCard(cornerRadius: 20) {
-                            VStack(alignment: .center, spacing: 10) {
-                                #if canImport(UIKit)
-                                if let img = makeQRCodeUIImage(from: hostShareURLString) {
-                                    Image(uiImage: img)
-                                        .interpolation(.none)
-                                        .resizable()
-                                        .scaledToFit()
-                                        .frame(maxWidth: .infinity)
-                                        .accessibilityLabel("Join QR code")
-                                } else {
-                                    Text("Unable to generate QR.")
-                                        .font(.custom("Roboto-Regular", size: 14))
-                                        .foregroundColor(.secondary)
-                                }
-                                #else
-                                Text("QR preview is not available on this platform.")
-                                    .font(.custom("Roboto-Regular", size: 14))
-                                    .foregroundColor(.secondary)
-                                #endif
-
-                                Text("Child will auto-enable SYNC when scanning.")
-                                    .font(.custom("Roboto-Light", size: 12))
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-
-                    // Troubleshooting (collapsed)
-                    DisclosureGroup {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("• Confirm both devices are on the same Wi-Fi.")
-                                .font(.custom("Roboto-Regular", size: 13))
-                                .foregroundColor(.secondary)
-                            Text("• Try Nearby mode.")
-                                .font(.custom("Roboto-Regular", size: 13))
-                                .foregroundColor(.secondary)
-
-                            if connectionMethod == .network {
-                                Button {
-                                    syncSettings.listenPort = String(generateEphemeralPort())
-                                    copyToPasteboard(syncSettings.listenPort, key: .port, toast: "New port generated")
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "arrow.triangle.2.circlepath")
-                                            .font(.system(size: 13, weight: .semibold))
-                                            .foregroundColor(.secondary)
-                                        Text("Regenerate port")
-                                            .font(.custom("Roboto-Medium", size: 14))
-                                        Spacer()
-                                    }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 10)
-                                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.primary.opacity(0.08), lineWidth: 1))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.top, 8)
-                    } label: {
-                        Text("Troubleshooting")
-                            .font(.custom("Roboto-Medium", size: 14))
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.top, 4)
-
-                    // Advanced (collapsed): utilities + “open in browser”
-                    DisclosureGroup {
-                        VStack(spacing: 10) {
-                            advancedRow(title: "Copy link",
-                                        detail: nil,
-                                        leadingSymbol: "link",
-                                        key: .link) {
-                                copyToPasteboard(hostShareURLString, key: .link, toast: "Link copied")
-                            }
-
-                            advancedRow(title: "Copy Host ID",
-                                        detail: "…\(uuidSuffix)",
-                                        leadingSymbol: "number",
-                                        key: .hostID) {
-                                copyToPasteboard(hostUUIDString, key: .hostID, toast: "Host ID copied")
-                            }
-
-                            if connectionMethod == .network, ipString != "Not on Wi-Fi" {
-                                advancedRow(title: "Copy IP",
-                                            detail: ipString,
-                                            leadingSymbol: "wifi",
-                                            key: .ip) {
-                                    copyToPasteboard(ipString, key: .ip, toast: "IP copied")
-                                }
-                            }
-
-                            if connectionMethod == .network, !isUnsetPort(syncSettings.listenPort) {
-                                advancedRow(title: "Copy Port",
-                                            detail: syncSettings.listenPort,
-                                            leadingSymbol: "circle.grid.cross",
-                                            key: .port) {
-                                    copyToPasteboard(syncSettings.listenPort, key: .port, toast: "Port copied")
-                                }
-                            }
-
-                            Button {
-                                openURL(hostShareURL)
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: "safari")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundColor(.secondary)
-                                        .frame(width: 18)
-                                    Text("Open in browser")
-                                        .font(.custom("Roboto-Medium", size: 14))
-                                        .foregroundColor(.primary)
-                                    Spacer()
-                                    Image(systemName: "arrow.up.right.square")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundColor(.secondary)
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 10)
-                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.primary.opacity(0.08), lineWidth: 1))
-                            }
-                            .buttonStyle(.plain)
-
-                            Text("Anyone with this link can generate Join QRs for this host.")
-                                .font(.custom("Roboto-Light", size: 12))
-                                .foregroundColor(.secondary)
-                                .padding(.top, 2)
-                        }
-                        .padding(.top, 8)
-                    } label: {
-                        Text("Advanced")
-                            .font(.custom("Roboto-Medium", size: 14))
-                            .foregroundColor(.secondary)
-                    }
+                } else {
+                    roomsLibraryTab
+                        .padding(.top, 16)
                 }
-                .padding(20)
             }
 
             if showCopiedToast {
@@ -9462,6 +9669,16 @@ private func printJoinQR() {
                     .padding(.horizontal, 20)
                     .allowsHitTesting(false)
             }
+        }
+        .alert("Changing Port", isPresented: $showPortWarning) {
+            Button("Cancel", role: .cancel) {
+                pendingPortChange = nil
+            }
+            Button("Proceed", role: .destructive) {
+                handlePortChange()
+            }
+        } message: {
+            Text("This will break the current room for anyone using the old join info.")
         }
     }
 }
