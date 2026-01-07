@@ -8800,7 +8800,7 @@ private func printJoinQR() {
 
     @State private var showCopiedToast = false
     @State private var lastCopied: CopyKey? = nil
-    @State private var showQRPreview = false
+    @State private var showQRModal = false
     @State private var toastText: String = "Copied"
     private enum JoinQRTab: CaseIterable {
         case create
@@ -8935,7 +8935,7 @@ private func printJoinQR() {
 
         roomsStore.updateLastUsed(room)
 
-        showQRPreview = false
+        showQRModal = false
         showCopiedToast = false
         lastCopied = nil
 
@@ -9576,46 +9576,10 @@ private func printJoinQR() {
 
             // Primary + Secondary actions (reduced above-the-fold weight)
             VStack(spacing: 10) {
-                glassPrimaryButton(label: showQRPreview ? "Hide QR" : "Show QR",
+                glassPrimaryButton(label: "Show QR",
                                    systemImage: "qrcode",
                                    disabled: (syncSettings.role != .parent)) {
-                    if !reduceMotion {
-                        withAnimation(.snappy(duration: 0.26, extraBounce: 0.12)) {
-                            showQRPreview.toggle()
-                        }
-                    } else {
-                        showQRPreview.toggle()
-                    }
-                }
-                
-                // QR preview (inline; avoids the “tool” framing)
-                if showQRPreview {
-                    glassCard(cornerRadius: 20) {
-                        VStack(alignment: .center, spacing: 10) {
-                            #if canImport(UIKit)
-                            if let img = makeQRCodeUIImage(from: hostShareURLString) {
-                                Image(uiImage: img)
-                                    .interpolation(.none)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(maxWidth: .infinity)
-                                    .accessibilityLabel("Join QR code")
-                            } else {
-                                Text("Unable to generate QR.")
-                                    .font(.custom("Roboto-Regular", size: 14))
-                                    .foregroundColor(.secondary)
-                            }
-                            #else
-                            Text("QR preview is not available on this platform.")
-                                .font(.custom("Roboto-Regular", size: 14))
-                                .foregroundColor(.secondary)
-                            #endif
-
-                            Text("Child will auto-enable SYNC when scanning.")
-                                .font(.custom("Roboto-Light", size: 12))
-                                .foregroundColor(.secondary)
-                        }
-                    }
+                    showQRModal = true
                 }
 
                 HStack(spacing: 10) {
@@ -9819,6 +9783,11 @@ private func printJoinQR() {
 
     var body: some View {
         let showTabs = !roomsStore.rooms.isEmpty
+        #if canImport(UIKit)
+        let printAction: (() -> Void)? = { printJoinQR() }
+        #else
+        let printAction: (() -> Void)? = nil
+        #endif
         return ZStack {
             if reduceTransparency {
                 Color(.systemBackground)
@@ -9889,7 +9858,173 @@ private func printJoinQR() {
 
         // optional: keep system dimming but prevent weird “card” feel
         .presentationBackgroundInteraction(.disabled)
+        .sheet(isPresented: $showQRModal) {
+            JoinQRModalStage(
+                hostShareURLString: hostShareURLString,
+                hostShareURL: hostShareURL,
+                deviceName: deviceName,
+                uuidSuffix: uuidSuffix,
+                accentColor: settings.flashColor,
+                onDismiss: { showQRModal = false },
+                onPrint: printAction
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.hidden)
+            .presentationBackground(.clear)
+            .presentationCornerRadius(32)
+            .presentationBackgroundInteraction(.disabled)
+        }
+    }
 
+    private struct JoinQRModalStage: View {
+        let hostShareURLString: String
+        let hostShareURL: URL
+        let deviceName: String
+        let uuidSuffix: String
+        let accentColor: Color
+        let onDismiss: () -> Void
+        let onPrint: (() -> Void)?
+
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+        @State private var highlightShift = false
+
+        private var cardShape: RoundedRectangle {
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+        }
+
+        var body: some View {
+            ZStack {
+                Color.black.opacity(reduceTransparency ? 0.55 : 0.45)
+                    .ignoresSafeArea()
+
+                ZStack {
+                    if !reduceMotion {
+                        cardShape
+                            .fill(
+                                RadialGradient(
+                                    colors: [
+                                        accentColor.opacity(0.30),
+                                        accentColor.opacity(0.05),
+                                        Color.clear
+                                    ],
+                                    center: highlightShift ? .topLeading : .bottomTrailing,
+                                    startRadius: 20,
+                                    endRadius: 280
+                                )
+                            )
+                            .blur(radius: 26)
+                            .opacity(reduceTransparency ? 0.18 : 0.28)
+                            .animation(.easeInOut(duration: 5.0).repeatForever(autoreverses: true), value: highlightShift)
+                            .onAppear { highlightShift = true }
+                    }
+
+                    VStack(spacing: 18) {
+                        VStack(spacing: 4) {
+                            Text(deviceName)
+                                .font(.custom("Roboto-SemiBold", size: 18))
+                            Text("Host ID …\(uuidSuffix)")
+                                .font(.custom("Roboto-Regular", size: 12))
+                                .foregroundColor(.secondary)
+                        }
+
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .fill(Color.white.opacity(reduceTransparency ? 0.08 : 0.06))
+                            #if canImport(UIKit)
+                            if let img = makeQRCodeUIImage(from: hostShareURLString, scale: 14) {
+                                Image(uiImage: img)
+                                    .interpolation(.none)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .padding(16)
+                                    .accessibilityLabel("Join QR code")
+                                    .overlay(
+                                        LinearGradient(
+                                            colors: [
+                                                Color.white.opacity(0.08),
+                                                Color.white.opacity(0.02),
+                                                Color.clear
+                                            ],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                        .blendMode(.screen)
+                                    )
+                            } else {
+                                Text("Unable to generate QR.")
+                                    .font(.custom("Roboto-Regular", size: 14))
+                                    .foregroundColor(.secondary)
+                            }
+                            #else
+                            Text("QR preview is not available on this platform.")
+                                .font(.custom("Roboto-Regular", size: 14))
+                                .foregroundColor(.secondary)
+                            #endif
+                        }
+                        .frame(maxWidth: 320, maxHeight: 320)
+
+                        HStack(spacing: 10) {
+                            Button(action: onDismiss) {
+                                ZStack {
+                                    LiquidGlassCircle(diameter: 44, tint: accentColor)
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(accentColor)
+                                        .symbolRenderingMode(.hierarchical)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Close")
+
+                            ShareLink(item: hostShareURL) {
+                                ZStack {
+                                    LiquidGlassCircle(diameter: 44, tint: accentColor)
+                                    Image(systemName: "square.and.arrow.up")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(accentColor)
+                                        .symbolRenderingMode(.hierarchical)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Share Join QR")
+
+                            if let onPrint {
+                                Button(action: onPrint) {
+                                    ZStack {
+                                        LiquidGlassCircle(diameter: 44, tint: accentColor)
+                                        Image(systemName: "printer")
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .foregroundColor(accentColor)
+                                            .symbolRenderingMode(.hierarchical)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Print Join QR")
+                            }
+                        }
+                    }
+                    .padding(24)
+                    .frame(maxWidth: .infinity)
+                    .background {
+                        if reduceTransparency {
+                            cardShape.fill(Color(.systemBackground))
+                        } else if #available(iOS 26.0, macOS 15.0, *) {
+                            Color.clear.glassEffect(.regular, in: cardShape)
+                        } else {
+                            cardShape.fill(.ultraThinMaterial)
+                        }
+                    }
+                    .overlay(
+                        cardShape.stroke(Color.white.opacity(0.16), lineWidth: 0.6)
+                    )
+                    .overlay(
+                        cardShape.stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    )
+                    .padding(.horizontal, 24)
+                }
+            }
+        }
     }
 }
 
