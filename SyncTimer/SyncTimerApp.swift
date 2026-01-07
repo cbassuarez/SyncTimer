@@ -3793,8 +3793,7 @@ struct MainScreen: View {
                 if $0.kind == .restart { return RestartEventWire(restartTime: $0.at) }
                 return nil
             }
-            let name = sheet.fileName.isEmpty ? sheet.title : sheet.fileName
-            let label = name.lastIndex(of: ".").map { String(name[..<$0]) } ?? name
+            let label = sheetBadgeLabel(for: sheet)
             return (stops, cues, restarts, label)
         }
 
@@ -4077,6 +4076,9 @@ struct MainScreen: View {
         }
     
         private func sheetBadgeLabel(for sheet: CueSheet) -> String {
+            if let label = CueLibraryStore.shared.badgeLabel(for: sheet.id) {
+                return label
+            }
             let name  = sheet.fileName.isEmpty ? sheet.title : sheet.fileName
             return name.lastIndex(of: ".").map { String(name[..<$0]) } ?? name
         }
@@ -5097,16 +5099,12 @@ struct MainScreen: View {
                         canBroadcast: { syncSettings.role == .parent && syncSettings.isEnabled },
                         onLoad: { sheet in
                             apply(sheet)
-                            let name  = sheet.fileName.isEmpty ? sheet.title : sheet.fileName
-                            let label = name.lastIndex(of: ".").map { String(name[..<$0]) } ?? name
-                            cueBadge.set(label, broadcast: false)
+                            cueBadge.setLoaded(sheetID: sheet.id, broadcast: false)
                         },
                         onBroadcast: { sheet in
                             apply(sheet)        // local first
                             broadcast(sheet)    // then send
-                            let name  = sheet.fileName.isEmpty ? sheet.title : sheet.fileName
-                            let label = name.lastIndex(of: ".").map { String(name[..<$0]) } ?? name
-                            cueBadge.set(label, broadcast: true)
+                            cueBadge.setLoaded(sheetID: sheet.id, broadcast: true)
                         }
                     )
                     .environmentObject(settings)
@@ -5769,9 +5767,7 @@ struct MainScreen: View {
                         if let sheet = CueLibraryStore.shared.sheet(namedOrId: sheetID) {
                             apply(sheet)
                             if syncSettings.role == .parent && syncSettings.isEnabled { broadcast(sheet) }
-                            let name  = sheet.fileName.isEmpty ? sheet.title : sheet.fileName
-                            let label = name.lastIndex(of: ".").map { String(name[..<$0]) } ?? name
-                            cueBadge.set(label, broadcast: (syncSettings.role == .parent))
+                            cueBadge.setLoaded(sheetID: sheet.id, broadcast: (syncSettings.role == .parent))
                         }
                     },
                     presentEditor: { idx in pendingPresetEditIndex = idx; showPresetEditor = true },
@@ -6273,15 +6269,11 @@ struct MainScreen: View {
                                                         canBroadcast: { syncSettings.role == .parent && syncSettings.isEnabled },
                                                         onLoad: { sheet in
                                                             apply(sheet)
-                                                            let name  = sheet.fileName.isEmpty ? sheet.title : sheet.fileName
-                                                            let label = name.lastIndex(of: ".").map { String(name[..<$0]) } ?? name
-                                                            cueBadge.set(label, broadcast: false)
+                                                            cueBadge.setLoaded(sheetID: sheet.id, broadcast: false)
                                                         },
                                                         onBroadcast: { sheet in
                                                             apply(sheet); broadcast(sheet)
-                                                            let name  = sheet.fileName.isEmpty ? sheet.title : sheet.fileName
-                                                            let label = name.lastIndex(of: ".").map { String(name[..<$0]) } ?? name
-                                                            cueBadge.set(label, broadcast: true)
+                                                            cueBadge.setLoaded(sheetID: sheet.id, broadcast: true)
                                                         }
                                                     )
                                                     .environmentObject(settings)
@@ -7336,13 +7328,13 @@ struct MainScreen: View {
         
                 // Show the sheet badge on children when provided
                 if let lbl = msg.sheetLabel, !lbl.isEmpty {
-                    cueBadge.set(lbl, broadcast: true)
+                    cueBadge.setFallbackLabel(lbl, broadcast: true)
                 }
         // Mirror parent's note (empty if none)
                 notesParent = msg.notesParent ?? ""
         // If a sheet/badge label comes in, surface it immediately on the child
                 if let lbl = msg.sheetLabel, !lbl.isEmpty {
-                    cueBadge.set(lbl, broadcast: true)
+                    cueBadge.setFallbackLabel(lbl, broadcast: true)
                 }
                 switch msg.action {
         case .start:
@@ -11847,13 +11839,45 @@ private struct JoinHostPickerSheet: View {
 }
 // Persistent badge state for "X loaded" shown inside TimerCard
 final class CueBadgeState: ObservableObject {
-    @Published var label: String? = nil      // filename w/o extension
-    @Published var broadcast: Bool = false   // true if parent broadcasted
-    func set(_ name: String, broadcast: Bool) {
-        self.label = name
+    @Published var loadedCueSheetID: UUID? = nil
+    @Published var broadcast: Bool = false
+    @Published private var fallbackLabel: String? = nil
+    private var cancellables = Set<AnyCancellable>()
+
+    init() {
+        CueLibraryStore.shared.$index
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+    }
+
+    var label: String? {
+        if let sheetID = loadedCueSheetID,
+           let label = CueLibraryStore.shared.badgeLabel(for: sheetID) {
+            return label
+        }
+        return fallbackLabel
+    }
+
+    func setLoaded(sheetID: UUID, broadcast: Bool) {
+        loadedCueSheetID = sheetID
+        fallbackLabel = nil
         self.broadcast = broadcast
     }
-    func clear() { label = nil; broadcast = false }
+
+    func setFallbackLabel(_ label: String, broadcast: Bool) {
+        loadedCueSheetID = nil
+        fallbackLabel = label
+        self.broadcast = broadcast
+    }
+
+    func clear() {
+        loadedCueSheetID = nil
+        fallbackLabel = nil
+        broadcast = false
+    }
 }
 //──────────────────────────────────────────────────────────────
 // MARK: – @main
