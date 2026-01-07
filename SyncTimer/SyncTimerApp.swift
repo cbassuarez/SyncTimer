@@ -8779,7 +8779,7 @@ private struct GenerateJoinQRSheet: View {
     }
 #if canImport(UIKit)
 private func printJoinQR() {
-    guard let img = makeQRCodeUIImage(from: hostShareURLString, scale: 14) else { return }
+    guard let img = makeBrandedJoinQRUIImage(from: hostShareURLString, qrScale: 14) else { return }
     let ctrl = UIPrintInteractionController.shared
     let info = UIPrintInfo(dictionary: nil)
     info.outputType = .photo
@@ -8964,6 +8964,67 @@ private func printJoinQR() {
         let transformed = output.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         guard let cg = context.createCGImage(transformed, from: transformed.extent) else { return nil }
         return UIImage(cgImage: cg)
+    }
+
+    private func makeBrandedJoinQRUIImage(
+        from string: String,
+        qrScale: CGFloat = 14,
+        tileCornerRadius: CGFloat = 22,
+        tilePadding: CGFloat = 18
+    ) -> UIImage? {
+        guard let rawQR = makeQRCodeUIImage(from: string, scale: qrScale) else { return nil }
+        let qrSide = rawQR.size.width
+        let tileSide = qrSide + (tilePadding * 2)
+        let tileSize = CGSize(width: tileSide, height: tileSide)
+        let renderer = UIGraphicsImageRenderer(size: tileSize)
+        let logo = UIImage(named: "AppLogo")
+
+        return renderer.image { context in
+            let tileRect = CGRect(origin: .zero, size: tileSize)
+            let tilePath = UIBezierPath(roundedRect: tileRect, cornerRadius: tileCornerRadius)
+            UIColor.white.setFill()
+            tilePath.fill()
+
+            let qrRect = CGRect(x: tilePadding, y: tilePadding, width: qrSide, height: qrSide)
+            context.cgContext.saveGState()
+            context.cgContext.setShouldAntialias(false)
+            context.cgContext.interpolationQuality = .none
+            rawQR.draw(in: qrRect)
+            context.cgContext.restoreGState()
+
+            guard let logo else { return }
+            let badgeDiameter = min(max(qrSide * 0.11, 28), 34)
+            let badgeRect = CGRect(
+                x: tileSide - tilePadding - badgeDiameter,
+                y: tilePadding,
+                width: badgeDiameter,
+                height: badgeDiameter
+            )
+            let badgePath = UIBezierPath(ovalIn: badgeRect)
+
+            context.cgContext.saveGState()
+            context.cgContext.setShadow(
+                offset: CGSize(width: 0, height: 1),
+                blur: 3,
+                color: UIColor.black.withAlphaComponent(0.15).cgColor
+            )
+            UIColor.white.withAlphaComponent(0.95).setFill()
+            badgePath.fill()
+            context.cgContext.restoreGState()
+
+            UIColor.white.withAlphaComponent(0.18).setStroke()
+            badgePath.lineWidth = 1
+            badgePath.stroke()
+
+            let innerStrokePath = UIBezierPath(ovalIn: badgeRect.insetBy(dx: 0.5, dy: 0.5))
+            UIColor.black.withAlphaComponent(0.06).setStroke()
+            innerStrokePath.lineWidth = 0.5
+            innerStrokePath.stroke()
+
+            let logoInset = badgeDiameter * 0.18
+            let logoRect = badgeRect.insetBy(dx: logoInset, dy: logoInset)
+            logo.draw(in: logoRect)
+        }
     }
     #endif
 
@@ -9865,7 +9926,7 @@ private func printJoinQR() {
                     reduceTransparency: reduceTransparency,
                     qrImage: {
                         #if canImport(UIKit)
-                        return makeQRCodeUIImage(from: hostShareURLString, scale: 14)
+                        return makeBrandedJoinQRUIImage(from: hostShareURLString, qrScale: 14)
                         #else
                         return nil
                         #endif
