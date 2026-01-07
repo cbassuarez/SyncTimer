@@ -28,6 +28,17 @@ final class CueLibraryStore: ObservableObject {
             self.sheets = self.sheets
         }
     }
+
+    func badgeLabel(for sheetID: UUID) -> String? {
+        guard let meta = index.sheets[sheetID] else { return nil }
+        let title = meta.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty {
+            return title
+        }
+        let fileName = meta.fileName
+        guard !fileName.isEmpty else { return nil }
+        return URL(fileURLWithPath: fileName).deletingPathExtension().lastPathComponent
+    }
 }
 
 
