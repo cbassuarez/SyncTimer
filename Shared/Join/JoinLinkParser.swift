@@ -17,7 +17,11 @@ enum JoinLinkParser {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return .failure(.invalidPath)
         }
-        let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value) })
+        let queryPairs: [(String, String)] = (components.queryItems ?? []).compactMap { item in
+            guard let value = item.value else { return nil }
+                    return (item.name, value)
+        }
+                let query = Dictionary(uniqueKeysWithValues: queryPairs)
 
         guard query["v"] == "1" else {
             return .failure(.invalidVersion)

@@ -7997,6 +7997,8 @@ struct ConnectionPage: View {
     @State private var showSyncErrorAlert = false
     @State private var syncErrorMessage   = ""
     
+    
+    
     @State private var isWifiAvailable = false
     @State private var showNoWifiAlert = false
     private let wifiMonitor = NWPathMonitor(requiredInterfaceType: .wifi)

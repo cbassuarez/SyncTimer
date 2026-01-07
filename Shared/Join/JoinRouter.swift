@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Combine
 
 final class JoinRouter: ObservableObject {
     @Published private(set) var pending: JoinRequestV1?

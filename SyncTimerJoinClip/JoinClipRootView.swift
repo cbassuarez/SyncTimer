@@ -85,6 +85,6 @@ struct JoinClipRootView: View {
         }
         let configuration = SKOverlay.AppConfiguration(appIdentifier: "0000000000", position: .bottom)
         configuration.userDismissible = true
-        SKOverlay.present(in: scene, configuration: configuration)
+        SKOverlay(configuration: configuration).present(in: scene)
     }
 }
