@@ -8950,6 +8950,11 @@ private func printJoinQR() {
 
     // MARK: - QR image
     #if canImport(UIKit)
+    private typealias JoinQRImage = UIImage
+    #else
+    private typealias JoinQRImage = Never
+    #endif
+    #if canImport(UIKit)
     private func makeQRCodeUIImage(from string: String, scale: CGFloat = 10) -> UIImage? {
         let context = CIContext()
         let filter = CIFilter.qrCodeGenerator()
@@ -9865,6 +9870,13 @@ private func printJoinQR() {
                 deviceName: deviceName,
                 uuidSuffix: uuidSuffix,
                 accentColor: settings.flashColor,
+                qrImage: {
+                    #if canImport(UIKit)
+                    return makeQRCodeUIImage(from: hostShareURLString, scale: 14)
+                    #else
+                    return nil
+                    #endif
+                }(),
                 onDismiss: { showQRModal = false },
                 onPrint: printAction
             )
@@ -9882,6 +9894,7 @@ private func printJoinQR() {
         let deviceName: String
         let uuidSuffix: String
         let accentColor: Color
+        let qrImage: JoinQRImage?
         let onDismiss: () -> Void
         let onPrint: (() -> Void)?
 
@@ -9932,8 +9945,8 @@ private func printJoinQR() {
                             RoundedRectangle(cornerRadius: 18, style: .continuous)
                                 .fill(Color.white.opacity(reduceTransparency ? 0.08 : 0.06))
                             #if canImport(UIKit)
-                            if let img = makeQRCodeUIImage(from: hostShareURLString, scale: 14) {
-                                Image(uiImage: img)
+                            if let qrImage {
+                                Image(uiImage: qrImage)
                                     .interpolation(.none)
                                     .resizable()
                                     .scaledToFit()
