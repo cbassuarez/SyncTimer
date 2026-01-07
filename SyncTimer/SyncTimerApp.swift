@@ -8007,17 +8007,16 @@ struct ConnectionPage: View {
     @Binding var inputText: String
     @Binding var isEnteringField: Bool
     @Binding var showBadPortError: Bool
-    @State private var showDeviceIP = false
     @State private var placeholderTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
     @State private var ipBlink = false
     @State private var portBlink = false
     @State private var showSyncErrorAlert = false
     @State private var syncErrorMessage   = ""
+    @State private var showPortWarning = false
     
     
     
     @State private var isWifiAvailable = false
-    @State private var showNoWifiAlert = false
     private let wifiMonitor = NWPathMonitor(requiredInterfaceType: .wifi)
     @State private var showGenerateJoinQRSheet = false
     
@@ -8029,6 +8028,12 @@ struct ConnectionPage: View {
         }
     private func generateEphemeralPort() -> UInt16 {
         UInt16.random(in: 49153...65534)
+    }
+
+    private func ensureValidListenPortIfNeeded() {
+        if isUnsetPort(syncSettings.listenPort) {
+            syncSettings.listenPort = String(generateEphemeralPort())
+        }
     }
     
     private func cancelEntry() {
@@ -8156,9 +8161,7 @@ struct ConnectionPage: View {
                                     roleIsParent: Bool,
                                     isEnabled: Bool,
                                     isWifiAvailable: Bool,
-                                    showDeviceIP: Bool,
-                                    onToggleIP: @escaping () -> Void,
-                                    onGeneratePort: @escaping () -> Void) -> some View {
+                                    onRequestPortChange: @escaping () -> Void) -> some View {
             VStack(alignment: .leading, spacing: 4) {
                 // Top line — identical style
                 HStack(spacing: 8) {
@@ -8201,23 +8204,19 @@ struct ConnectionPage: View {
                                 Text("HOST:")
                                                     .font(.custom("Roboto-SemiBold", size: 16))
                                 Spacer()
-                                // IP button
-                                Button(action: onToggleIP) {
-                                    Text(showDeviceIP
-                                         ? (getLocalIPAddress() ?? "Unknown")
-                                         : (isWifiAvailable ? "Tap for IP" : "Not connected to Wi-Fi"))
-                                        .font(.custom("Roboto-Regular", size: 16))
-                                        .foregroundColor(isWifiAvailable ? (showDeviceIP ? .primary : .secondary) : .secondary)
-                                        .lineLimit(1).minimumScaleFactor(0.85)
-                                }
-                                .buttonStyle(.plain)
+                                let ipText = isWifiAvailable
+                                    ? (getLocalIPAddress() ?? "Unknown")
+                                    : "Not connected to Wi-Fi"
+                                Text(ipText)
+                                    .font(.custom("Roboto-Regular", size: 16))
+                                    .foregroundColor(isWifiAvailable ? .primary : .secondary)
+                                    .lineLimit(1).minimumScaleFactor(0.85)
                                 Text("•").foregroundColor(.secondary).opacity(0.5)
-                                // Port button (persists by reading syncSettings.listenPort)
-                                Button(action: onGeneratePort) {
-                                                    Text(isUnsetPort(syncSettings.listenPort) ? "Tap for new port" : syncSettings.listenPort)
-                                                        .font(.custom("Roboto-Regular", size: 16))
-                                                        .foregroundColor(isUnsetPort(syncSettings.listenPort) ? .secondary : .primary)
-                                                }
+                                Button(action: onRequestPortChange) {
+                                    Text(syncSettings.listenPort)
+                                        .font(.custom("Roboto-Regular", size: 16))
+                                        .foregroundColor(isUnsetPort(syncSettings.listenPort) ? .secondary : .primary)
+                                }
                                 .buttonStyle(.plain)
                             }
                             Divider().opacity(0.08)
@@ -8407,7 +8406,10 @@ struct ConnectionPage: View {
                                                     else                            { syncSettings.stopChild() }
                                                     syncSettings.isEnabled = false
                                                 }
+                        if newMethod == .network {
+                            ensureValidListenPortIfNeeded()
                         }
+                    }
                     .frame(maxWidth: .infinity)      // ← let it grow to fill the content area
                     .accessibilityLabel(syncSettings.connectionMethod.rawValue)
                     .accessibilityHint("Selects \(syncSettings.connectionMethod.rawValue) sync mode")
@@ -8437,21 +8439,8 @@ struct ConnectionPage: View {
                                         roleIsParent: (syncSettings.role == .parent),
                                         isEnabled: syncSettings.isEnabled,
                                         isWifiAvailable: isWifiAvailable,
-                                        showDeviceIP: showDeviceIP,
-                                        onToggleIP: {
-                                            if isWifiAvailable { withAnimation { showDeviceIP.toggle() } }
-                                            else { showNoWifiAlert = true }
-                                        },
-                                        onGeneratePort: {
-                                                                    syncSettings.listenPort = String(generateEphemeralPort())
-                                                                }
+                                        onRequestPortChange: { showPortWarning = true }
                                     )
-                                    // preserve the existing Wi-Fi alert
-                                    .alert("No Wi-Fi Connection", isPresented: $showNoWifiAlert) {
-                                        Button("OK") { }
-                                    } message: {
-                                        Text("Please join a Wi-Fi network before revealing your IP address.")
-                                    }
                     
                 case .bluetooth:
                     bluetoothStatusPanel(statusText: btStatusText,
@@ -8519,6 +8508,7 @@ struct ConnectionPage: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(20)
         .onAppear {
+              ensureValidListenPortIfNeeded()
               wifiMonitor.pathUpdateHandler = { path in
                 DispatchQueue.main.async {
                   isWifiAvailable = (path.status == .satisfied)
@@ -8561,6 +8551,14 @@ struct ConnectionPage: View {
                             }
                         }
                     }
+        .alert("Changing Port", isPresented: $showPortWarning) {
+            Button("Cancel", role: .cancel) { }
+            Button("Proceed", role: .destructive) {
+                syncSettings.listenPort = String(generateEphemeralPort())
+            }
+        } message: {
+            Text("This will break the current room for anyone using the old join info.")
+        }
         .alert("Cannot Start Sync",
                isPresented: $showSyncErrorAlert) {
           Button("OK", role: .cancel) { }
@@ -8592,28 +8590,24 @@ struct ConnectionPage: View {
             HStack {
                 Text("Your Port:")
                 Spacer()
-                Text(isUnsetPort(syncSettings.listenPort) ? "Tap to generate" : syncSettings.listenPort)
+                Text(syncSettings.listenPort)
                     .font(.custom("Roboto-Regular", size: 12))
                     .foregroundColor(isUnsetPort(syncSettings.listenPort) ? .secondary : .primary)
                     .lineLimit(1).minimumScaleFactor(0.85)
                     .contentShape(Rectangle())
-                    .onTapGesture { syncSettings.listenPort = String(generateEphemeralPort()) }
+                    .onTapGesture { showPortWarning = true }
                     .accessibilityAddTraits(.isButton)
             }
             
             HStack {
                 Text("Your IP:")
                 Spacer()
-                Button {
-                    withAnimation { showDeviceIP.toggle() }
-                } label: {
-                    Text(showDeviceIP
-                         ? getLocalIPAddress() ?? "Unknown"
-                         : "Tap to reveal")
+                let ipText = isWifiAvailable
+                    ? (getLocalIPAddress() ?? "Unknown")
+                    : "Not connected to Wi-Fi"
+                Text(ipText)
                     .font(.custom("Roboto-Regular", size: 16))
-                    .foregroundColor(showDeviceIP ? .primary : .secondary)
-                }
-                .buttonStyle(.plain)
+                    .foregroundColor(isWifiAvailable ? .primary : .secondary)
             }
             
             Divider().opacity(0.5)
@@ -8806,7 +8800,6 @@ private func printJoinQR() {
 
     @State private var showCopiedToast = false
     @State private var lastCopied: CopyKey? = nil
-    @State private var revealIP = false
     @State private var showQRPreview = false
     @State private var toastText: String = "Copied"
     private enum JoinQRTab: CaseIterable {
@@ -8829,17 +8822,10 @@ private func printJoinQR() {
     }
 
     @State private var selectedTab: JoinQRTab = .create
-    @State private var showPortWarning = false
-    @State private var pendingPortChange: PortChangeAction? = nil
     @StateObject private var roomsStore = RoomsStore()
     @Namespace private var tabNamespace
 
     private enum CopyKey { case link, hostID, ip, port }
-
-    private enum PortChangeAction {
-        case regenerateCurrent(copyToClipboard: Bool)
-        case cloneRoom(Room)
-    }
 
     private var hostShareURLString: String { hostShareURL.absoluteString }
     private var uuidSuffix: String { String(hostUUIDString.suffix(8)).uppercased() }
@@ -8879,8 +8865,6 @@ private func printJoinQR() {
         if p == 0 || p == 50000 { return true }
         return !(49153...65534).contains(p)
     }
-
-    private func generateEphemeralPort() -> UInt16 { UInt16.random(in: 49153...65534) }
 
     private func connectionLabel(for method: SyncSettings.SyncConnectionMethod) -> String {
         switch method {
@@ -8930,25 +8914,6 @@ private func printJoinQR() {
         }
     }
 
-    private func requestPortChange(_ action: PortChangeAction) {
-        pendingPortChange = action
-        showPortWarning = true
-    }
-
-    private func handlePortChange() {
-        guard let action = pendingPortChange else { return }
-        switch action {
-        case .regenerateCurrent(let copyToClipboard):
-            syncSettings.listenPort = String(generateEphemeralPort())
-            if copyToClipboard {
-                copyToPasteboard(syncSettings.listenPort, key: .port, toast: "New port generated")
-            }
-        case .cloneRoom(let room):
-            cloneRoomWithNewPort(room)
-        }
-        pendingPortChange = nil
-    }
-
     private func loadRoom(_ room: Room) {
         let wasEnabled = syncSettings.isEnabled
         let currentRole = syncSettings.role
@@ -8971,7 +8936,6 @@ private func printJoinQR() {
         roomsStore.updateLastUsed(room)
 
         showQRPreview = false
-        revealIP = false
         showCopiedToast = false
         lastCopied = nil
 
@@ -8982,19 +8946,6 @@ private func printJoinQR() {
                 selectedTab = .create
             }
         }
-    }
-
-    private func cloneRoomWithNewPort(_ room: Room) {
-        let newPort = String(generateEphemeralPort())
-        let newRoom = Room(
-            name: room.name,
-            hostUUID: room.hostUUID,
-            connectionMethod: (room.connectionMethod == .bonjour) ? .network : room.connectionMethod,
-            role: room.role,
-            listenPort: newPort
-        )
-        roomsStore.add(newRoom)
-        loadRoom(newRoom)
     }
 
     // MARK: - QR image
@@ -9468,21 +9419,15 @@ private func printJoinQR() {
                                 .foregroundColor(.secondary)
                                 .frame(width: 26, alignment: .leading)
 
-                            Button {
-                                if !reduceMotion { withAnimation(.easeInOut(duration: 0.18)) { revealIP.toggle() } }
-                                else { revealIP.toggle() }
-                            } label: {
-                                Text(revealIP ? ipString : "Tap to reveal")
-                                    .font(.custom("Roboto-Regular", size: 14))
-                                    .foregroundColor(revealIP ? .primary : .secondary)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.85)
-                            }
-                            .buttonStyle(.plain)
+                            Text(ipString)
+                                .font(.custom("Roboto-Regular", size: 14))
+                                .foregroundColor(ipString == "Not on Wi-Fi" ? .secondary : .primary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
 
                             Spacer()
 
-                            if revealIP, ipString != "Not on Wi-Fi" {
+                            if ipString != "Not on Wi-Fi" {
                                 Button {
                                     copyToPasteboard(ipString, key: .ip, toast: "IP copied")
                                 } label: {
@@ -9502,18 +9447,13 @@ private func printJoinQR() {
                                 .foregroundColor(.secondary)
                                 .frame(width: 26, alignment: .leading)
 
-                            Button {
-                                requestPortChange(.regenerateCurrent(copyToClipboard: false))
-                            } label: {
-                                Text(isUnsetPort(syncSettings.listenPort) ? "Tap to generate" : syncSettings.listenPort)
-                                    .font(.custom("Roboto-Regular", size: 14))
-                                    .foregroundColor(isUnsetPort(syncSettings.listenPort) ? .secondary : .primary)
-                            }
-                            .buttonStyle(.plain)
+                            Text(syncSettings.listenPort)
+                                .font(.custom("Roboto-Regular", size: 14))
+                                .foregroundColor(isUnsetPort(syncSettings.listenPort) ? .secondary : .primary)
 
                             Spacer()
 
-                            if !isUnsetPort(syncSettings.listenPort) {
+                            if !syncSettings.listenPort.isEmpty {
                                 Button {
                                     copyToPasteboard(syncSettings.listenPort, key: .port, toast: "Port copied")
                                 } label: {
@@ -9714,26 +9654,6 @@ private func printJoinQR() {
                     Text("• Try Nearby mode.")
                         .font(.custom("Roboto-Regular", size: 13))
                         .foregroundColor(.secondary)
-
-                    if syncSettings.connectionMethod == .network {
-                        Button {
-                            requestPortChange(.regenerateCurrent(copyToClipboard: true))
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundColor(.secondary)
-                                Text("Regenerate port")
-                                    .font(.custom("Roboto-Medium", size: 14))
-                                Spacer()
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.primary.opacity(0.08), lineWidth: 1))
-                        }
-                        .buttonStyle(.plain)
-                    }
                 }
                 .padding(.top, 8)
             } label: {
@@ -9742,14 +9662,6 @@ private func printJoinQR() {
                     .foregroundColor(.secondary)
             }
             .padding(.top, 4)
-
-            if syncSettings.connectionMethod == .network {
-                glassSecondaryButton(label: "New Room (New Port)", systemImage: "plus.circle") {
-                    requestPortChange(.regenerateCurrent(copyToClipboard: false))
-                }
-                .disabled(syncSettings.role != .parent)
-                .opacity(syncSettings.role != .parent ? 0.55 : 1.0)
-            }
 
             // Advanced (collapsed): utilities + “open in browser”
             DisclosureGroup {
@@ -9777,7 +9689,7 @@ private func printJoinQR() {
                         }
                     }
 
-                    if syncSettings.connectionMethod == .network, !isUnsetPort(syncSettings.listenPort) {
+                    if syncSettings.connectionMethod == .network, !syncSettings.listenPort.isEmpty {
                         advancedRow(title: "Copy Port",
                                     detail: syncSettings.listenPort,
                                     leadingSymbol: "circle.grid.cross",
@@ -9841,13 +9753,6 @@ private func printJoinQR() {
                 ForEach(roomsStore.rooms) { room in
                     glassCard {
                         roomRow(room)
-                    }
-                    .contextMenu {
-                        Button {
-                            requestPortChange(.cloneRoom(room))
-                        } label: {
-                            Label("Load New Port", systemImage: "arrow.triangle.2.circlepath")
-                        }
                     }
                     .swipeActions {
                         Button(role: .destructive) {
@@ -9958,16 +9863,6 @@ private func printJoinQR() {
                     .padding(.horizontal, 20)
                     .allowsHitTesting(false)
             }
-        }
-        .alert("Changing Port", isPresented: $showPortWarning) {
-            Button("Cancel", role: .cancel) {
-                pendingPortChange = nil
-            }
-            Button("Proceed", role: .destructive) {
-                handlePortChange()
-            }
-        } message: {
-            Text("This will break the current room for anyone using the old join info.")
         }
         .onChange(of: roomsStore.rooms.count) { newValue in
             guard newValue == 0, selectedTab == .rooms else { return }
