@@ -825,6 +825,7 @@ final class SyncSettings: ObservableObject {
         
         static let role      = "role"
         static let timestamp = "ts"
+        static let hostUUID  = "hostUUID"
     }
     
     /// Called by BonjourSyncManager when a service is resolved
@@ -864,7 +865,19 @@ final class SyncSettings: ObservableObject {
         }()
         
         // 6) Build the Peer
-        let peerID = service.name.hashValueAsUUID
+        let resolvedHostUUID: UUID? = {
+            guard let data = txt[TXTKey.hostUUID],
+                  let raw = String(data: data, encoding: .utf8) else {
+                return nil
+            }
+            return UUID(uuidString: raw)
+        }()
+        if let allowed = joinAllowedHostUUIDs {
+            guard let resolvedHostUUID, allowed.contains(resolvedHostUUID) else {
+                return
+            }
+        }
+        let peerID = resolvedHostUUID ?? service.name.hashValueAsUUID
         let peer = Peer(
             id:              peerID,
             name:            peerName,
@@ -920,6 +933,8 @@ final class SyncSettings: ObservableObject {
     @Published var parentLockEnabled = false
     @Published var discoveredPeers: [Peer]   = []
     @Published var stopWires: [StopEventWire] = []
+    @Published var joinAllowedHostUUIDs: Set<UUID>? = nil
+    @Published var joinSelectedHostUUID: UUID? = nil
     
     /// Existing API to add prior-discovered BLE/Bonjour peers
     func addDiscoveredService(name: String, role: Role, signal: Int) {
@@ -938,6 +953,74 @@ final class SyncSettings: ObservableObject {
     
     var isLocked: Bool {
         role == .child && isEnabled && parentLockEnabled
+    }
+
+    func applyJoinConstraints(allowed: Set<UUID>, selected: UUID?) {
+        joinAllowedHostUUIDs = allowed
+        joinSelectedHostUUID = selected
+    }
+
+    func clearJoinConstraints() {
+        joinAllowedHostUUIDs = nil
+        joinSelectedHostUUID = nil
+    }
+
+    func connectChildOverLAN(host: String, port: UInt16) {
+        guard role == .child else { return }
+        peerIP = host
+        peerPort = String(port)
+        _connectChildOverLAN()
+    }
+
+    func connectToResolvedBonjourParent(service: NetService, txt: [String: Data]) -> Bool {
+        guard role == .child, connectionMethod == .bonjour else { return false }
+        guard let allowed = joinAllowedHostUUIDs else { return false }
+        guard let roleData = txt[TXTKey.role],
+              let roleString = String(data: roleData, encoding: .utf8),
+              roleString == "parent" else { return false }
+
+        let resolvedHostUUID: UUID? = {
+            guard let data = txt[TXTKey.hostUUID],
+                  let raw = String(data: data, encoding: .utf8) else {
+                return nil
+            }
+            return UUID(uuidString: raw)
+        }()
+        guard let resolvedHostUUID, allowed.contains(resolvedHostUUID) else { return false }
+        if let selected = joinSelectedHostUUID {
+            guard resolvedHostUUID == selected else { return false }
+        } else if allowed.count > 1 {
+            return false
+        }
+
+        if let connection = clientConnection {
+            switch connection.state {
+            case .ready, .preparing, .waiting, .setup:
+                return true
+            default:
+                break
+            }
+        }
+
+        guard let addrs = service.addresses, !addrs.isEmpty else { return false }
+        let v4data = addrs.first { data in
+            data.withUnsafeBytes { ptr in
+                guard let base = ptr.baseAddress?.assumingMemoryBound(to: sockaddr_storage.self) else {
+                    return false
+                }
+                return base.pointee.ss_family == sa_family_t(AF_INET)
+            }
+        } ?? addrs.first
+        guard let hostPortData = v4data else { return false }
+
+        switch NetService.fromSockAddr(data: hostPortData) {
+        case .hostPort(let host, _):
+            guard service.port > 0, let port = UInt16(exactly: service.port) else { return false }
+            connectChildOverLAN(host: host.debugDescription, port: port)
+            return true
+        case .none:
+            return false
+        }
     }
     
     @Published var role: Role         = .parent
@@ -10202,6 +10285,8 @@ private struct ParticipantsOverlay: View {
 struct ContentView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var syncSettings: SyncSettings
+    @EnvironmentObject private var joinRouter: JoinRouter
+    @Environment(\.openURL) private var openURL
     
     @AppStorage("settingsPage") private var settingsPage = 0
     @State private var showSettings = false
@@ -10214,6 +10299,8 @@ struct ContentView: View {
     @State private var editingTarget: EditableField? = nil
     @State private var inputText: String = ""
     @State private var isEnteringField: Bool = false
+    @State private var didCheckJoinHandoff = false
+    @State private var handledJoinRequestId: String? = nil
     
     var body: some View {
 #if os(iOS)
@@ -10345,6 +10432,106 @@ innerBody
                   message: Text(syncErrorMessage),
                   dismissButton: .default(Text("OK")))
         }
+        .sheet(isPresented: $joinRouter.needsHostPicker) {
+            JoinHostPickerSheet(
+                pending: joinRouter.pending,
+                onSelect: { host in
+                    joinRouter.selectHost(host)
+                }
+            )
+        }
+        .alert("Update Required", isPresented: Binding(
+            get: { joinRouter.updateRequiredMinBuild != nil },
+            set: { isPresented in
+                if !isPresented {
+                    joinRouter.updateRequiredMinBuild = nil
+                }
+            }
+        )) {
+            Button("Open App Store") {
+                if let url = URL(string: ContentView.appStoreURLString) {
+                    openURL(url)
+                }
+                joinRouter.updateRequiredMinBuild = nil
+            }
+            Button("Cancel", role: .cancel) {
+                joinRouter.updateRequiredMinBuild = nil
+            }
+        } message: {
+            if let minBuild = joinRouter.updateRequiredMinBuild {
+                Text("Update required (build \(minBuild)+) to join this session.")
+            }
+        }
+        .onAppear {
+            guard !didCheckJoinHandoff else { return }
+            didCheckJoinHandoff = true
+            joinRouter.ingestAppGroupPendingIfAny()
+            applyJoinIfReady()
+        }
+        .onChange(of: joinRouter.pending?.selectedHostUUID) { _ in
+            applyJoinIfReady()
+        }
+        .onChange(of: joinRouter.pending?.requestId) { _ in
+            applyJoinIfReady()
+        }
+    }
+
+    private static let appStoreURLString = "https://apps.apple.com/app/id0000000000"
+
+    private func applyJoinIfReady() {
+        guard let request = joinRouter.pending else { return }
+        guard !request.needsHostSelection else { return }
+        guard handledJoinRequestId != request.requestId else { return }
+
+        handledJoinRequestId = request.requestId
+        showSettings = false
+        mainMode = .sync
+
+        syncSettings.role = .child
+        syncSettings.isEnabled = true
+        syncSettings.connectionMethod = request.mode == "nearby" ? .bluetooth : .bonjour
+        syncSettings.applyJoinConstraints(
+            allowed: Set(request.hostUUIDs),
+            selected: request.selectedHostUUID
+        )
+        syncSettings.startChild()
+        joinRouter.markConsumed()
+    }
+}
+
+private struct JoinHostPickerSheet: View {
+    let pending: JoinRequestV1?
+    let onSelect: (UUID) -> Void
+
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(hosts.indices, id: \.self) { index in
+                    let host = hosts[index]
+                    Button {
+                        onSelect(host.id)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(host.name)
+                            Text(host.suffix)
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(pending?.roomLabel ?? "Select Host")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private var hosts: [(id: UUID, name: String, suffix: String)] {
+        guard let pending else { return [] }
+        return pending.hostUUIDs.enumerated().map { index, uuid in
+            let name = pending.deviceNames.indices.contains(index) ? pending.deviceNames[index] : "Host \(index + 1)"
+            let suffix = "…\(uuid.uuidString.suffix(4))"
+            return (id: uuid, name: name, suffix: suffix)
+        }
     }
 }
 // Persistent badge state for "X loaded" shown inside TimerCard
@@ -10379,6 +10566,7 @@ struct SyncTimerApp: App {
     @StateObject private var appSettings  = AppSettings()
     @StateObject private var clockSync = ClockSyncService()
     @StateObject private var syncSettings = SyncSettings()
+    @StateObject private var joinRouter = JoinRouter()
     @AppStorage("settingsPage") private var settingsPage = 0
     @State private var editingTarget: EditableField? = nil
     @State private var inputText       = ""
@@ -10471,12 +10659,22 @@ if WCSession.isSupported() {
                     .environmentObject(syncSettings)
                     .environmentObject(clockSync)
                     .environmentObject(cueBadge)
+                    .environmentObject(joinRouter)
                     .preferredColorScheme(appSettings.appTheme == .dark ? .dark : .light)
                     .dynamicTypeSize(.small ... .large)
             // “Open in SyncTimer” from Files/Share Sheet (XML only)
                     .onOpenURL { url in
+                                    if url.host == "synctimerapp.com", url.path == "/join" {
+                                        joinRouter.ingestUniversalLink(url)
+                                        return
+                                    }
                                     handleOpenURL(url)
                                 }
+                    .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                        guard let url = activity.webpageURL else { return }
+                        guard url.host == "synctimerapp.com", url.path == "/join" else { return }
+                        joinRouter.ingestUniversalLink(url)
+                    }
 
                 }
 #if targetEnvironment(macCatalyst)

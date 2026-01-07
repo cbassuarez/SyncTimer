@@ -68,7 +68,7 @@ final class BonjourSyncManager: NSObject {
         print("[AD] \(settings.role == .parent ? "Parent" : "Child") calling startAdvertising()")
         
         // Always advertise on port 50000
-        let port: Int32 = 50000
+        let port: Int32 = settings.listenerPort > 0 ? Int32(settings.listenerPort) : 50000
 
         // Service name: "SyncTimer Parent – <DeviceName>"
         let peerName = UIDevice.current.name ?? "Unknown"
@@ -100,7 +100,8 @@ final class BonjourSyncManager: NSObject {
         let isParent = (settings.role == .parent)
 
         // —— key change ↓ ——
-        let port: Int32 = isParent ? 50000               // parent’s listener
+        let port: Int32 = isParent
+        ? (settings.listenerPort > 0 ? Int32(settings.listenerPort) : 50000)
                                    : Int32(UInt16.random(in: 49152...65534)) // child
 
         let peerName = UIDevice.current.name
@@ -194,6 +195,7 @@ final class BonjourSyncManager: NSObject {
         
         //  ── NEW: include your own mnemonic & RSSI
             dict["name"] = Data(settings.localNickname.utf8)
+            dict["hostUUID"] = Data(settings.localPeerID.uuidString.utf8)
             // always advertise yourself at full strength:
             dict["rssi"] = Data("3".utf8)
 
@@ -356,7 +358,14 @@ extension BonjourSyncManager: NetServiceDelegate {
        let rssiString = String(data: rssiData, encoding: .utf8),
        let rssi       = Int(rssiString)
     {
-      let peerID = uuid(from: sender.name)
+      let peerID: UUID = {
+        if let hostUUIDData = txtDict["hostUUID"],
+           let hostUUIDString = String(data: hostUUIDData, encoding: .utf8),
+           let hostUUID = UUID(uuidString: hostUUIDString) {
+          return hostUUID
+        }
+        return uuid(from: sender.name)
+      }()
       DispatchQueue.main.async {
         self.syncSettings?.updateSignalStrength(peerID: peerID, to: rssi)
       }
@@ -364,6 +373,9 @@ extension BonjourSyncManager: NetServiceDelegate {
 
     // 3) *** NEW: actually open the TCP connection ***
     // Only connect once, of course
+      if self.syncSettings?.connectToResolvedBonjourParent(service: sender, txt: txtDict) == true {
+        return
+      }
       maybeConnectTo(sender)
 
     
