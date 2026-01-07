@@ -2295,7 +2295,7 @@ private struct EventsSection: View {
                 HStack(spacing: 10) {
                     PhotosPicker(selection: $pickedImageItem, matching: .images) {
                         HStack(spacing: 8) {
-                        Image(systemName: "photo")
+                        Image(systemName: "mountain.2")
                         Text(pickedImageAssetID == nil ? "Choose Image" : "Replace Image")
                         Spacer()
                         Image(systemName: "chevron.right")
@@ -2525,11 +2525,11 @@ private struct EventTypeChipRow: View {
     }
 
     private let items: [Item] = [
-        .init(kind: .stop, title: "Stop", icon: "hand.raised.fill"),
+        .init(kind: .stop, title: "Stop", icon: "playpause.fill"),
         .init(kind: .cue, title: "Cue", icon: "bolt.fill"),
-        .init(kind: .restart, title: "Restart", icon: "gobackward"),
-        .init(kind: .message, title: "Message", icon: "text.bubble"),
-        .init(kind: .image, title: "Image", icon: "photo")
+        .init(kind: .restart, title: "Restart", icon: "arrow.counterclockwise"),
+        .init(kind: .message, title: "Message", icon: "text.quote"),
+        .init(kind: .image, title: "Image", icon: "mountain.2")
     ]
 
     var body: some View {
@@ -3304,10 +3304,10 @@ private struct EventRow: View {
     private var iconName: String {
         switch event.kind {
         case .cue:     return "bolt.fill"
-        case .stop:    return "hand.raised.fill"
-        case .restart: return "gobackward"
-        case .message: return "text.bubble"
-        case .image:   return "photo"
+        case .stop:    return "playpause.fill"
+        case .restart: return "arrow.counterclockwise"
+        case .message: return "text.quote"
+        case .image:   return "mountain.2"
         default:       return "questionmark"
         }
     }

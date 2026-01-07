@@ -2991,6 +2991,8 @@ struct TimerCard: View {
                                 } else {
                                     ForEach(0..<5) { idx in
                                         if idx < events.count {
+                                            let glyphSize = circleDiameter * 0.56
+
                                             switch events[idx] {
                                             case .stop:
                                                 ZStack {
@@ -2998,9 +3000,13 @@ struct TimerCard: View {
                                                         .fill(flashColor)
                                                         .frame(width: circleDiameter,
                                                                height: circleDiameter)
-                                                    Text("S")
-                                                        .font(.custom("Roboto-Regular", size: subTextFontSize * 0.6))
-                                                        .foregroundColor(isDark ? .black : .white)
+                                                    Image(systemName: "playpause")
+                                                        .font(.system(size: glyphSize, weight: .semibold))
+                                                        .symbolRenderingMode(.hierarchical)
+                                                        .foregroundStyle(isDark ? Color.black : Color.white)
+                                                        .contentTransition(.symbolEffect(.replace))
+                                                        .ifAvailableSymbolReplace()
+
                                                 }
                                             case .cue:
                                                 ZStack {
@@ -3008,9 +3014,13 @@ struct TimerCard: View {
                                                         .stroke(flashColor, lineWidth: isLandscape ? 1.5 : 1)
                                                         .frame(width: circleDiameter,
                                                                height: circleDiameter)
-                                                    Text("C")
-                                                        .font(.custom("Roboto-Regular", size: subTextFontSize * 0.6))
-                                                        .foregroundColor(flashColor)
+                                                    Image(systemName: "bolt.fill")
+                                                        .font(.system(size: glyphSize, weight: .semibold))
+                                                        .symbolRenderingMode(.hierarchical)
+                                                        .foregroundStyle(flashColor)
+                                                        .contentTransition(.symbolEffect(.replace))
+                                                        .ifAvailableSymbolReplace()
+
                                                 }
                                             case .restart:
                                                 ZStack {
@@ -3018,9 +3028,13 @@ struct TimerCard: View {
                                                         .stroke(flashColor, lineWidth: isLandscape ? 1.5 : 1)
                                                         .frame(width: circleDiameter,
                                                                height: circleDiameter)
-                                                    Text("R")
-                                                        .font(.custom("Roboto-Regular", size: subTextFontSize * 0.6))
-                                                        .foregroundColor(isDark ? .white : .black)
+                                                    Image(systemName: "arrow.counterclockwise")
+                                                        .font(.system(size: glyphSize, weight: .semibold))
+                                                        .symbolRenderingMode(.hierarchical)
+                                                        .foregroundStyle(isDark ? Color.white : Color.black)
+                                                        .contentTransition(.symbolEffect(.replace))
+                                                        .ifAvailableSymbolReplace()
+
                                                 }
                                             case .message:
                                                 ZStack {
@@ -3032,9 +3046,13 @@ struct TimerCard: View {
                                                         .stroke(flashColor, lineWidth: isLandscape ? 1.5 : 1)
                                                         .frame(width: circleDiameter,
                                                                height: circleDiameter)
-                                                    Text("M")
-                                                        .font(.custom("Roboto-Regular", size: subTextFontSize * 0.6))
-                                                        .foregroundColor(isDark ? .white : .black)
+                                                    Image(systemName: "text.quote")
+                                                        .font(.system(size: glyphSize, weight: .semibold))
+                                                        .symbolRenderingMode(.hierarchical)
+                                                        .foregroundStyle(isDark ? Color.white : Color.black)
+                                                        .contentTransition(.symbolEffect(.replace))
+                                                        .ifAvailableSymbolReplace()
+
                                                 }
                                                 .accessibilityLabel("Message event")
                                             case .image:
@@ -3047,9 +3065,13 @@ struct TimerCard: View {
                                                         .stroke(flashColor, lineWidth: isLandscape ? 1.2 : 1)
                                                         .frame(width: circleDiameter * 0.55,
                                                                height: circleDiameter * 0.42)
-                                                    Text("I")
-                                                        .font(.custom("Roboto-Regular", size: subTextFontSize * 0.5))
-                                                        .foregroundColor(isDark ? .white : .black)
+                                                    Image(systemName: "mountain.2")
+                                                        .font(.system(size: circleDiameter * 0.34, weight: .semibold))
+                                                        .symbolRenderingMode(.hierarchical)
+                                                        .foregroundStyle(isDark ? Color.white : Color.black)
+                                                        .contentTransition(.symbolEffect(.replace))
+                                                        .ifAvailableSymbolReplace()
+
                                                 }
                                                 .accessibilityLabel("Image event")
                                             }
@@ -9961,7 +9983,7 @@ private func printJoinQR() {
         .presentationBackground(.clear)
 
         // optional: keep system dimming but prevent weird “card” feel
-        .presentationBackgroundInteraction(.enabled)
+        .presentationBackgroundInteraction(.disabled)
 
     }
 }
@@ -11838,6 +11860,7 @@ private struct JoinHostPickerSheet: View {
     }
 }
 // Persistent badge state for "X loaded" shown inside TimerCard
+@MainActor
 final class CueBadgeState: ObservableObject {
     @Published var loadedCueSheetID: UUID? = nil
     @Published var broadcast: Bool = false
