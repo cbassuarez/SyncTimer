@@ -8754,6 +8754,8 @@ struct ConnectionPage: View {
 }
 
 private struct GenerateJoinQRSheet: View {
+    @State private var showShareGlyph = false
+
     let deviceName: String
     let hostUUIDString: String
     let hostShareURL: URL
@@ -8959,10 +8961,11 @@ private func printJoinQR() {
 
     @ViewBuilder
     private var headerIcon: some View {
-        let base = Image(systemName: "qrcode")
+        let base = Image(systemName: showShareGlyph ? "square.and.arrow.up" : "qrcode")
             .font(.system(size: 18, weight: .semibold))
-            .symbolRenderingMode(.palette)
-            .foregroundStyle(.primary, settings.flashColor) // guaranteed contrast
+            .symbolRenderingMode(showShareGlyph ? .hierarchical : .palette)
+            .foregroundStyle(showShareGlyph ? settings.flashColor : .primary,
+                             settings.flashColor) // qrcode keeps (primary + flashColor)
 
         ZStack {
             LiquidGlassCircle(diameter: 44, tint: settings.flashColor)
@@ -8971,7 +8974,10 @@ private func printJoinQR() {
                 if reduceMotion {
                     base
                 } else {
-                    base.symbolEffect(.drawOn, options: .speed(1.25))
+                    base
+                      .contentTransition(.symbolEffect(.replace.magic(fallback: .replace.upUp.byLayer)))
+//                      .animation(.spring(response: 0.45, dampingFraction: 0.82), value: showShareGlyph)
+
                 }
             } else {
                 // older iOS: no symbolEffect, still visible
@@ -8980,6 +8986,17 @@ private func printJoinQR() {
                     .foregroundColor(.primary)
             }
         }
+        .onAppear {
+            guard !reduceMotion else { return }
+            showShareGlyph = false
+            DispatchQueue.main.async {
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
+                    showShareGlyph = true   // one replace: qrcode → share
+                }
+            }
+        }
+        .onDisappear { showShareGlyph = false } // ensures it replays next time
+
         .accessibilityHidden(true)
     }
 
