@@ -17,6 +17,9 @@ import CoreImage.CIFilterBuiltins
 import CoreBluetooth
 import SpriteKit
 import UIKit
+#if canImport(AppKit)
+import AppKit
+#endif
 
 
 //───────────────────
@@ -8000,6 +8003,7 @@ struct ConnectionPage: View {
     @State private var isWifiAvailable = false
     @State private var showNoWifiAlert = false
     private let wifiMonitor = NWPathMonitor(requiredInterfaceType: .wifi)
+    @State private var showGenerateJoinQRSheet = false
     
     // Treat default/sentinel ports as "unset" for display-only
         private func isUnsetPort(_ s: String) -> Bool {
@@ -8019,6 +8023,37 @@ struct ConnectionPage: View {
     
     private var isMax: Bool {
         UIScreen.main.bounds.height >= 930
+    }
+
+    private var hostUUIDString: String {
+        syncSettings.localPeerID.uuidString
+    }
+
+    private var hostDeviceName: String {
+        let trimmed = syncSettings.localNickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        return UIDevice.current.name
+    }
+
+    private var hostShareURL: URL {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "synctimerapp.com"
+        components.path = "/host"
+        components.queryItems = [
+            URLQueryItem(name: "v", value: "1"),
+            URLQueryItem(name: "host_uuid", value: hostUUIDString),
+            URLQueryItem(name: "device_name", value: hostDeviceName)
+        ]
+        return components.url ?? URL(string: "https://synctimerapp.com/host")!
+    }
+
+    private var hostShareURLString: String {
+        hostShareURL.absoluteString
+    }
+
+    private var uuidSuffix: String {
+        String(hostUUIDString.suffix(8)).uppercased()
     }
     
     
@@ -8322,6 +8357,41 @@ struct ConnectionPage: View {
             return ""
         }
     }
+
+    @ViewBuilder
+    private func hostShareGlassChrome(isEnabled: Bool) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        shape
+            .fill(.ultraThinMaterial)
+            .overlay(
+                shape
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.18),
+                                Color.white.opacity(0.04)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            )
+            .overlay(
+                shape
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.10),
+                                Color.white.opacity(0.00)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .opacity(isEnabled ? 1 : 0.4)
+            )
+    }
     var body: some View {
         VStack(spacing: 0) {
             // ── Content area ───────────────────────────────────────────────
@@ -8351,7 +8421,49 @@ struct ConnectionPage: View {
                                     .fixedSize(horizontal: false, vertical: true)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 28)
-                
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Host Share")
+                        .font(.custom("Roboto-Medium", size: 13))
+                        .foregroundColor(.secondary)
+                    Button {
+                        showGenerateJoinQRSheet = true
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "qrcode")
+                                    .font(.system(size: 18, weight: .semibold))
+                                Text("Generate Join QR…")
+                                    .font(.custom("Roboto-SemiBold", size: 16))
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.secondary.opacity(0.6))
+                            }
+                            Text("Opens synctimerapp.com with this host preloaded.")
+                                .font(.custom("Roboto-Light", size: 12))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(hostShareGlassChrome(isEnabled: syncSettings.role == .parent))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(syncSettings.role != .parent)
+                    if syncSettings.role != .parent {
+                        Text("Switch to Parent to generate host QR.")
+                            .font(.custom("Roboto-Light", size: 12))
+                            .foregroundColor(.secondary)
+                            .padding(.leading, 4)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.bottom, 18)
+
                 switch syncSettings.connectionMethod {
                 case .network:
                                     lanStatusPanel(
@@ -8489,6 +8601,14 @@ struct ConnectionPage: View {
           Button("OK", role: .cancel) { }
         } message: {
           Text(syncErrorMessage)
+        }
+        .sheet(isPresented: $showGenerateJoinQRSheet) {
+            GenerateJoinQRSheet(deviceName: hostDeviceName,
+                                hostUUIDString: hostUUIDString,
+                                hostShareURL: hostShareURL,
+                                connectionMethod: syncSettings.connectionMethod,
+                                role: syncSettings.role,
+                                isSyncEnabled: syncSettings.isEnabled)
         }
     }
     
@@ -8675,6 +8795,198 @@ struct ConnectionPage: View {
 }
 
 
+
+private struct GenerateJoinQRSheet: View {
+    let deviceName: String
+    let hostUUIDString: String
+    let hostShareURL: URL
+    let connectionMethod: SyncSettings.SyncConnectionMethod
+    let role: SyncSettings.Role
+    let isSyncEnabled: Bool
+
+    @Environment(\.openURL) private var openURL
+    @State private var showCopiedToast = false
+
+    private var hostShareURLString: String {
+        hostShareURL.absoluteString
+    }
+
+    private var uuidSuffix: String {
+        String(hostUUIDString.suffix(8)).uppercased()
+    }
+
+    private var transportLabel: String {
+        switch connectionMethod {
+        case .network:
+            return "Wi-Fi"
+        case .bluetooth:
+            return "Nearby"
+        case .bonjour:
+            return "Bonjour"
+        }
+    }
+
+    private func copyToPasteboard(_ value: String) {
+        #if canImport(UIKit)
+        UIPasteboard.general.string = value
+        #elseif canImport(AppKit)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(value, forType: .string)
+        #endif
+        showCopiedToast = true
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(deviceName)
+                            .font(.custom("Roboto-SemiBold", size: 20))
+                        Button {
+                            copyToPasteboard(hostUUIDString)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Text("HOST ID • …\(uuidSuffix)")
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundColor(.primary)
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(.ultraThinMaterial, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        Text(hostUUIDString)
+                            .font(.system(.footnote, design: .monospaced))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    )
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Config")
+                            .font(.custom("Roboto-Medium", size: 13))
+                            .foregroundColor(.secondary)
+                        HStack(spacing: 8) {
+                            Label(transportLabel,
+                                  systemImage: connectionMethod == .network ? "wifi" : "antenna.radiowaves.left.and.right")
+                                .font(.custom("Roboto-Regular", size: 12))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(.ultraThinMaterial, in: Capsule())
+                            Label(role == .parent ? "Parent" : "Child",
+                                  systemImage: role == .parent ? "arrow.up.circle" : "arrow.down.circle")
+                                .font(.custom("Roboto-Regular", size: 12))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(.ultraThinMaterial, in: Capsule())
+                            Label(isSyncEnabled ? "SYNC On" : "SYNC Off",
+                                  systemImage: isSyncEnabled ? "bolt.fill" : "bolt.slash")
+                                .font(.custom("Roboto-Regular", size: 12))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(.ultraThinMaterial, in: Capsule())
+                        }
+                        .foregroundColor(.secondary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Button {
+                            openURL(hostShareURL)
+                        } label: {
+                            HStack {
+                                Text("Open QR Tool")
+                                    .font(.custom("Roboto-SemiBold", size: 16))
+                                Spacer()
+                                Image(systemName: "arrow.up.right.square")
+                                    .font(.system(size: 14, weight: .semibold))
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(role != .parent)
+
+                        ShareLink(item: hostShareURL) {
+                            HStack {
+                                Text("Share Link…")
+                                    .font(.custom("Roboto-Medium", size: 16))
+                                Spacer()
+                                Image(systemName: "square.and.arrow.up")
+                                    .font(.system(size: 14, weight: .semibold))
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            copyToPasteboard(hostShareURLString)
+                        } label: {
+                            HStack {
+                                Text("Copy Link")
+                                    .font(.custom("Roboto-Medium", size: 16))
+                                Spacer()
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 14, weight: .semibold))
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            copyToPasteboard(hostUUIDString)
+                        } label: {
+                            HStack {
+                                Text("Copy Host ID")
+                                    .font(.custom("Roboto-Medium", size: 16))
+                                Spacer()
+                                Image(systemName: "number")
+                                    .font(.system(size: 14, weight: .semibold))
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    Text("Anyone with this link can generate Join QRs for this host.")
+                        .font(.custom("Roboto-Light", size: 12))
+                        .foregroundColor(.secondary)
+                        .padding(.top, 4)
+                }
+                .padding(20)
+            }
+            .navigationTitle("Generate Join QR")
+        }
+        .overlay(
+            Group {
+                if showCopiedToast {
+                    Text("Copied")
+                        .font(.custom("Roboto-Medium", size: 12))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .transition(.opacity)
+                        .onAppear {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                                withAnimation {
+                                    showCopiedToast = false
+                                }
+                            }
+                        }
+                }
+            },
+            alignment: .top
+        )
+    }
+}
 
  struct NicknameGenerator {
     static let adjectives = ["Sunny","Brave","Swift","Clever","Mighty","Calm","Witty","Bold","Vague","Pushy","Vulgar", "Mellow", "Wise", "Brainy", "Sleepy","Royal","Proud","Zany","Weary,","Good","Strange","Up"]
