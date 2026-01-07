@@ -8360,111 +8360,62 @@ struct ConnectionPage: View {
         }
     }
 
-    @ViewBuilder
-    private func hostShareGlassChrome(isEnabled: Bool) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
-        shape
-            .fill(.ultraThinMaterial)
-            .overlay(
-                shape
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.18),
-                                Color.white.opacity(0.04)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
-            )
-            .overlay(
-                shape
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.10),
-                                Color.white.opacity(0.00)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .opacity(isEnabled ? 1 : 0.4)
-            )
+    private var joinQRButton: some View {
+        Button {
+            showGenerateJoinQRSheet = true
+        } label: {
+            ZStack {
+                LiquidGlassCircle(diameter: 44, tint: settings.flashColor)
+                Image(systemName: "qrcode")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(settings.flashColor)
+                    .symbolRenderingMode(.hierarchical)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(syncSettings.role != .parent)
+        .accessibilityLabel("Generate Join QR")
+        .accessibilityHint("Opens a share sheet for children to join.")
     }
     var body: some View {
         VStack(spacing: 0) {
             // ── Content area ───────────────────────────────────────────────
             VStack(alignment: .leading, spacing: -24) {
-                SegmentedControlPicker(selection: $syncSettings.connectionMethod,
-                                       shadowOpacity: 0.08,
-                                       allowed: [.network, .bluetooth])
-                .onChange(of: syncSettings.connectionMethod) { newMethod in
-                    // ① clear any in-flight numpad entry
-                        cancelEntry()
-                
-                        // ② if we were mid-sync, shut everything down
-                    if syncSettings.isEnabled {
-                                                if syncSettings.role == .parent { syncSettings.stopParent() }
-                                                else                            { syncSettings.stopChild() }
-                                                syncSettings.isEnabled = false
-                                            }
-                    }
-                .frame(maxWidth: .infinity)      // ← let it grow to fill the content area
+                HStack(spacing: 10) {
+                    SegmentedControlPicker(selection: $syncSettings.connectionMethod,
+                                           shadowOpacity: 0.08,
+                                           allowed: [.network, .bluetooth])
+                    .onChange(of: syncSettings.connectionMethod) { newMethod in
+                        // ① clear any in-flight numpad entry
+                            cancelEntry()
+                    
+                            // ② if we were mid-sync, shut everything down
+                        if syncSettings.isEnabled {
+                                                    if syncSettings.role == .parent { syncSettings.stopParent() }
+                                                    else                            { syncSettings.stopChild() }
+                                                    syncSettings.isEnabled = false
+                                                }
+                        }
+                    .frame(maxWidth: .infinity)      // ← let it grow to fill the content area
+                    .accessibilityLabel(syncSettings.connectionMethod.rawValue)
+                    .accessibilityHint("Selects \(syncSettings.connectionMethod.rawValue) sync mode")
+                    joinQRButton
+                }
                 .padding(.horizontal, -8)         // ← pull it 8pt in from each edge (instead of 12)
                 .padding(.vertical, -8)
-                .accessibilityLabel(syncSettings.connectionMethod.rawValue)
-                .accessibilityHint("Selects \(syncSettings.connectionMethod.rawValue) sync mode")
                 Text(connectionDescription)
                                     .font(.custom("Roboto-Light", size: 14))
                                     .foregroundColor(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 28)
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Host Share")
-                        .font(.custom("Roboto-Medium", size: 13))
+                if syncSettings.role != .parent {
+                    Text("Switch to Parent to share a Join QR.")
+                        .font(.custom("Roboto-Light", size: 12))
                         .foregroundColor(.secondary)
-                    Button {
-                        showGenerateJoinQRSheet = true
-                    } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "qrcode")
-                                    .font(.system(size: 18, weight: .semibold))
-                                Text("Generate Join QR…")
-                                    .font(.custom("Roboto-SemiBold", size: 16))
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(.secondary.opacity(0.6))
-                            }
-                            Text("Opens synctimerapp.com with this host preloaded.")
-                                .font(.custom("Roboto-Light", size: 12))
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(hostShareGlassChrome(isEnabled: syncSettings.role == .parent))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(syncSettings.role != .parent)
-                    if syncSettings.role != .parent {
-                        Text("Switch to Parent to generate host QR.")
-                            .font(.custom("Roboto-Light", size: 12))
-                            .foregroundColor(.secondary)
-                            .padding(.leading, 4)
-                    }
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 18)
                 }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 18)
 
                 switch syncSettings.connectionMethod {
                 case .network:
@@ -8611,6 +8562,8 @@ struct ConnectionPage: View {
                                 connectionMethod: syncSettings.connectionMethod,
                                 role: syncSettings.role,
                                 isSyncEnabled: syncSettings.isEnabled)
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
         }
     }
     
