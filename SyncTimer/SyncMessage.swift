@@ -18,12 +18,26 @@ enum SyncMessage: Codable {
         case cueEvent
     }
 
+    private static func encodeSheetSnapshot(_ sheet: CueSheet) throws -> String {
+        let data = CueXML.write(sheet)
+        return data.base64EncodedString()
+    }
+
+    private static func decodeSheetSnapshot(_ string: String) throws -> CueSheet {
+        guard let data = Data(base64Encoded: string) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: [CodingKeys.sheetSnapshot],
+                                                    debugDescription: "Invalid base64 sheet snapshot"))
+        }
+        return try CueXML.read(data)
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let type = try container.decode(MessageType.self, forKey: .type)
         switch type {
         case .sheetSnapshot:
-            let sheet = try container.decode(CueSheet.self, forKey: .sheetSnapshot)
+            let snapshot = try container.decode(String.self, forKey: .sheetSnapshot)
+            let sheet = try Self.decodeSheetSnapshot(snapshot)
             self = .sheetSnapshot(sheet)
         case .playbackState:
             let state = try container.decode(PlaybackState.self, forKey: .playbackState)
@@ -39,7 +53,8 @@ enum SyncMessage: Codable {
         switch self {
         case .sheetSnapshot(let sheet):
             try container.encode(MessageType.sheetSnapshot, forKey: .type)
-            try container.encode(sheet, forKey: .sheetSnapshot)
+            let snapshot = try Self.encodeSheetSnapshot(sheet)
+            try container.encode(snapshot, forKey: .sheetSnapshot)
         case .playbackState(let state):
             try container.encode(MessageType.playbackState, forKey: .type)
             try container.encode(state, forKey: .playbackState)
