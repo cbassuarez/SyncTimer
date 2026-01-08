@@ -8779,7 +8779,7 @@ private struct GenerateJoinQRSheet: View {
     }
 #if canImport(UIKit)
 private func printJoinQR() {
-    guard let img = makeBrandedJoinQRUIImage(from: hostShareURLString, qrScale: 14) else { return }
+    guard let img = makeBrandedJoinQRUIImage(from: joinAppClipURLString, qrScale: 14) else { return }
     let ctrl = UIPrintInteractionController.shared
     let info = UIPrintInfo(dictionary: nil)
     info.outputType = .photo
@@ -8827,7 +8827,50 @@ private func printJoinQR() {
 
     private enum CopyKey { case link, hostID, ip, port }
 
-    private var hostShareURLString: String { hostShareURL.absoluteString }
+    // Website prefill / QR-generator entrypoint (Advanced → Open in browser only)
+    private var prefillGeneratorURL: URL { hostShareURL }
+    private var prefillGeneratorURLString: String { prefillGeneratorURL.absoluteString }
+
+    // Canonical App Clip join URL (QR/Share/Copy/Print must use this)
+    private var joinMode: String {
+        (normalizedConnectionMethod == .bluetooth) ? "nearby" : "wifi"
+    }
+
+    private var joinAppClipURL: URL {
+        var c = URLComponents()
+        c.scheme = "https"
+        c.host = "synctimerapp.com"
+        c.path = "/join"
+
+        var items: [URLQueryItem] = [
+            .init(name: "v", value: "1"),
+            .init(name: "mode", value: joinMode),
+            .init(name: "hosts", value: hostUUIDString)
+        ]
+
+        // Optional but expected (keeps UI nicer in Join flow)
+        if !deviceName.isEmpty {
+            items.append(.init(name: "device_names", value: deviceName))
+            items.append(.init(name: "room_label", value: deviceName))
+        }
+
+        // Legacy hint only if bonjour is actually the stored method
+        if syncSettings.connectionMethod == .bonjour {
+            items.append(.init(name: "transport_hint", value: "bonjour"))
+        }
+
+        // Update gating (optional but supported)
+        if let buildStr = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+           let build = Int(buildStr), build > 0 {
+            items.append(.init(name: "min_build", value: String(build)))
+        }
+
+        c.queryItems = items
+        return c.url ?? prefillGeneratorURL
+    }
+
+    private var joinAppClipURLString: String { joinAppClipURL.absoluteString }
+
     private var uuidSuffix: String { String(hostUUIDString.suffix(8)).uppercased() }
 
     private var normalizedConnectionMethod: SyncSettings.SyncConnectionMethod {
@@ -8959,12 +9002,39 @@ private func printJoinQR() {
         let context = CIContext()
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(string.utf8)
-        filter.correctionLevel = "M"
+        filter.correctionLevel = "H"
         guard let output = filter.outputImage else { return nil }
         let transformed = output.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         guard let cg = context.createCGImage(transformed, from: transformed.extent) else { return nil }
         return UIImage(cgImage: cg)
     }
+#if canImport(UIKit)
+    @MainActor
+private enum AppAsset {
+    final class Token {} // anchors the bundle for *this* module/target
+    static let bundle = Bundle(for: Token.self)
+
+    static func uiImage(named name: String) -> UIImage? {
+        // Try module bundle first, then main, then legacy
+        if let ui = UIImage(named: name, in: bundle, compatibleWith: nil) { return ui.withRenderingMode(.alwaysOriginal) }
+        if let ui = UIImage(named: name, in: .main, compatibleWith: nil) { return ui.withRenderingMode(.alwaysOriginal) }
+        if let ui = UIImage(named: name) { return ui.withRenderingMode(.alwaysOriginal) }
+
+        // Fallback: render the SwiftUI Image into a UIImage (works even when UIKit lookup doesn’t)
+        if #available(iOS 16.0, *) {
+            let r = ImageRenderer(content:
+                Image(name)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 256, height: 256)
+            )
+            r.isOpaque = false
+            return r.uiImage
+        }
+        return nil
+    }
+}
+#endif
 
     private func makeBrandedJoinQRUIImage(
         from string: String,
@@ -8973,11 +9043,13 @@ private func printJoinQR() {
         tilePadding: CGFloat = 18
     ) -> UIImage? {
         guard let rawQR = makeQRCodeUIImage(from: string, scale: qrScale) else { return nil }
+
         let qrSide = rawQR.size.width
         let tileSide = qrSide + (tilePadding * 2)
         let tileSize = CGSize(width: tileSide, height: tileSide)
+
         let renderer = UIGraphicsImageRenderer(size: tileSize)
-        let logo = UIImage(named: "AppLogo")
+        let logoImage = UIImage(named: "AppLogo")
 
         return renderer.image { context in
             let tileRect = CGRect(origin: .zero, size: tileSize)
@@ -8985,6 +9057,7 @@ private func printJoinQR() {
             UIColor.white.setFill()
             tilePath.fill()
 
+            // Draw QR (crisp, no interpolation)
             let qrRect = CGRect(x: tilePadding, y: tilePadding, width: qrSide, height: qrSide)
             context.cgContext.saveGState()
             context.cgContext.setShouldAntialias(false)
@@ -8992,40 +9065,52 @@ private func printJoinQR() {
             rawQR.draw(in: qrRect)
             context.cgContext.restoreGState()
 
-            guard let logo else { return }
-            let badgeDiameter = min(max(qrSide * 0.11, 28), 34)
-            let badgeRect = CGRect(
-                x: tileSide - tilePadding - badgeDiameter,
-                y: tilePadding,
-                width: badgeDiameter,
-                height: badgeDiameter
-            )
-            let badgePath = UIBezierPath(ovalIn: badgeRect)
+            // If logo missing, still return a valid QR tile
+            guard let logo = logoImage else { return }
 
+            // Center “logo plate” over the QR (ECC H makes this safe)
+            let plateSide = min(max(qrSide * 0.24, 64), qrSide * 0.28) // ~24–28% of QR
+            let plateRect = CGRect(
+                x: tilePadding + (qrSide - plateSide) * 0.5,
+                y: tilePadding + (qrSide - plateSide) * 0.5,
+                width: plateSide,
+                height: plateSide
+            )
+
+            let plateCorner = plateSide * 0.26
+            let platePath = UIBezierPath(roundedRect: plateRect, cornerRadius: plateCorner)
+
+            // Plate shadow + fill (knocks out modules under it)
             context.cgContext.saveGState()
             context.cgContext.setShadow(
-                offset: CGSize(width: 0, height: 1),
-                blur: 3,
-                color: UIColor.black.withAlphaComponent(0.15).cgColor
+                offset: CGSize(width: 0, height: 2),
+                blur: 8,
+                color: UIColor.black.withAlphaComponent(0.18).cgColor
             )
-            UIColor.white.withAlphaComponent(0.95).setFill()
-            badgePath.fill()
+            UIColor.white.withAlphaComponent(0.98).setFill()
+            platePath.fill()
             context.cgContext.restoreGState()
 
+            // Subtle strokes (premium but minimal)
             UIColor.white.withAlphaComponent(0.18).setStroke()
-            badgePath.lineWidth = 1
-            badgePath.stroke()
+            platePath.lineWidth = 1
+            platePath.stroke()
 
-            let innerStrokePath = UIBezierPath(ovalIn: badgeRect.insetBy(dx: 0.5, dy: 0.5))
+            let innerStroke = UIBezierPath(
+                roundedRect: plateRect.insetBy(dx: 0.6, dy: 0.6),
+                cornerRadius: plateCorner * 0.92
+            )
             UIColor.black.withAlphaComponent(0.06).setStroke()
-            innerStrokePath.lineWidth = 0.5
-            innerStrokePath.stroke()
+            innerStroke.lineWidth = 0.6
+            innerStroke.stroke()
 
-            let logoInset = badgeDiameter * 0.18
-            let logoRect = badgeRect.insetBy(dx: logoInset, dy: logoInset)
+            // Draw logo (readable)
+            let logoInset = plateSide * 0.10
+            let logoRect = plateRect.insetBy(dx: logoInset, dy: logoInset)
             logo.draw(in: logoRect)
         }
     }
+
     #endif
 
     @ViewBuilder
@@ -9655,7 +9740,7 @@ private func printJoinQR() {
                 }
 
                 HStack(spacing: 10) {
-                    ShareLink(item: hostShareURL) {
+                    ShareLink(item: joinAppClipURL) {
                         HStack(spacing: 10) {
                             Image(systemName: "square.and.arrow.up")
                                 .font(.system(size: 15, weight: .semibold))
@@ -9712,12 +9797,13 @@ private func printJoinQR() {
             // Advanced (collapsed): utilities + “open in browser”
             DisclosureGroup {
                 VStack(spacing: 10) {
-                    advancedRow(title: "Copy link",
+                    advancedRow(title: "Copy Join link",
                                 detail: nil,
                                 leadingSymbol: "link",
                                 key: .link) {
-                        copyToPasteboard(hostShareURLString, key: .link, toast: "Link copied")
+                        copyToPasteboard(joinAppClipURLString, key: .link, toast: "Join link copied")
                     }
+
 
                     advancedRow(title: "Copy Host ID",
                                 detail: "…\(uuidSuffix)",
@@ -9745,7 +9831,8 @@ private func printJoinQR() {
                     }
 
                     Button {
-                        openURL(hostShareURL)
+                        openURL(prefillGeneratorURL)
+
                     } label: {
                         HStack(spacing: 10) {
                             Image(systemName: "safari")
@@ -9767,7 +9854,7 @@ private func printJoinQR() {
                     }
                     .buttonStyle(.plain)
 
-                    Text("Anyone with this link can generate Join QRs for this host.")
+                    Text("Opens the QR generator page for this host (prefilled).")
                         .font(.custom("Roboto-Light", size: 12))
                         .foregroundColor(.secondary)
                         .padding(.top, 2)
@@ -9918,7 +10005,7 @@ private func printJoinQR() {
 
             if showQRModal {
                 JoinQRStageOverlay(
-                    hostShareURL: hostShareURL,
+                    joinAppClipURL: joinAppClipURL,
                     deviceName: deviceName,
                     uuidSuffix: uuidSuffix,
                     accentColor: settings.flashColor,
@@ -9926,7 +10013,7 @@ private func printJoinQR() {
                     reduceTransparency: reduceTransparency,
                     qrImage: {
                         #if canImport(UIKit)
-                        return makeBrandedJoinQRUIImage(from: hostShareURLString, qrScale: 14)
+                        return makeBrandedJoinQRUIImage(from: joinAppClipURLString, qrScale: 14)
                         #else
                         return nil
                         #endif
@@ -9963,7 +10050,8 @@ private func printJoinQR() {
     }
 
     private struct JoinQRStageOverlay: View {
-        let hostShareURL: URL
+        let joinAppClipURL: URL
+
         let deviceName: String
         let uuidSuffix: String
         let accentColor: Color
@@ -10062,7 +10150,8 @@ private func printJoinQR() {
                         )
 
                         HStack(spacing: 14) {
-                            ShareLink(item: hostShareURL) {
+                            ShareLink(item: joinAppClipURL) {
+
                                 HStack(spacing: 8) {
                                     Image(systemName: "square.and.arrow.up")
                                         .font(.system(size: 14, weight: .semibold))
