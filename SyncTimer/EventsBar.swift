@@ -194,6 +194,7 @@ struct EventsBar: View {
             HStack(spacing: 0) {
                 // ─── CYCLE (“STOP” / “CUE” / “RESTART”) button ─────────────────
                 Button(action: {
+                    Haptics.light()
                     // Cycle through modes: stop → cue → restart → stop
                     switch eventMode {
                     case .stop:     eventMode = .cue

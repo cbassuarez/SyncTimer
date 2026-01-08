@@ -23,6 +23,28 @@ import AppKit
 
 
 //───────────────────
+// MARK: – Haptics
+//───────────────────
+private enum Haptics {
+    static func light() {
+        #if canImport(UIKit)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        #endif
+    }
+
+    static func selection() {
+        #if canImport(UIKit)
+        UISelectionFeedbackGenerator().selectionChanged()
+        #endif
+    }
+
+    static func warning() {
+        #if canImport(UIKit)
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        #endif
+    }
+}
+//───────────────────
 // MARK: – tiny helpers
 //───────────────────
 // MARK: - App-wide notification (optional)
@@ -1741,37 +1763,42 @@ struct NumPadView: View {
     }
     
     
-    
     // MARK: – key handling
     private func handle(_ key: Key) {
         switch key {
         case .digit, .backspace:
             guard !lockActive else { return }
+            Haptics.light()
             onKey(key)
             
             
         case .dot:
             guard isEntering else { return }
+            Haptics.light()
             onKey(.dot)
             
             
         case .enter:
             guard isEntering else { return }
+            Haptics.light()
             onKey(.enter)
             isEntering = false
             
             
         case .settings:
+            Haptics.light()
             onSettings()
             
             
         case .chevronLeft:
             guard parentMode == .settings else { return }
+            Haptics.selection()
             settingsPage = (settingsPage + 3) % 4
             
             
         case .chevronRight:
             guard parentMode == .settings else { return }
+            Haptics.selection()
             settingsPage = (settingsPage + 1) % 4
         }
     }
@@ -1935,16 +1962,20 @@ struct SyncBar: View {
                         onOpenSyncSettings()
                     } else {
                         guard !isCounting else {
+                            Haptics.warning()
                             suppressNextOpenSettingsTap = true
                             return
                         }
                         suppressNextOpenSettingsTap = true
+                        Haptics.light()
                         let newRole: SyncSettings.Role = (syncSettings.role == .parent ? .child : .parent)
                         onRoleConfirmed(newRole)
                     }
                 case .second:
                     if allowMainViewChanges {
                         guard !isCounting else { return }
+                        guard !isCounting else { Haptics.warning(); return }
+                        Haptics.light()
                         let newRole: SyncSettings.Role = (syncSettings.role == .parent ? .child : .parent)
                         onRoleConfirmed(newRole)
                     } else {
@@ -1985,10 +2016,12 @@ struct SyncBar: View {
                         onOpenSyncSettings()
                     } else {
                         suppressNextOpenSettingsTap = true
+                        Haptics.light()
                         onToggleSyncMode()
                     }
                 case .second:
                     if allowMainViewChanges {
+                        Haptics.light()
                         onToggleSyncMode()
                     } else {
                         onOpenSyncSettings()
@@ -8373,6 +8406,7 @@ struct ConnectionPage: View {
 
     private var joinQRButton: some View {
         Button {
+            Haptics.light()
             showGenerateJoinQRSheet = true
         } label: {
             ZStack {
@@ -8762,7 +8796,6 @@ struct ConnectionPage: View {
 
 private struct GenerateJoinQRSheet: View {
     @State private var showShareGlyph = false
-
     let deviceName: String
     let hostUUIDString: String
     let hostShareURL: URL
@@ -8777,18 +8810,102 @@ private struct GenerateJoinQRSheet: View {
         self.hostShareURL = hostShareURL
         self.onRequestEnableSync = onRequestEnableSync
     }
+    @State private var activeRoomLabel: String = "Join Room"   // in-memory default
+    @State private var showingSaveRoomPrompt = false
+    @State private var draftRoomLabel: String = "Join Room"
+
 #if canImport(UIKit)
-private func printJoinQR() {
-    guard let img = makeBrandedJoinQRUIImage(from: joinAppClipURLString, qrScale: 14) else { return }
-    let ctrl = UIPrintInteractionController.shared
-    let info = UIPrintInfo(dictionary: nil)
-    info.outputType = .photo
-    info.jobName = "SyncTimer Join QR"
-    ctrl.printInfo = info
-    ctrl.printingItem = img
-    ctrl.present(animated: true, completionHandler: nil)
-}
+    private func printJoinQR() {
+        guard let img = makePrintedJoinQRUIImage(
+            from: joinAppClipURLString,
+            title: roomLabelForSharing,
+            qrScale: 14
+        ) else { return }
+
+        let ctrl = UIPrintInteractionController.shared
+        let info = UIPrintInfo(dictionary: nil)
+        info.outputType = .photo
+        info.jobName = "SyncTimer Join QR"
+        ctrl.printInfo = info
+        ctrl.printingItem = img
+        ctrl.present(animated: true, completionHandler: nil)
+    }
+
 #endif
+    private func sanitizeRoomLabel(_ raw: String) -> String {
+        // strip newlines + normalize whitespace
+        let parts = raw.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        var s = parts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if s.isEmpty { s = "Join Room" }
+        // max 32 characters (emoji OK, grapheme-safe)
+        if s.count > 32 { s = String(s.prefix(32)) }
+        return s
+    }
+
+    private var roomLabelForSharing: String {
+        sanitizeRoomLabel(activeRoomLabel)
+    }
+
+    private func makePrintedJoinQRUIImage(from string: String,
+                                          title: String,
+                                          qrScale: CGFloat = 14) -> UIImage? {
+        guard let tile = makeBrandedJoinQRUIImage(from: string, qrScale: qrScale) else { return nil }
+
+        let title = sanitizeRoomLabel(title)
+        let topPad: CGFloat = 28
+        let midPad: CGFloat = 18
+        let sidePad: CGFloat = 24
+        let bottomPad: CGFloat = 28
+
+        let maxWidth = tile.size.width + (sidePad * 2)
+
+        let para = NSMutableParagraphStyle()
+        para.alignment = .center
+        para.lineBreakMode = .byWordWrapping
+
+        let titleFont = UIFont.systemFont(ofSize: 34, weight: .semibold)
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: titleFont,
+            .foregroundColor: UIColor.black,
+            .paragraphStyle: para
+        ]
+
+        let titleRect = (title as NSString).boundingRect(
+            with: CGSize(width: maxWidth - (sidePad * 2), height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: attrs,
+            context: nil
+        ).integral
+
+        let canvasSize = CGSize(
+            width: maxWidth,
+            height: topPad + titleRect.height + midPad + tile.size.height + bottomPad
+        )
+
+        let r = UIGraphicsImageRenderer(size: canvasSize)
+        return r.image { ctx in
+            UIColor.white.setFill()
+            ctx.fill(CGRect(origin: .zero, size: canvasSize))
+
+            let titleDrawRect = CGRect(
+                x: sidePad,
+                y: topPad,
+                width: maxWidth - (sidePad * 2),
+                height: titleRect.height
+            )
+            (title as NSString).draw(with: titleDrawRect,
+                                     options: [.usesLineFragmentOrigin, .usesFontLeading],
+                                     attributes: attrs,
+                                     context: nil)
+
+            let tileOrigin = CGPoint(
+                x: (maxWidth - tile.size.width) * 0.5,
+                y: topPad + titleRect.height + midPad
+            )
+            tile.draw(at: tileOrigin)
+        }
+    }
 
     @EnvironmentObject private var syncSettings: SyncSettings
     @EnvironmentObject private var settings: AppSettings
@@ -8827,9 +8944,38 @@ private func printJoinQR() {
 
     private enum CopyKey { case link, hostID, ip, port }
 
-    // Website prefill / QR-generator entrypoint (Advanced → Open in browser only)
-    private var prefillGeneratorURL: URL { hostShareURL }
+    // Website QR-generator entrypoint (Advanced → Open in browser only)
+    private var prefillGeneratorURL: URL {
+        // matches web decodeState(): #state=<base64(JSON)>
+        let hosts: [[String: String]] = [
+            ["uuid": hostUUIDString, "deviceName": deviceName]
+        ]
+
+        let json: [String: Any] = [
+            "mode": joinMode,                  // "wifi" | "nearby"
+            "roomLabel": roomLabelForSharing,
+            "hosts": hosts,
+            "minBuild": "",
+            "minVersion": "",
+            "displayMode": false,
+            "printMode": false
+        ]
+
+        guard let data = try? JSONSerialization.data(withJSONObject: json, options: []),
+              !data.isEmpty
+        else { return hostShareURL }
+
+        let payload = data.base64EncodedString()
+
+        var c = URLComponents()
+        c.scheme = "https"
+        c.host = "synctimerapp.com"
+        c.path = "/qr/"
+        c.fragment = "state=\(payload)"
+        return c.url ?? hostShareURL
+    }
     private var prefillGeneratorURLString: String { prefillGeneratorURL.absoluteString }
+
 
     // Canonical App Clip join URL (QR/Share/Copy/Print must use this)
     private var joinMode: String {
@@ -8851,8 +8997,9 @@ private func printJoinQR() {
         // Optional but expected (keeps UI nicer in Join flow)
         if !deviceName.isEmpty {
             items.append(.init(name: "device_names", value: deviceName))
-            items.append(.init(name: "room_label", value: deviceName))
         }
+        // single shared label (even if multiple hosts/device_names)
+        items.append(.init(name: "room_label", value: roomLabelForSharing))
 
         // Legacy hint only if bonjour is actually the stored method
         if syncSettings.connectionMethod == .bonjour {
@@ -8968,7 +9115,7 @@ private func printJoinQR() {
 
         syncSettings.connectionMethod = (room.connectionMethod == .bonjour) ? .network : room.connectionMethod
         syncSettings.role = room.role
-        if room.connectionMethod == .network {
+        if room.connectionMethod != .bluetooth { // network OR legacy bonjour
             syncSettings.listenPort = room.listenPort
         }
 
@@ -8977,6 +9124,7 @@ private func printJoinQR() {
         else { syncSettings.startChild() }
 
         roomsStore.updateLastUsed(room)
+        activeRoomLabel = sanitizeRoomLabel(room.name) // override (your #6)
 
         showQRModal = false
         showCopiedToast = false
@@ -9261,6 +9409,7 @@ private enum AppAsset {
     private func setConnectionMethod(_ method: SyncSettings.SyncConnectionMethod) {
         let desired: SyncSettings.SyncConnectionMethod = (method == .bonjour) ? .network : method
         guard syncSettings.connectionMethod != desired else { return }
+        Haptics.light()
         stopSyncIfRunning()
         syncSettings.connectionMethod = desired
     }
@@ -9290,6 +9439,7 @@ private enum AppAsset {
 
     private func setRole(_ role: SyncSettings.Role) {
         guard syncSettings.role != role else { return }
+        Haptics.light()
         stopSyncIfRunning()
         syncSettings.role = role
     }
@@ -9300,6 +9450,8 @@ private enum AppAsset {
     }
 
     private func setSyncEnabled(_ enabled: Bool) {
+        guard syncSettings.isEnabled != enabled else { return }
+        Haptics.light()
         if enabled {
             // Prefer the sheet’s “blessed” enable path if provided (keeps parity with main UX).
             if let onRequestEnableSync { onRequestEnableSync(); return }
@@ -9514,7 +9666,10 @@ private enum AppAsset {
 
             Spacer()
 
-            Button { dismiss() } label: {
+            Button {
+                dismiss()
+                Haptics.selection()
+            } label: {
                 ZStack {
                     LiquidGlassCircle(diameter: 44, tint: settings.flashColor)
                     Image(systemName: "xmark")
@@ -9704,20 +9859,18 @@ private enum AppAsset {
             
             Divider().opacity(0.95)
 
-            
+            Text(roomLabelForSharing)
+                .font(.custom("Roboto-SemiBold", size: 18))
+                .padding(.top, 2)
+
             
             glassPrimaryButton(label: "Save Room",
                                systemImage: "tray.and.arrow.down",
                                disabled: syncSettings.role != .parent) {
-                let room = Room(
-                    name: deviceName,
-                    hostUUID: hostUUIDString,
-                    connectionMethod: normalizedConnectionMethod,
-                    role: syncSettings.role,
-                    listenPort: syncSettings.listenPort
-                )
-                roomsStore.add(room)
+                draftRoomLabel = roomLabelForSharing   // default in prompt
+                showingSaveRoomPrompt = true
             }
+
             
             Text("Save rooms to keep connection presets handy or print QR codes for easy scanning. \(subtitleLine2)")
                 .font(.custom("Roboto-Light", size: 12))
@@ -9730,6 +9883,7 @@ private enum AppAsset {
                 glassPrimaryButton(label: "Show QR",
                                    systemImage: "qrcode",
                                    disabled: (syncSettings.role != .parent)) {
+                    Haptics.light()
                     if reduceMotion {
                         showQRModal = true
                     } else {
@@ -9755,12 +9909,14 @@ private enum AppAsset {
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.primary.opacity(0.08), lineWidth: 1))
                     }
+                    .simultaneousGesture(TapGesture().onEnded { Haptics.light() })
                     .buttonStyle(.plain)
                     .disabled(syncSettings.role != .parent)
                     .opacity(syncSettings.role != .parent ? 0.55 : 1.0)
 
                     #if canImport(UIKit)
                     glassSecondaryButton(label: "Print", systemImage: "printer") {
+                        Haptics.light()
                         printJoinQR()
                     }
                     .disabled(syncSettings.role != .parent)
@@ -10006,6 +10162,7 @@ private enum AppAsset {
             if showQRModal {
                 JoinQRStageOverlay(
                     joinAppClipURL: joinAppClipURL,
+                    roomLabel: roomLabelForSharing,
                     deviceName: deviceName,
                     uuidSuffix: uuidSuffix,
                     accentColor: settings.flashColor,
@@ -10042,6 +10199,26 @@ private enum AppAsset {
                 }
             }
         }
+        .alert("Room name", isPresented: $showingSaveRoomPrompt) {
+            TextField("Join Room", text: $draftRoomLabel)
+            Button("Save") {
+                let finalName = sanitizeRoomLabel(draftRoomLabel)
+                activeRoomLabel = finalName // becomes active when saved (in-memory)
+
+                let room = Room(
+                    name: finalName,
+                    hostUUID: hostUUIDString,
+                    connectionMethod: normalizedConnectionMethod,
+                    role: syncSettings.role,
+                    listenPort: syncSettings.listenPort
+                )
+                roomsStore.add(room)
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Max 32 characters. Newlines are removed.")
+        }
+
         // iOS 16+ (works on iOS 26): remove default sheet material background
         .presentationBackground(.clear)
 
@@ -10051,7 +10228,7 @@ private enum AppAsset {
 
     private struct JoinQRStageOverlay: View {
         let joinAppClipURL: URL
-
+        let roomLabel: String
         let deviceName: String
         let uuidSuffix: String
         let accentColor: Color
@@ -10149,6 +10326,12 @@ private enum AppAsset {
                                 .stroke(Color.black.opacity(0.08), lineWidth: 1)
                         )
 
+                        Text(roomLabel)
+                           .font(.custom("Roboto-SemiBold", size: 18))
+                           .multilineTextAlignment(.center)
+                           .lineLimit(1)
+                           .minimumScaleFactor(0.85)
+                           .padding(.top, 2)
                         HStack(spacing: 14) {
                             ShareLink(item: joinAppClipURL) {
 
