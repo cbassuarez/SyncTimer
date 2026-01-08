@@ -262,6 +262,14 @@ extension CueLibraryStore {
         return CueXML.AssetBlob(id: meta.id, mime: meta.mime, sha256: sha, data: data)
     }
 
+    func assetBlobs(for sheet: CueSheet) -> [CueXML.AssetBlob] {
+        let assetIDs = Set(sheet.events.compactMap { event in
+            if case .image(let payload)? = event.payload { return payload.assetID }
+            return nil
+        })
+        return assetIDs.compactMap { exportAssetBlob(id: $0) }
+    }
+
     func garbageCollectUnusedAssets() {
         let used = referencedAssetIDs()
         guard let metas = try? FileManager.default.contentsOfDirectory(at: assetsURL, includingPropertiesForKeys: nil) else { return }
@@ -290,7 +298,7 @@ extension CueLibraryStore {
         return ids
     }
 
-    private func ingestEmbeddedAssets(for sheet: inout CueSheet, blobs: [CueXML.AssetBlob]) {
+    func ingestEmbeddedAssets(for sheet: inout CueSheet, blobs: [CueXML.AssetBlob]) {
         guard !blobs.isEmpty else { return }
         var remap: [UUID: UUID] = [:]
         for blob in blobs {
