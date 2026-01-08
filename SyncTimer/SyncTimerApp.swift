@@ -7527,6 +7527,11 @@ struct MainScreen: View {
             )
             m.notesParent = parentNotePayload
             syncSettings.broadcastToChildren(m)
+            if let sheet = loadedCueSheet {
+                syncSettings.broadcastSyncMessage(.sheetSnapshot(sheet))
+                let state = makePlaybackState(for: sheet)
+                syncSettings.broadcastSyncMessage(.playbackState(state))
+            }
         }
 
         

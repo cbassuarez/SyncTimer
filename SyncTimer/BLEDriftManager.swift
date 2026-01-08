@@ -627,12 +627,14 @@ extension BLEDriftManager: CBCentralManagerDelegate, CBPeripheralDelegate {
             guard shouldActAsParent, let characteristic = driftCharacteristic else { return }
             if (characteristic.subscribedCentrals?.isEmpty ?? true) { return }
             guard let data = try? JSONEncoder().encode(envelope) else { return }
+            print("[BLE] Sent SyncEnvelope to children: \(envelope.message)")
             _ = peripheralManager.updateValue(data, for: characteristic, onSubscribedCentrals: nil)
         }
 
         func sendSyncEnvelopeToParent(_ envelope: SyncEnvelope) {
             guard let p = discoveredPeripheral, let c = driftCharOnPeripheral else { return }
             guard let data = try? JSONEncoder().encode(envelope) else { return }
+            print("[BLE] Sent SyncEnvelope to parent: \(envelope.message)")
             p.writeValue(data, for: c, type: .withoutResponse)
         }
 
@@ -655,6 +657,7 @@ extension BLEDriftManager: CBCentralManagerDelegate, CBPeripheralDelegate {
             return
         }
         if let envelope = try? JSONDecoder().decode(SyncEnvelope.self, from: data) {
+            print("[BLE] Received SyncEnvelope: \(envelope.message)")
             DispatchQueue.main.async { [weak self] in
                 self?.owner?.receiveSyncEnvelope(envelope)
                 self?.owner?.setEstablished(true)

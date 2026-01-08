@@ -194,13 +194,17 @@ extension CueLibraryStore {
             return nil
         })
         guard !assetIDs.isEmpty else { return }
-        Task.detached(priority: .utility) {
+        let title = sheet.title
+        DispatchQueue.global(qos: .userInitiated).async {
             for id in assetIDs {
                 if CueLibraryStore.cachedImage(id: id) != nil { continue }
                 guard let data = CueLibraryStore.assetDataFromDisk(id: id),
                       let decoded = UIImage(data: data) else { continue }
-                CueLibraryStore.cacheImage(decoded, for: id)
+                DispatchQueue.main.async {
+                    CueLibraryStore.cacheImage(decoded, for: id)
+                }
             }
+            print("[Prefetch] Loaded \(assetIDs.count) images for \(title)")
         }
     }
 
