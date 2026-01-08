@@ -2485,6 +2485,12 @@ struct TimerCard: View {
     private var shouldFlashRight: Bool {
         mode == .stop && stopStep == 1
     }
+    private var isChildTabLockActive: Bool {
+        (syncSettings.role == .child) && syncSettings.isEnabled && syncSettings.isEstablished
+    }
+    private var eventsTabDisabled: Bool {
+        isChildTabLockActive && mode == .sync
+    }
 
     // ── Inputs ───────────────────────────────────────────────────────
     @Binding var mode: ViewMode
@@ -3149,6 +3155,7 @@ struct TimerCard: View {
                                 HStack {
                                     Text("EVENTS VIEW")
                                         .foregroundColor(mode == .stop ? txtMain : txtSec)
+                                        .opacity(eventsTabDisabled ? 0.35 : 1.0)
                                     Spacer()
                                     Text("SYNC VIEW")
                                         .foregroundColor(mode == .sync ? txtMain : txtSec)
@@ -3202,9 +3209,11 @@ struct TimerCard: View {
                                 .contentShape(Rectangle())
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .onTapGesture {
+                                    guard !eventsTabDisabled else { return }
                                     mode = .stop
                                     lightHaptic()
                                 }
+                                .allowsHitTesting(!eventsTabDisabled)
                             // Right half: tap → SYNC
                             Color.clear
                                 .contentShape(Rectangle())
@@ -3868,6 +3877,8 @@ struct MainScreen: View {
     // ── UI mode ────────────────────────────────────────────────
     @Binding var parentMode: ViewMode
     @State private var previousMode: ViewMode = .sync   // track old mode
+    @State private var lastAcceptedMode: ViewMode = .sync
+    @State private var wasChildTabLockActive = false
     
     // Preset editor state
     @State private var showPresetEditor = false
@@ -3937,9 +3948,12 @@ struct MainScreen: View {
     }
     // ── Sync / Lock ─────────────────────────────────────────────
         private var lockActive: Bool { syncSettings.isLocked }
+        private var isChildTabLockActive: Bool {
+            (syncSettings.role == .child) && syncSettings.isEnabled && syncSettings.isEstablished
+        }
         /// Child devices must be UI-locked while connected to a parent.
         private var uiLockedByParent: Bool {
-            (syncSettings.role == .child) && syncSettings.isEnabled && syncSettings.isEstablished
+            isChildTabLockActive
         }
         private var padLocked: Bool {
             lockActive
@@ -4616,7 +4630,7 @@ struct MainScreen: View {
                                     }
                                 
                                 // Lock timer interactions while child is connected
-                                    .allowsHitTesting(!(lockActive || uiLockedByParent)),                                            settings:
+                                    .allowsHitTesting(!(lockActive || (isChildTabLockActive && parentMode == .sync))),                                            settings:
                                     SettingsPagerCard(
                                         page: $settingsPage,
                                         editingTarget: $editingTarget,
@@ -5106,6 +5120,11 @@ struct MainScreen: View {
             
             // 1) When you switch *into* Events view, seed the STOP buffer:
                 .onChange(of: parentMode) { newMode in
+                    if isChildTabLockActive && lastAcceptedMode == .sync && newMode == .stop {
+                        parentMode = .sync
+                        return
+                    }
+                    lastAcceptedMode = newMode
                     if newMode == .stop {
                         // ensure we’re in STOP mode
                         eventMode   = .stop
@@ -5113,6 +5132,12 @@ struct MainScreen: View {
                         stopStep    = 0
                         stopCleared = false
                     }
+                }
+                .onChange(of: isChildTabLockActive) { isActive in
+                    if isActive && !wasChildTabLockActive && parentMode == .stop {
+                        parentMode = .sync
+                    }
+                    wasChildTabLockActive = isActive
                 }
             // 2) When you switch *within* Events between Stop/Cue/Restart:
                 .onChange(of: eventMode) { newMode in
@@ -5977,7 +6002,7 @@ struct MainScreen: View {
                 )
                 .environmentObject(cueDisplay)
             }
-                        .allowsHitTesting(!(lockActive || uiLockedByParent)),
+                        .allowsHitTesting(!(lockActive || (isChildTabLockActive && parentMode == .sync))),
                     settings:
                         SettingsPagerCard(
                             page: $settingsPage,
@@ -6309,7 +6334,7 @@ struct MainScreen: View {
                                 )
                                 .environmentObject(cueDisplay)
                             }
-                            .allowsHitTesting(!(lockActive || uiLockedByParent))
+                            .allowsHitTesting(!(lockActive || (isChildTabLockActive && parentMode == .sync)))
                             .transition(.opacity)
                             .padding(.horizontal, 20)
                             .overlay(alignment: .topLeading) {
