@@ -623,6 +623,19 @@ extension BLEDriftManager: CBCentralManagerDelegate, CBPeripheralDelegate {
             p.writeValue(data, for: c, type: .withoutResponse)
         }
 
+        func sendSyncEnvelopeToChildren(_ envelope: SyncEnvelope) {
+            guard shouldActAsParent, let characteristic = driftCharacteristic else { return }
+            if (characteristic.subscribedCentrals?.isEmpty ?? true) { return }
+            guard let data = try? JSONEncoder().encode(envelope) else { return }
+            _ = peripheralManager.updateValue(data, for: characteristic, onSubscribedCentrals: nil)
+        }
+
+        func sendSyncEnvelopeToParent(_ envelope: SyncEnvelope) {
+            guard let p = discoveredPeripheral, let c = driftCharOnPeripheral else { return }
+            guard let data = try? JSONEncoder().encode(envelope) else { return }
+            p.writeValue(data, for: c, type: .withoutResponse)
+        }
+
     func peripheral(_ peripheral: CBPeripheral,
                     didUpdateValueFor characteristic: CBCharacteristic,
                     error: Error?) {
@@ -634,17 +647,24 @@ extension BLEDriftManager: CBCentralManagerDelegate, CBPeripheralDelegate {
         lastPacketAt = Date().timeIntervalSince1970
 
         // ① Try full timer control first (parent → child)
-                if let msg = try? JSONDecoder().decode(TimerMessage.self, from: data) {
-                    DispatchQueue.main.async { [weak self] in
-                        self?.owner?.onReceiveTimer?(msg)
-                        self?.owner?.setEstablished(true) // keep lamp green while control flows
-                    }
-                    return
-                }
-                // ② Fall back to drift protocol
-                if let req = try? JSONDecoder().decode(DriftRequest.self, from: data) {
-                    handleDriftRequest(req)
-                } else if let _ = try? JSONDecoder().decode(Double.self, from: data) {
+        if let msg = try? JSONDecoder().decode(TimerMessage.self, from: data) {
+            DispatchQueue.main.async { [weak self] in
+                self?.owner?.onReceiveTimer?(msg)
+                self?.owner?.setEstablished(true) // keep lamp green while control flows
+            }
+            return
+        }
+        if let envelope = try? JSONDecoder().decode(SyncEnvelope.self, from: data) {
+            DispatchQueue.main.async { [weak self] in
+                self?.owner?.receiveSyncEnvelope(envelope)
+                self?.owner?.setEstablished(true)
+            }
+            return
+        }
+        // ② Fall back to drift protocol
+        if let req = try? JSONDecoder().decode(DriftRequest.self, from: data) {
+            handleDriftRequest(req)
+        } else if let _ = try? JSONDecoder().decode(Double.self, from: data) {
                     handleDriftCorrection(data)
                 } else {
                     print("Child: Unexpected BLE packet")
