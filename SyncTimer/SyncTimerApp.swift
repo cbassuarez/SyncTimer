@@ -640,6 +640,28 @@ final class SyncSettings: ObservableObject {
     private var reconnectAttempt: Int = 0
     private var syncEnvelopeSeq: Int = 0
     private var lastReceivedSyncSeq: Int = -1
+    private var receiveBuffers: [ObjectIdentifier: Data] = [:]
+
+    private var wcCancellables: Set<AnyCancellable> = []
+
+    init() {
+        ConnectivityManager.shared.$incoming
+            .compactMap { $0 }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] msg in
+                self?.onReceiveTimer?(msg)
+            }
+            .store(in: &wcCancellables)
+
+        ConnectivityManager.shared.$incomingSyncEnvelope
+            .compactMap { $0 }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] envelope in
+                guard let self else { return }
+                self.receiveSyncEnvelope(envelope)
+            }
+            .store(in: &wcCancellables)
+    }
     
     // Cancel any active retry
     private func cancelReconnect() {
@@ -1486,6 +1508,7 @@ final class SyncSettings: ObservableObject {
             for conn in childConnections {
                 conn.send(content: framed, completion: .contentProcessed({ _ in }))
             }
+            ConnectivityManager.shared.sendSyncEnvelope(envelope)
 
             if connectionMethod == .bluetooth {
                 bleDriftManager.sendSyncEnvelopeToChildren(envelope)
@@ -1518,6 +1541,7 @@ final class SyncSettings: ObservableObject {
             let encoder = JSONEncoder()
             guard let data = try? encoder.encode(envelope) else { return }
             let framed = data + Data([0x0A])
+            ConnectivityManager.shared.sendSyncEnvelope(envelope)
 
             switch connectionMethod {
             case .bluetooth:
@@ -1535,21 +1559,34 @@ final class SyncSettings: ObservableObject {
                 // ⬇️ turn lamp green on first packet, no button cycle required
                 if self.role == .child { self.setEstablished(true) }
                 
-                // existing: split on newline, decode, dispatch …
-                let pieces = data.split(separator: 0x0A)
+                // Buffer + extract newline-framed packets across receives.
+                let connectionID = ObjectIdentifier(connection)
+                var buffer = self.receiveBuffers[connectionID] ?? Data()
+                buffer.append(data)
+
+                let delimiter = Data([0x0A])
+                var frames: [Data] = []
+                while let range = buffer.firstRange(of: delimiter) {
+                    let frame = buffer.subdata(in: buffer.startIndex..<range.lowerBound)
+                    buffer.removeSubrange(buffer.startIndex..<range.upperBound)
+                    frames.append(frame)
+                }
+                self.receiveBuffers[connectionID] = buffer
+
                 let decoder = JSONDecoder()
-                for piece in pieces {
-                    if let msg = try? decoder.decode(TimerMessage.self, from: Data(piece)) {
+                for frame in frames {
+                    guard !frame.isEmpty else { continue }
+                    if let msg = try? decoder.decode(TimerMessage.self, from: frame) {
                         DispatchQueue.main.async { self.onReceiveTimer?(msg) }
                         continue
                                             }
-                                            if let env = try? decoder.decode(SyncEnvelope.self, from: Data(piece)) {
+                                            if let env = try? decoder.decode(SyncEnvelope.self, from: frame) {
                                                 DispatchQueue.main.async {
                                                     self.receiveSyncEnvelope(env)
                                                 }
                                                 continue
                                             }
-                                            if self.isEnabled, let env = try? decoder.decode(BeaconEnvelope.self, from: Data(piece)) {
+                                            if self.isEnabled, let env = try? decoder.decode(BeaconEnvelope.self, from: frame) {
                                                 // Route via ClockSyncService
                                                 let roleIsChild = (self.role == .child)
                                                                 if let reply = self.clockSyncService?.handleInbound(env,
@@ -1570,6 +1607,7 @@ final class SyncSettings: ObservableObject {
                                                 }
                                                 continue
                     }
+                    print("⚠️ [Sync] decode failed for \(frame.count) bytes")
                 }
             }
             
@@ -1578,6 +1616,8 @@ final class SyncSettings: ObservableObject {
                 self.receiveLoop(on: connection)
             } else {
                 // Connection closed or errored
+                let connectionID = ObjectIdentifier(connection)
+                self.receiveBuffers.removeValue(forKey: connectionID)
                 connection.cancel()
             }
         }
@@ -1586,6 +1626,16 @@ final class SyncSettings: ObservableObject {
     func receiveSyncEnvelope(_ envelope: SyncEnvelope) {
         guard envelope.seq > lastReceivedSyncSeq else { return }
         lastReceivedSyncSeq = envelope.seq
+        #if DEBUG
+        switch envelope.message {
+        case .sheetSnapshot:
+            print("📡 [Sync] received sheet snapshot seq=\(envelope.seq)")
+        case .playbackState:
+            print("📡 [Sync] received playback state seq=\(envelope.seq)")
+        default:
+            break
+        }
+        #endif
         onReceiveSyncMessage?(envelope)
     }
 }
@@ -3807,10 +3857,21 @@ struct TimerCard: View {
         
         private func loadImageIfNeeded() {
             guard let image else { uiImage = nil; return }
-            Task { @MainActor in
-                let data = try? CueLibraryStore.shared.assetData(id: image.assetID)
-                let loaded = data.flatMap { UIImage(data: $0) }
-                uiImage = loaded
+            if let cached = CueLibraryStore.cachedImage(id: image.assetID) {
+                uiImage = cached
+                return
+            }
+            uiImage = nil
+            let assetID = image.assetID
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let data = CueLibraryStore.assetDataFromDisk(id: assetID),
+                      let decoded = UIImage(data: data) else { return }
+                CueLibraryStore.cacheImage(decoded, for: assetID)
+                DispatchQueue.main.async {
+                    if image.assetID == assetID {
+                        uiImage = decoded
+                    }
+                }
             }
         }
     }
@@ -4055,6 +4116,7 @@ struct MainScreen: View {
         mapEvents(from: sheet)
         // Notify any listeners that a sheet was loaded
         NotificationCenter.default.post(name: .didLoadCueSheet, object: sheet)
+        CueLibraryStore.shared.prefetchImages(in: sheet)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
     }
 
@@ -4096,6 +4158,7 @@ struct MainScreen: View {
         cueDisplay.buildTimeline(from: sheet)
         mapEvents(from: sheet)
         NotificationCenter.default.post(name: .didLoadCueSheet, object: sheet)
+        CueLibraryStore.shared.prefetchImages(in: sheet)
     }
     // Derive connected device display names for the Devices card.
         // Replace internals later with your canonical peer list if you expose one.
@@ -7500,6 +7563,7 @@ struct MainScreen: View {
             mapEvents(from: sheet)
             cueBadge.setFallbackLabel(sheetBadgeLabel(for: sheet), broadcast: true)
             NotificationCenter.default.post(name: .didLoadCueSheet, object: sheet)
+            CueLibraryStore.shared.prefetchImages(in: sheet)
 
             if let pending = pending,
                pending.sheetID == sheet.id,

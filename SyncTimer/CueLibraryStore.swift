@@ -18,6 +18,8 @@ final class CueLibraryStore: ObservableObject {
     @Published private(set) var index = CueLibraryIndex()
     @Published private(set) var sheets: [UUID: CueSheet] = [:]
     private var primed = false
+    // Decoded image cache to keep overlay rendering off the main thread.
+    private static let imageCache = NSCache<NSUUID, UIImage>()
 
     private func publish() {
         guard primed else { return }
@@ -164,6 +166,42 @@ extension CueLibraryStore {
     func assetData(id: UUID) -> Data? {
         guard let meta = assetMeta(id: id) else { return nil }
         return try? Data(contentsOf: assetDataURL(for: meta))
+    }
+
+    nonisolated static func assetDataFromDisk(id: UUID) -> Data? {
+        let baseURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CueSheets", isDirectory: true)
+        let assetsURL = baseURL.appendingPathComponent("Assets", isDirectory: true)
+        try? FileManager.default.createDirectory(at: assetsURL, withIntermediateDirectories: true)
+        let metaURL = assetsURL.appendingPathComponent("\(id.uuidString).json")
+        guard let metaData = try? Data(contentsOf: metaURL),
+              let meta = try? JSONDecoder().decode(AssetMeta.self, from: metaData) else { return nil }
+        let dataURL = assetsURL.appendingPathComponent("\(meta.id.uuidString).\(meta.ext)")
+        return try? Data(contentsOf: dataURL)
+    }
+
+    nonisolated static func cachedImage(id: UUID) -> UIImage? {
+        imageCache.object(forKey: id as NSUUID)
+    }
+
+    nonisolated static func cacheImage(_ image: UIImage, for id: UUID) {
+        imageCache.setObject(image, forKey: id as NSUUID)
+    }
+
+    func prefetchImages(in sheet: CueSheet) {
+        let assetIDs = Set(sheet.events.compactMap { event in
+            if case .image(let payload)? = event.payload { return payload.assetID }
+            return nil
+        })
+        guard !assetIDs.isEmpty else { return }
+        Task.detached(priority: .utility) {
+            for id in assetIDs {
+                if CueLibraryStore.cachedImage(id: id) != nil { continue }
+                guard let data = CueLibraryStore.assetDataFromDisk(id: id),
+                      let decoded = UIImage(data: data) else { continue }
+                CueLibraryStore.cacheImage(decoded, for: id)
+            }
+        }
     }
 
     private func hasAlpha(_ image: UIImage) -> Bool {
