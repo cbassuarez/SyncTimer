@@ -16,7 +16,7 @@ public final class ConnectivityManager: NSObject, ObservableObject {
     private var lastTimerMessage: TimerMessage?
 
     @Published public private(set) var incoming: TimerMessage?
-    @Published public private(set) var incomingSyncEnvelope: SyncEnvelope?
+    @Published private(set) var incomingSyncEnvelope: SyncEnvelope?
     public let commands = PassthroughSubject<ControlRequest, Never>()
     /// Convenience: only returns session when supported **and** activated.
         private var activatedSession: WCSession? {
@@ -75,7 +75,7 @@ public final class ConnectivityManager: NSObject, ObservableObject {
         send(ControlRequest(cmd))
     }
 
-    public func sendSyncEnvelope(_ envelope: SyncEnvelope) {
+    func sendSyncEnvelope(_ envelope: SyncEnvelope) {
         send(envelope)
     }
 }
