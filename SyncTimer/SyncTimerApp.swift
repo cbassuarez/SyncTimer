@@ -662,6 +662,10 @@ final class SyncSettings: ObservableObject {
             }
             .store(in: &wcCancellables)
     }
+
+    private func resetSyncSequence() {
+        lastReceivedSyncSeq = -1
+    }
     
     // Cancel any active retry
     private func cancelReconnect() {
@@ -1075,7 +1079,13 @@ final class SyncSettings: ObservableObject {
     
     @Published var role: Role         = .parent
     @Published var isEnabled          = false
-    @Published var isEstablished      = false
+    @Published var isEstablished      = false {
+        didSet {
+            if oldValue != isEstablished {
+                resetSyncSequence()
+            }
+        }
+    }
     @Published var statusMessage: String = "Not connected"
     @Published var listenPort: String = "50000"
     @Published var peerIP:     String = ""
@@ -3758,6 +3768,8 @@ struct TimerCard: View {
         var namespace: Namespace.ID?
         var onDismiss: () -> Void
         @State private var uiImage: UIImage?
+        @State private var imageLoadToken: UUID?
+        @State private var showMissingImage = false
         
         var body: some View {
             ZStack {
@@ -3803,6 +3815,16 @@ struct TimerCard: View {
                                         .resizable()
                                         .scaledToFit()
                                         .frame(width: containerWidth)
+                                } else if showMissingImage {
+                                    VStack(spacing: 8) {
+                                        Image(systemName: "photo")
+                                            .font(.system(size: 28))
+                                            .foregroundColor(.secondary)
+                                        Text("Image unavailable")
+                                            .font(.body.weight(.semibold))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    .frame(width: containerWidth)
                                 } else {
                                     VStack {
                                         ProgressView()
@@ -3856,13 +3878,26 @@ struct TimerCard: View {
         }
         
         private func loadImageIfNeeded() {
-            guard let image else { uiImage = nil; return }
+            guard let image else {
+                uiImage = nil
+                showMissingImage = false
+                imageLoadToken = nil
+                return
+            }
             if let cached = CueLibraryStore.cachedImage(id: image.assetID) {
                 uiImage = cached
+                showMissingImage = false
                 return
             }
             uiImage = nil
+            showMissingImage = false
             let assetID = image.assetID
+            imageLoadToken = assetID
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                if imageLoadToken == assetID && uiImage == nil {
+                    showMissingImage = true
+                }
+            }
             DispatchQueue.global(qos: .userInitiated).async {
                 guard let data = CueLibraryStore.assetDataFromDisk(id: assetID),
                       let decoded = UIImage(data: data) else { return }
@@ -3870,6 +3905,7 @@ struct TimerCard: View {
                 DispatchQueue.main.async {
                     if image.assetID == assetID {
                         uiImage = decoded
+                        showMissingImage = false
                     }
                 }
             }
@@ -5184,96 +5220,8 @@ struct MainScreen: View {
             // end watch commands
             // wire up the child‐side handler
                 .onAppear {
-                    // NEW: latency-aware authoritative applier (child only)
-                    var lastRemoteTS: TimeInterval = 0
                     syncSettings.onReceiveTimer = { msg in
-                        guard syncSettings.role == .child else { return }
-                        
-                        // Ignore stale frames (latest wins)
-                        guard msg.timestamp >= lastRemoteTS else { return }
-                        lastRemoteTS = msg.timestamp
-                        
-                        // --- Helpers ---
-                        @inline(__always) func ensureLoop() {
-                            if ticker == nil { startLoop() }
-                        }
-                        @inline(__always) func hardSyncTo(elapsed target: TimeInterval) {
-                            elapsed   = target
-                            startDate = Date().addingTimeInterval(-target)
-                        }
-                        
-                        // Network one-way delay (never negative)
-                        let now   = Date().timeIntervalSince1970
-                        let delta = max(0, now - msg.timestamp)
-                        
-                        // Update events → 5 circles
-                        let wireStops = msg.stopEvents.map { StopEvent(eventTime: $0.eventTime, duration: $0.duration) }
-                        rawStops = wireStops
-                        events   = wireStops.map(Event.stop)
-                        // Keep SyncSettings copy in sync (used elsewhere)
-                        syncSettings.setRawStops(wireStops)
-                        
-                        // Parent lock (UI lock propagation)
-                        if let lock = msg.parentLockEnabled {
-                            syncSettings.parentLockEnabled = lock
-                        }
-                        
-                        switch msg.phase {
-                        case "stop":
-                            // Parent sends: phase="stop", anchorElapsed, isStopActive=true, stopRemainingActive=duration
-                            let parentLeft = msg.stopRemainingActive ?? 0           // ← duration, not elapsed
-                            let left = max(0, parentLeft - delta)                   // subtract one-way flight time
-                            // Freeze main clock at parent's anchor (if provided)
-                            if let anchor = msg.anchorElapsed {
-                                pausedElapsed = anchor
-                                startDate = Date().addingTimeInterval(-anchor)
-                            } else {
-                                pausedElapsed = elapsed
-                            }
-                            stopActive    = true
-                            stopRemaining = left
-                            phase = .running
-                            // reset tick clock for accurate first-frame dt and start loop
-                            // 🔧 Force a fresh render loop so tickRunning() begins immediately
-                            ticker?.cancel(); ticker = nil
-                            lastTickUptime = ProcessInfo.processInfo.systemUptime
-                            startLoop()
-                        case "running":
-                            // Project parent's elapsed to "now"
-                            let parentNow = msg.remaining + delta   // (remaining carries ELAPSED when running)
-                            let err = parentNow - elapsed
-                            if abs(err) > 0.03 {
-                                // snap if we drifted >30 ms
-                                hardSyncTo(elapsed: parentNow)
-                            } else {
-                                // micro-nudge startDate to kill residual drift smoothly
-                                if let sd = startDate { startDate = sd.addingTimeInterval(-err) }
-                                else { hardSyncTo(elapsed: parentNow) }
-                            }
-                            // IMPORTANT: do not clear an in-progress local stop due to periodic “running” updates.
-                            // Keep stopActive as-is; the stop loop ends locally when stopRemaining hits zero.
-                            phase = .running
-                            ensureLoop()
-                            
-                        case "paused":
-                            ticker?.cancel()
-                            stopActive = false
-                            let exact = msg.remaining       // paused → do NOT add delta
-                            pausedElapsed = max(0, exact)
-                            elapsed = pausedElapsed
-                            phase = .paused
-                            
-                        case "countdown":
-                            stopActive = false
-                            let remainingNow = max(0, msg.remaining - delta)
-                            // If you track a dedicated countdownRemaining variable, set it here:
-                            countdownRemaining = remainingNow
-                            phase = .countdown
-                            ensureLoop()
-                            
-                        default:
-                            break
-                        }
+                        applyIncomingTimerMessage(msg)
                     }
                     syncSettings.onReceiveSyncMessage = { envelope in
                         applyIncomingSyncMessage(envelope.message)
@@ -7012,19 +6960,16 @@ struct MainScreen: View {
                 startLoop()
                 events.removeFirst()
 
-                let remainingStopWires = events.compactMap { event -> StopEventWire? in
-                    if case .stop(let st) = event {
-                        return StopEventWire(eventTime: st.eventTime, duration: st.duration)
-                    } else {
-                        return nil
-                    }
-                }
+                let snap = encodeCurrentEvents()
                 let resetMsg = TimerMessage(
                     action: .reset,
                     timestamp: Date().timeIntervalSince1970,
                     phase: "running",
                     remaining: elapsed,
-                    stopEvents: remainingStopWires
+                    stopEvents: snap.stops,
+                    cueEvents: snap.cues,
+                    restartEvents: snap.restarts,
+                    sheetLabel: cueBadge.label
                 )
                 cueDisplay.reset()
                 if syncSettings.role == .parent && syncSettings.isEnabled {
@@ -7625,16 +7570,8 @@ struct MainScreen: View {
                 events = combined
                 syncSettings.stopWires = msg.stopEvents
         
-        // Mirror parent's note here as well
+        // Mirror parent's note and sheet label when provided
                 notesParent = msg.notesParent ?? ""
-        
-                // Show the sheet badge on children when provided
-                if let lbl = msg.sheetLabel, !lbl.isEmpty {
-                    cueBadge.setFallbackLabel(lbl, broadcast: true)
-                }
-        // Mirror parent's note (empty if none)
-                notesParent = msg.notesParent ?? ""
-        // If a sheet/badge label comes in, surface it immediately on the child
                 if let lbl = msg.sheetLabel, !lbl.isEmpty {
                     cueBadge.setFallbackLabel(lbl, broadcast: true)
                 }
@@ -7669,14 +7606,6 @@ struct MainScreen: View {
                                 elapsed = 0
                                 stopActive = false
                                 stopRemaining = 0
-                                // REBUILD events from the snapshot (do NOT clear)
-                                let stops = msg.stopEvents.map { Event.stop(StopEvent(eventTime: $0.eventTime, duration: $0.duration)) }
-                                let cues  = (msg.cueEvents ?? []).map { Event.cue(CueEvent(cueTime: $0.cueTime)) }
-                                let rsts  = (msg.restartEvents ?? []).map { Event.restart(RestartEvent(restartTime: $0.restartTime)) }
-                                events = (stops + cues + rsts).sorted { $0.fireTime < $1.fireTime }
-                                rawStops = stops.compactMap {
-                                    if case let .stop(s) = $0 { return s } else { return nil }
-                                }
             
         case .update:
             if msg.phase == "countdown" {
