@@ -410,6 +410,7 @@ final class AppSettings: ObservableObject {
     @Published var countdownResetMode: CountdownResetMode = .off
     @Published var resetConfirmationMode: ResetConfirmationMode = .off
     @Published var stopConfirmationMode: ResetConfirmationMode = .off
+    @AppStorage("simulateChildMode") var simulateChildMode: Bool = false
 }
 
 
@@ -637,6 +638,8 @@ final class SyncSettings: ObservableObject {
     // Auto-retry state (child, .network only)
     private var reconnectWorkItem: DispatchWorkItem?
     private var reconnectAttempt: Int = 0
+    private var syncEnvelopeSeq: Int = 0
+    private var lastReceivedSyncSeq: Int = -1
     
     // Cancel any active retry
     private func cancelReconnect() {
@@ -1062,6 +1065,7 @@ final class SyncSettings: ObservableObject {
     private var clientConnection: NWConnection?
     
     var onReceiveTimer: ((TimerMessage)->Void)? = nil
+    var onReceiveSyncMessage: ((SyncEnvelope) -> Void)? = nil
     
     func integrateBonjourConnection(_ conn: NWConnection) {
         clientConnection?.cancel()
@@ -1466,6 +1470,27 @@ final class SyncSettings: ObservableObject {
                 bleDriftManager.sendTimerMessageToChildren(msg)
             }
         }
+
+        func broadcastSyncMessage(_ message: SyncMessage) {
+            guard role == .parent else { return }
+            syncEnvelopeSeq += 1
+            let envelope = SyncEnvelope(seq: syncEnvelopeSeq, message: message)
+            broadcastSyncEnvelope(envelope)
+        }
+
+        private func broadcastSyncEnvelope(_ envelope: SyncEnvelope) {
+            let encoder = JSONEncoder()
+            guard let data = try? encoder.encode(envelope) else { return }
+            let framed = data + Data([0x0A])
+
+            for conn in childConnections {
+                conn.send(content: framed, completion: .contentProcessed({ _ in }))
+            }
+
+            if connectionMethod == .bluetooth {
+                bleDriftManager.sendSyncEnvelopeToChildren(envelope)
+            }
+        }
     
     // ── SEND JSON TO PARENT (child only) ─────────────────────────────────
         func sendToParent(_ msg: TimerMessage) {
@@ -1486,6 +1511,22 @@ final class SyncSettings: ObservableObject {
                 conn.send(content: framed, completion: .contentProcessed({ _ in }))
             }
         }
+
+        func sendSyncMessageToParent(_ message: SyncMessage) {
+            guard role == .child else { return }
+            let envelope = SyncEnvelope(seq: Int(Date().timeIntervalSince1970 * 1000), message: message)
+            let encoder = JSONEncoder()
+            guard let data = try? encoder.encode(envelope) else { return }
+            let framed = data + Data([0x0A])
+
+            switch connectionMethod {
+            case .bluetooth:
+                bleDriftManager.sendSyncEnvelopeToParent(envelope)
+            default:
+                guard let conn = clientConnection else { return }
+                conn.send(content: framed, completion: .contentProcessed({ _ in }))
+            }
+        }
     // ── RECEIVE LOOP (both parent and child reuse) ───────────────────────
     private func receiveLoop(on connection: NWConnection) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
@@ -1502,10 +1543,16 @@ final class SyncSettings: ObservableObject {
                         DispatchQueue.main.async { self.onReceiveTimer?(msg) }
                         continue
                                             }
+                                            if let env = try? decoder.decode(SyncEnvelope.self, from: Data(piece)) {
+                                                DispatchQueue.main.async {
+                                                    self.receiveSyncEnvelope(env)
+                                                }
+                                                continue
+                                            }
                                             if self.isEnabled, let env = try? decoder.decode(BeaconEnvelope.self, from: Data(piece)) {
                                                 // Route via ClockSyncService
                                                 let roleIsChild = (self.role == .child)
-                                                                        if let reply = self.clockSyncService?.handleInbound(env,
+                                                                if let reply = self.clockSyncService?.handleInbound(env,
                                                                                                                             roleIsChild: roleIsChild,
                                                                                                                             localUUID: self.localPeerID.uuidString) {
                                                     // parent followup → unicast; child echo → to parent
@@ -1534,6 +1581,12 @@ final class SyncSettings: ObservableObject {
                 connection.cancel()
             }
         }
+    }
+
+    func receiveSyncEnvelope(_ envelope: SyncEnvelope) {
+        guard envelope.seq > lastReceivedSyncSeq else { return }
+        lastReceivedSyncSeq = envelope.seq
+        onReceiveSyncMessage?(envelope)
     }
 }
 
@@ -1567,9 +1620,13 @@ struct StopEvent: Identifiable, Equatable {
 
 
 /// A single cue‐event (fires at a single time, with no duration)
-struct CueEvent: Identifiable, Equatable {
-    let id = UUID()
+struct CueEvent: Identifiable, Equatable, Codable {
+    let id: UUID
     var cueTime: TimeInterval
+    init(id: UUID = UUID(), cueTime: TimeInterval) {
+        self.id = id
+        self.cueTime = cueTime
+    }
     static func == (lhs: CueEvent, rhs: CueEvent) -> Bool {
         return lhs.id == rhs.id
     }
@@ -3986,10 +4043,13 @@ struct MainScreen: View {
     @State private var lastLoadedLabel: String? = nil
     @State private var lastLoadedWasBroadcast: Bool = false
     @State private var loadedCueSheetID: UUID? = nil
+    @State private var loadedCueSheet: CueSheet? = nil
+    @State private var pendingPlaybackState: PlaybackState? = nil
     
     func apply(_ sheet: CueSheet) {
 
         loadedCueSheetID = sheet.id
+        loadedCueSheet = sheet
         cueDisplay.reset()
         cueDisplay.buildTimeline(from: sheet)
         mapEvents(from: sheet)
@@ -4031,6 +4091,7 @@ struct MainScreen: View {
               let sheet = try? CueLibraryStore.shared.load(meta: meta) else { return }
 
         loadedCueSheetID = sheet.id
+        loadedCueSheet = sheet
         cueDisplay.reset()
         cueDisplay.buildTimeline(from: sheet)
         mapEvents(from: sheet)
@@ -4132,6 +4193,14 @@ struct MainScreen: View {
     
             // IMPORTANT: this does NOT stop or toggle any radios.
             syncSettings.broadcastToChildren(m)
+
+            syncSettings.broadcastSyncMessage(.sheetSnapshot(sheet))
+            let state = makePlaybackState(for: sheet)
+            syncSettings.broadcastSyncMessage(.playbackState(state))
+            if settings.simulateChildMode {
+                applyIncomingSyncMessage(.sheetSnapshot(sheet))
+                applyIncomingSyncMessage(.playbackState(state))
+            }
         }
     
     /// Helper: build *all* event wires from a sheet
@@ -4150,6 +4219,26 @@ struct MainScreen: View {
             }
             let name  = sheet.fileName.isEmpty ? sheet.title : sheet.fileName
             return name.lastIndex(of: ".").map { String(name[..<$0]) } ?? name
+        }
+
+        private func sheetRevision(for sheet: CueSheet) -> Int {
+            Int(sheet.modified.timeIntervalSince1970)
+        }
+
+        private func makePlaybackState(for sheet: CueSheet) -> PlaybackState {
+            let sorted = sheet.events.sorted { $0.at < $1.at }
+            let currentIndex = sorted.lastIndex { $0.at <= elapsed }
+            let nextIndex = sorted.firstIndex { $0.at > elapsed }
+            let startEpoch = startDate?.timeIntervalSince1970 ?? Date().timeIntervalSince1970 - elapsed
+            return PlaybackState(
+                isRunning: phase == .running,
+                startTime: startEpoch,
+                elapsedTime: elapsed,
+                currentEventID: currentIndex.map { sorted[$0].id },
+                nextEventID: nextIndex.map { sorted[$0].id },
+                sheetID: sheet.id,
+                revision: sheetRevision(for: sheet)
+            )
         }
     // MARK: – toggleSyncMode (drop-in)
     private func toggleSyncMode() {
@@ -5018,6 +5107,16 @@ struct MainScreen: View {
                         syncSettings.broadcastToChildren(tm)   // ← keep children’s snapshot hot (stops + cues + restarts)
                     }
 
+                    if syncSettings.role == .parent,
+                       syncSettings.isEnabled,
+                       let sheet = loadedCueSheet {
+                        let state = makePlaybackState(for: sheet)
+                        syncSettings.broadcastSyncMessage(.playbackState(state))
+                        if settings.simulateChildMode {
+                            applyIncomingSyncMessage(.playbackState(state))
+                        }
+                    }
+
                 }
             // end watch commands
             // wire up the child‐side handler
@@ -5113,9 +5212,13 @@ struct MainScreen: View {
                             break
                         }
                     }
+                    syncSettings.onReceiveSyncMessage = { envelope in
+                        applyIncomingSyncMessage(envelope.message)
+                    }
                 }
                 .onDisappear {
                     syncSettings.onReceiveTimer = nil
+                    syncSettings.onReceiveSyncMessage = nil
                 }
             
             // 1) When you switch *into* Events view, seed the STOP buffer:
@@ -7383,6 +7486,61 @@ struct MainScreen: View {
     
     //──────────────────── apply incoming TimerMessage ────────────────────
     // MARK: – Handle messages from the parent
+    func applyIncomingSyncMessage(_ message: SyncMessage) {
+        guard syncSettings.role == .child || settings.simulateChildMode else { return }
+
+        switch message {
+        case .sheetSnapshot(let sheet):
+            let pending = pendingPlaybackState
+            pendingPlaybackState = nil
+            loadedCueSheetID = sheet.id
+            loadedCueSheet = sheet
+            cueDisplay.reset()
+            cueDisplay.buildTimeline(from: sheet)
+            mapEvents(from: sheet)
+            cueBadge.setFallbackLabel(sheetBadgeLabel(for: sheet), broadcast: true)
+            NotificationCenter.default.post(name: .didLoadCueSheet, object: sheet)
+
+            if let pending = pending,
+               pending.sheetID == sheet.id,
+               pending.revision == sheetRevision(for: sheet) {
+                applyIncomingSyncMessage(.playbackState(pending))
+            }
+
+        case .playbackState(let state):
+            guard let sheet = loadedCueSheet,
+                  sheet.id == state.sheetID,
+                  state.revision == sheetRevision(for: sheet) else {
+                pendingPlaybackState = state
+                return
+            }
+
+            let delta = max(0, Date().timeIntervalSince(state.sentAt))
+            var adjusted = state
+            if state.isRunning {
+                adjusted.elapsedTime += delta
+            }
+
+            elapsed = adjusted.elapsedTime
+            startDate = Date().addingTimeInterval(-adjusted.elapsedTime)
+            lastTickUptime = ProcessInfo.processInfo.systemUptime
+
+            if adjusted.isRunning {
+                phase = .running
+                startLoop()
+            } else {
+                ticker?.cancel()
+                phase = adjusted.elapsedTime == 0 ? .idle : .paused
+            }
+
+            cueDisplay.syncPlaybackState(adjusted)
+
+        case .cueEvent(let event):
+            events.append(.cue(event))
+            events.sort { $0.fireTime < $1.fireTime }
+        }
+    }
+
     func applyIncomingTimerMessage(_ msg: TimerMessage) {
         guard syncSettings.role == .child else { return }
         
@@ -7961,6 +8119,20 @@ struct TimerBehaviorPage: View {
             .foregroundColor(.secondary)
             .padding(.leading, 0)
             .lineLimit(1)
+
+#if DEBUG
+    Divider()
+        .padding(.vertical, 4)
+
+    Toggle("Simulate Child Mode", isOn: $appSettings.simulateChildMode)
+        .toggleStyle(SwitchToggleStyle(tint: appSettings.flashColor))
+        .font(.custom("Roboto-Regular", size: 16))
+    Text("Applies incoming sync updates locally to preview child rendering.")
+        .font(.custom("Roboto-Light", size: 12))
+        .foregroundColor(.secondary)
+        .padding(.leading, 0)
+        .lineLimit(2)
+#endif
     }
   }
 
