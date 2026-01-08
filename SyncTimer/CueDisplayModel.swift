@@ -101,6 +101,10 @@ final class CueDisplayController: ObservableObject {
         activeSheetID = nil
     }
 
+    func syncPlaybackState(_ state: PlaybackState) {
+        updateDisplayFromState(elapsed: state.elapsedTime)
+    }
+
     func dismiss() {
         cancelAll()
         slot = .none
@@ -201,6 +205,101 @@ final class CueDisplayController: ObservableObject {
         messageClearWorkItem?.cancel()
         markClearWorkItem?.cancel()
         imageClearWorkItem?.cancel()
+    }
+
+    private func updateDisplayFromState(elapsed: TimeInterval) {
+        cancelAll()
+        cursor = timeline.firstIndex(where: { $0.at > elapsed }) ?? timeline.count
+
+        var latestMessage: (payload: CueSheet.MessagePayload, at: TimeInterval, hold: TimeInterval?)?
+        var latestImage: (payload: CueSheet.ImagePayload, at: TimeInterval, hold: TimeInterval?)?
+        var latestMark: (mark: String, at: TimeInterval, hold: TimeInterval?)?
+
+        for entry in timeline where entry.at <= elapsed {
+            switch entry.kind {
+            case .message(let payload, let hold):
+                if isEntryActive(at: entry.at, hold: hold, elapsed: elapsed, payload: payload) {
+                    latestMessage = (payload, entry.at, hold)
+                }
+            case .image(let payload, let hold):
+                if isEntryActive(at: entry.at, hold: hold, elapsed: elapsed, payload: payload) {
+                    latestImage = (payload, entry.at, hold)
+                }
+            case .rehearsalMark(let mark, let hold):
+                latestMark = (mark, entry.at, hold)
+            }
+        }
+
+        messagePayload = latestMessage?.payload
+        image = latestImage?.payload
+
+        if let latestMark {
+            settledRehearsalMarkText = latestMark.mark
+            if let sheetID = activeSheetID {
+                settledMarksBySheet[sheetID] = latestMark.mark
+            }
+            if isEntryActive(at: latestMark.at, hold: latestMark.hold, elapsed: elapsed, payload: latestMark.mark) {
+                rehearsalMarkText = latestMark.mark
+            } else {
+                rehearsalMarkText = nil
+            }
+        } else {
+            rehearsalMarkText = nil
+            settledRehearsalMarkText = nil
+        }
+
+        if let latestMessage, let latestImage {
+            slot = latestMessage.at >= latestImage.at ? .message(latestMessage.payload) : .image(latestImage.payload)
+        } else if let latestMessage {
+            slot = .message(latestMessage.payload)
+        } else if let latestImage {
+            slot = .image(latestImage.payload)
+        } else {
+            slot = .none
+        }
+
+        if let latestMessage {
+            scheduleRemainingClear(at: latestMessage.at, hold: latestMessage.hold, elapsed: elapsed, payload: latestMessage.payload)
+        }
+        if let latestImage {
+            scheduleRemainingClear(at: latestImage.at, hold: latestImage.hold, elapsed: elapsed, payload: latestImage.payload)
+        }
+        if let latestMark {
+            scheduleRemainingClear(at: latestMark.at, hold: latestMark.hold, elapsed: elapsed, payload: latestMark.mark)
+        }
+    }
+
+    private func isEntryActive(at time: TimeInterval, hold: TimeInterval?, elapsed: TimeInterval, payload: Any) -> Bool {
+        if let hold {
+            if hold == 0 { return true }
+            return elapsed < time + hold
+        }
+        return elapsed < time + defaultDuration(for: payload)
+    }
+
+    private func defaultDuration(for payload: Any) -> TimeInterval {
+        let charCount: Int = {
+            if let msg = payload as? CueSheet.MessagePayload { return msg.text.count }
+            if let img = payload as? CueSheet.ImagePayload { return img.caption?.text.count ?? 0 }
+            if let mark = payload as? String { return mark.count }
+            return 0
+        }()
+        return min(durationConfig.base + (durationConfig.perChar * Double(charCount)), durationConfig.max)
+    }
+
+    private func scheduleRemainingClear(at time: TimeInterval, hold: TimeInterval?, elapsed: TimeInterval, payload: Any) {
+        guard let remaining = remainingDuration(at: time, hold: hold, elapsed: elapsed, payload: payload) else { return }
+        if remaining > 0 {
+            scheduleClear(after: remaining, payload: payload)
+        }
+    }
+
+    private func remainingDuration(at time: TimeInterval, hold: TimeInterval?, elapsed: TimeInterval, payload: Any) -> TimeInterval? {
+        if let hold {
+            if hold == 0 { return nil }
+            return max(0, (time + hold) - elapsed)
+        }
+        return max(0, (time + defaultDuration(for: payload)) - elapsed)
     }
 
     private func rehearsalMarkLabel(for index: Int) -> String {
