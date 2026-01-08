@@ -16,6 +16,7 @@ public final class ConnectivityManager: NSObject, ObservableObject {
     private var lastTimerMessage: TimerMessage?
 
     @Published public private(set) var incoming: TimerMessage?
+    @Published private(set) var incomingSyncEnvelope: SyncEnvelope?
     public let commands = PassthroughSubject<ControlRequest, Never>()
     /// Convenience: only returns session when supported **and** activated.
         private var activatedSession: WCSession? {
@@ -73,6 +74,10 @@ public final class ConnectivityManager: NSObject, ObservableObject {
     public func sendCommand(_ cmd: ControlRequest.Command) {
         send(ControlRequest(cmd))
     }
+
+    func sendSyncEnvelope(_ envelope: SyncEnvelope) {
+        send(envelope)
+    }
 }
 
 // MARK: WCSessionDelegate
@@ -107,6 +112,9 @@ extension ConnectivityManager: WCSessionDelegate {
         let dec = JSONDecoder()
         if let msg = try? dec.decode(TimerMessage.self, from: data) {
             DispatchQueue.main.async { self.incoming = msg }; return
+        }
+        if let env = try? dec.decode(SyncEnvelope.self, from: data) {
+            DispatchQueue.main.async { self.incomingSyncEnvelope = env }; return
         }
         if let cmd = try? dec.decode(ControlRequest.self, from: data) {
             DispatchQueue.main.async { self.commands.send(cmd) }; return

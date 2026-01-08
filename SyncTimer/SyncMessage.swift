@@ -1,5 +1,15 @@
 import Foundation
 
+#if os(watchOS)
+struct CueSheet: Codable {
+    let rawData: Data
+}
+
+struct PlaybackState: Codable {}
+
+struct CueEvent: Codable {}
+#endif
+
 enum SyncMessage: Codable {
     case sheetSnapshot(CueSheet)
     case playbackState(PlaybackState)
@@ -19,8 +29,12 @@ enum SyncMessage: Codable {
     }
 
     private static func encodeSheetSnapshot(_ sheet: CueSheet) throws -> String {
+        #if os(watchOS)
+        return sheet.rawData.base64EncodedString()
+        #else
         let data = CueXML.write(sheet)
         return data.base64EncodedString()
+        #endif
     }
 
     private static func decodeSheetSnapshot(_ string: String) throws -> CueSheet {
@@ -28,7 +42,11 @@ enum SyncMessage: Codable {
             throw DecodingError.dataCorrupted(.init(codingPath: [CodingKeys.sheetSnapshot],
                                                     debugDescription: "Invalid base64 sheet snapshot"))
         }
+        #if os(watchOS)
+        return CueSheet(rawData: data)
+        #else
         return try CueXML.read(data)
+        #endif
     }
 
     init(from decoder: Decoder) throws {
