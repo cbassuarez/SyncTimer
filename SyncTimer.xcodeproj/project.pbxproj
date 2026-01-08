@@ -177,6 +177,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				AppIcon.icon,
+				SyncMessage.swift,
 			);
 			target = 9636A7412E791DBB00A062B6 /* SyncTimerWatch Watch App */;
 		};
