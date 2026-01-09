@@ -8,7 +8,7 @@
 import Foundation
 public struct TimerMessage: Codable, Equatable {
     public enum Action: String, Codable {
-        case update, start, pause, reset, addEvent
+        case update, start, pause, reset, addEvent, endCueSheet
     }
     public struct TimerDisplayWire: Codable, Equatable {
         public enum Kind: String, Codable { case none, message, image }
@@ -55,6 +55,7 @@ public struct TimerMessage: Codable, Equatable {
         public let cueEvents: [CueEventWire]?
         public let restartEvents: [RestartEventWire]?
         public let sheetLabel: String?
+        public let sheetID: String?
     // NEW: lets parent say “a stop just began”, and how much is left
         public var isStopActive: Bool?
         public var stopRemainingActive: TimeInterval?
@@ -91,6 +92,7 @@ public struct TimerMessage: Codable, Equatable {
     cueEvents: [CueEventWire]? = nil,
             restartEvents: [RestartEventWire]? = nil,
             sheetLabel: String? = nil,
+            sheetID: String? = nil,
                       role: String? = nil,
                       link: String? = nil,
                       controlsEnabled: Bool? = nil,
@@ -115,6 +117,7 @@ public struct TimerMessage: Codable, Equatable {
         self.cueEvents = cueEvents
                 self.restartEvents = restartEvents
         self.sheetLabel = sheetLabel
+        self.sheetID = sheetID
         self.role              = role
                   self.link              = link
                   self.controlsEnabled   = controlsEnabled
