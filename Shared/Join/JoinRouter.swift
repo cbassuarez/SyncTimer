@@ -8,22 +8,11 @@ final class JoinRouter: ObservableObject {
     @Published var updateRequiredMinBuild: Int?
 
     func ingestUniversalLink(_ url: URL) {
-        let currentBuild = Self.currentBuildNumber()
-        switch JoinLinkParser.parse(url: url, currentBuild: currentBuild) {
+        switch JoinRequestV1.parse(url: url) {
         case .success(let request):
-            pending = request
-            needsHostPicker = request.needsHostSelection
-            updateRequiredMinBuild = nil
-            JoinHandoffStore.savePending(request)
+            ingestParsed(request)
         case .failure(let error):
-            updateRequiredMinBuild = nil
-            switch error {
-            case .updateRequired(let minBuild):
-                updateRequiredMinBuild = minBuild
-                JoinHandoffStore.recordLastError("update_required_\(minBuild)")
-            default:
-                JoinHandoffStore.recordLastError("parse_error_\(error)")
-            }
+            handleParseFailure(error)
         }
     }
 
@@ -51,12 +40,21 @@ final class JoinRouter: ObservableObject {
         needsHostPicker = false
     }
 
-    private static func currentBuildNumber() -> Int {
-        let bundle = Bundle.main
-        if let raw = bundle.infoDictionary?["CFBundleVersion"] as? String,
-           let build = Int(raw) {
-            return build
+    func ingestParsed(_ request: JoinRequestV1) {
+        pending = request
+        needsHostPicker = request.needsHostSelection
+        updateRequiredMinBuild = nil
+        JoinHandoffStore.savePending(request)
+    }
+
+    func handleParseFailure(_ error: JoinLinkParser.JoinLinkError) {
+        updateRequiredMinBuild = nil
+        switch error {
+        case .updateRequired(let minBuild):
+            updateRequiredMinBuild = minBuild
+            JoinHandoffStore.recordLastError("update_required_\(minBuild)")
+        default:
+            JoinHandoffStore.recordLastError("parse_error_\(error)")
         }
-        return 0
     }
 }

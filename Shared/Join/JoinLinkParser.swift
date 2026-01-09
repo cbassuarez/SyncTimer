@@ -26,7 +26,7 @@ enum JoinLinkParser {
         guard query["v"] == "1" else {
             return .failure(.invalidVersion)
         }
-        guard let mode = query["mode"], mode == "wifi" || mode == "nearby" else {
+        guard let mode = query["mode"], mode == "wifi" || mode == "nearby" || mode == "bluetooth" else {
             return .failure(.invalidMode)
         }
         guard let hostsRaw = query["hosts"] else {
@@ -47,7 +47,8 @@ enum JoinLinkParser {
 
         var deviceNames: [String] = []
         if let namesRaw = query["device_names"] {
-            let rawNames = namesRaw.split(separator: "|").map { String($0) }
+            let rawNames = namesRaw.split(whereSeparator: { $0 == "," || $0 == "|" })
+                .map { String($0) }
             deviceNames = rawNames.map { raw in
                 let decoded = raw.removingPercentEncoding ?? raw
                 return String(decoded.prefix(40))
