@@ -638,11 +638,149 @@ private struct AbsoluteDurationChipsField: View {
             )
             .animation(.snappy(duration: 0.22), value: activeComponent)
         }
+        .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        quickTimeChipsBar
+                        Spacer()
+                        Button("Done") { focusedComponent = nil }
+                    }
+                }
         .onAppear { syncFromTimeText(source: timeText) }
         .onChange(of: timeText) { newValue in
             guard !isWritingTimeText else { return }
             syncFromTimeText(source: newValue)
         }
+    }
+    
+// MARK: - Keyboard quick chips
+    private enum QuickAction: Hashable {
+        case clearAll
+        case zero(Component)
+        case bump(deltaCentiseconds: Int)
+    }
+
+    private struct QuickChip: Identifiable {
+        let id = UUID()
+        let title: String
+        let systemImage: String?
+        let action: QuickAction
+    }
+
+    private var quickTimeChipsBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(quickChips) { chip in
+                    Button { performQuickAction(chip.action) } label: {
+                        quickChipLabel(chip)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 6)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func quickChipLabel(_ chip: QuickChip) -> some View {
+        let base = Group {
+            if let systemImage = chip.systemImage {
+                Label(chip.title, systemImage: systemImage)
+                    .labelStyle(.titleAndIcon)
+            } else {
+                Text(chip.title)
+            }
+        }
+        base
+            .font(.custom("Roboto-Regular", size: 13)).monospacedDigit()
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(Color.primary.opacity(0.14), lineWidth: 0.8)
+            )
+            .contentShape(Capsule(style: .continuous))
+    }
+
+    private var quickChips: [QuickChip] {
+        let hasAnyTime = totalCentisecondsCurrent() > 0
+        var chips: [QuickChip] = [
+            .init(title: "0 \(activeComponent.label)", systemImage: "0.circle", action: .zero(activeComponent)),
+            .init(title: "Clear", systemImage: "xmark", action: .clearAll)
+        ]
+
+        switch activeComponent {
+        case .hours:
+            if hasAnyTime { chips.insert(.init(title: "−1h", systemImage: nil, action: .bump(deltaCentiseconds: -360000)), at: 0) }
+            chips.append(contentsOf: [
+                .init(title: "+1h", systemImage: nil, action: .bump(deltaCentiseconds: 360000)),
+                .init(title: "+2h", systemImage: nil, action: .bump(deltaCentiseconds: 720000)),
+                .init(title: "+6h", systemImage: nil, action: .bump(deltaCentiseconds: 2160000))
+            ])
+        case .minutes:
+            if hasAnyTime { chips.insert(.init(title: "−1m", systemImage: nil, action: .bump(deltaCentiseconds: -6000)), at: 0) }
+            chips.append(contentsOf: [
+                .init(title: "+1m", systemImage: nil, action: .bump(deltaCentiseconds: 6000)),
+                .init(title: "+5m", systemImage: nil, action: .bump(deltaCentiseconds: 30000)),
+                .init(title: "+10m", systemImage: nil, action: .bump(deltaCentiseconds: 60000)),
+                .init(title: "+15m", systemImage: nil, action: .bump(deltaCentiseconds: 90000))
+            ])
+        case .seconds:
+            if hasAnyTime { chips.insert(.init(title: "−5s", systemImage: nil, action: .bump(deltaCentiseconds: -500)), at: 0) }
+            chips.append(contentsOf: [
+                .init(title: "+5s", systemImage: nil, action: .bump(deltaCentiseconds: 500)),
+                .init(title: "+10s", systemImage: nil, action: .bump(deltaCentiseconds: 1000)),
+                .init(title: "+30s", systemImage: nil, action: .bump(deltaCentiseconds: 3000)),
+                .init(title: "+1m", systemImage: nil, action: .bump(deltaCentiseconds: 6000))
+            ])
+        case .centiseconds:
+            if hasAnyTime { chips.insert(.init(title: "−10cs", systemImage: nil, action: .bump(deltaCentiseconds: -10)), at: 0) }
+            chips.append(contentsOf: [
+                .init(title: "+10cs", systemImage: nil, action: .bump(deltaCentiseconds: 10)),
+                .init(title: "+25cs", systemImage: nil, action: .bump(deltaCentiseconds: 25)),
+                .init(title: "+50cs", systemImage: nil, action: .bump(deltaCentiseconds: 50)),
+                .init(title: "+1s", systemImage: nil, action: .bump(deltaCentiseconds: 100))
+            ])
+        }
+
+        return chips
+    }
+
+    private func performQuickAction(_ action: QuickAction) {
+        switch action {
+        case .clearAll:
+            setTotalCentiseconds(0, userInitiated: true)
+            activate(activeComponent, focus: true)
+        case .zero(let component):
+            update(component: component, to: 0, userInitiated: true)
+            activate(component, focus: true)
+        case .bump(let deltaCentiseconds):
+            bumpTotalCentiseconds(deltaCentiseconds)
+            activate(activeComponent, focus: true)
+        }
+    }
+
+    private func totalCentisecondsCurrent() -> Int {
+        max(0, (max(0, hours) * 3600 + max(0, minutes) * 60 + max(0, seconds)) * 100 + max(0, centiseconds))
+    }
+
+    private func setTotalCentiseconds(_ total: Int, userInitiated: Bool) {
+        let normalized = normalize(totalCentiseconds: max(0, total))
+        hours = normalized.hours
+        minutes = normalized.minutes
+        seconds = normalized.seconds
+        centiseconds = normalized.centiseconds
+        writeTimeText(normalized)
+        if userInitiated {
+            hasUserInteracted = true
+            hasError = false
+        }
+    }
+
+    private func bumpTotalCentiseconds(_ delta: Int) {
+        setTotalCentiseconds(totalCentisecondsCurrent() + delta, userInitiated: true)
     }
 
     // MARK: - Chips
@@ -3428,6 +3566,12 @@ private struct FractionMeterControl: View {
         }
         .padding(12)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") { focusField = nil }
+                    }
+                }
     }
 
     private var divider: some View {

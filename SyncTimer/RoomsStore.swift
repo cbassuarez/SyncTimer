@@ -177,9 +177,9 @@ final class RoomsStore: ObservableObject {
         rooms.first { $0.hostUUID == hostUUID }
     }
 
-    static func loadRoomLabel(hostUUID: UUID,
-                              defaults: UserDefaults = .standard,
-                              key: String = "saved_rooms_v1") -> (label: String, isBroadcastEnabled: Bool)? {
+    nonisolated static func loadRoomLabel(hostUUID: UUID,
+                                              defaults: UserDefaults = .standard,
+                                              key: String = "saved_rooms_v1") -> (label: String, isBroadcastEnabled: Bool)? {
         guard let data = defaults.data(forKey: key),
               let decoded = try? JSONDecoder().decode([Room].self, from: data) else { return nil }
         guard let room = decoded.first(where: { $0.hostUUID == hostUUID }) else { return nil }
