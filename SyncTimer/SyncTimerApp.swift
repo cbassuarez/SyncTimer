@@ -1571,6 +1571,12 @@ final class SyncSettings: ObservableObject {
                 }
                 outbound.actionKind = outbound.action
             }
+            if outbound.stateSeq == nil {
+                outbound.stateSeq = actionSeqCounter
+            }
+            if let actionSeq = outbound.actionSeq {
+                outbound.stateSeq = actionSeq
+            }
             let encoder = JSONEncoder()
             guard let data = try? encoder.encode(outbound) else { return }
             let framed = data + Data([0x0A])   // newline-delimit each JSON packet
@@ -4234,7 +4240,9 @@ struct MainScreen: View {
     @State private var playbackStopAnchorElapsedNs: UInt64? = nil
     @State private var playbackStopAnchorUptimeNs: UInt64? = nil
     @State private var lastAppliedPlaybackSeq: UInt64 = 0
-    @State private var lastAppliedControlActionSeq: UInt64 = 0
+    @State private var lastAppliedControlSeq: UInt64 = 0
+    @State private var lastAppliedControlKind: TimerMessage.Action? = nil
+    @State private var ignoreRunningUpdatesUntil: TimeInterval? = nil
     @State private var lastStopFinalSettleSeq: UInt64? = nil
     @State private var lastStopBurstSeq: UInt64? = nil
     @State private var lastStopAnchorElapsedNs: UInt64? = nil
@@ -7943,24 +7951,43 @@ struct MainScreen: View {
 
     func applyIncomingTimerMessage(_ msg: TimerMessage) {
         guard syncSettings.role == .child else { return }
-        
+
         let isControlAction = (msg.action == .pause || msg.action == .reset || msg.action == .start)
-        if isControlAction, syncSettings.connectionMethod == .bluetooth {
-            let receiveTime = Date().timeIntervalSince1970
-            if let seq = msg.actionSeq {
-                print("[BLE Child] control recv action=\(msg.action) seq=\(seq) t=\(receiveTime)")
-            } else {
-                print("[BLE Child] control recv action=\(msg.action) seq=<nil> t=\(receiveTime)")
+        // Centisecond quantizer to keep visuals identical across devices
+        @inline(__always) func qcs(_ t: TimeInterval) -> TimeInterval {
+            return Double(Int((t * 100).rounded())) / 100.0
+        }
+        // One-way latency from parent timestamp → “now”
+        let now = Date().timeIntervalSince1970
+        let delta = max(0, now - msg.timestamp) // never negative
+        let actionSeqDesc = msg.actionSeq.map(String.init) ?? "nil"
+        let stateSeqDesc = msg.stateSeq.map(String.init) ?? "nil"
+        var dropReason: String? = nil
+
+        if isControlAction, let seq = msg.actionSeq, seq <= lastAppliedControlSeq {
+            dropReason = "stale-control"
+        } else if !isControlAction {
+            if let stateSeq = msg.stateSeq, stateSeq < lastAppliedControlSeq {
+                dropReason = "stale-state"
+            } else if let ignoreUntil = ignoreRunningUpdatesUntil,
+                      now < ignoreUntil,
+                      msg.phase == "running" {
+                dropReason = "quench-window"
             }
         }
 
-        // Centisecond quantizer to keep visuals identical across devices
-                @inline(__always) func qcs(_ t: TimeInterval) -> TimeInterval {
-                    return Double(Int((t * 100).rounded())) / 100.0
-                }
-                // One-way latency from parent timestamp → “now”
-                let now = Date().timeIntervalSince1970
-                let delta = max(0, now - msg.timestamp) // never negative
+        if syncSettings.connectionMethod == .bluetooth {
+            let decision = dropReason ?? "applied"
+            print("[BLE Child] recv action=\(msg.action) phase=\(msg.phase) remaining=\(qcs(msg.remaining)) actionSeq=\(actionSeqDesc) stateSeq=\(stateSeqDesc) lastControlSeq=\(lastAppliedControlSeq) decision=\(decision)")
+        }
+        if let dropReason {
+            if dropReason == "stale-control",
+               syncSettings.connectionMethod == .bluetooth,
+               let seq = msg.actionSeq {
+                syncSettings.bleDriftManager.sendControlAck(seq: seq)
+            }
+            return
+        }
         
         // Always refresh stops (TimerMessage always carries these)
         rawStops = msg.stopEvents.map { StopEvent(eventTime: $0.eventTime, duration: $0.duration) }
@@ -8045,12 +8072,31 @@ struct MainScreen: View {
                     rebuildChildDisplayEvents()
             
         case .update:
-            if msg.phase == "countdown" {
+            switch msg.phase {
+            case "countdown":
                 countdownRemaining = max(0, qcs(msg.remaining - delta))
                 phase = .countdown
                 childTargetStartDate = nil
                 startDate = nil
-            } else {
+            case "paused", "idle":
+                ticker?.cancel()
+                phase = (msg.phase == "idle") ? .idle : .paused
+                let fixed = qcs(msg.remaining)
+                childTargetStartDate = nil
+                startDate = nil
+                pausedElapsed = fixed
+                elapsed = fixed
+                childDisplayElapsed = fixed
+            case "stop":
+                ticker?.cancel()
+                phase = .paused
+                let fixed = qcs(msg.remaining)
+                childTargetStartDate = nil
+                startDate = nil
+                pausedElapsed = fixed
+                elapsed = fixed
+                childDisplayElapsed = fixed
+            default:
                 let adj = qcs(msg.remaining + delta)
                 phase = .running
                 childTargetStartDate = Date().addingTimeInterval(-adj)
@@ -8068,17 +8114,18 @@ struct MainScreen: View {
                                 }
                     
             // If the parent entered a stop, mirror it locally.
-                        if msg.isStopActive == true, let parentStopLeft = msg.stopRemainingActive {
-                            // Freeze main clock at parent’s pausedElapsed (as of message time)
-                            pausedElapsed = qcs(msg.remaining)   // the elapsed at the moment stop began
-                            stopActive = true
-                            elapsed = pausedElapsed
+                    if msg.isStopActive == true, let parentStopLeft = msg.stopRemainingActive {
+                        // Freeze main clock at parent’s pausedElapsed (as of message time)
+                        pausedElapsed = qcs(msg.remaining)   // the elapsed at the moment stop began
+                        stopActive = true
+                        elapsed = pausedElapsed
                             // While the packet was in flight, the parent’s stop timer ticked by `delta`
                             stopRemaining = max(0, qcs(parentStopLeft - delta))
                             childTargetStartDate = nil
                             childDisplayElapsed = pausedElapsed
                             // Ensure the run loop is active so our child ticks the stop timer down
                             startLoop()
+                            ignoreRunningUpdatesUntil = now + 0.25
                         }
                 case .addEvent:
                     // caches were already updated at the top of this function (when arrays are present)
@@ -8088,9 +8135,14 @@ struct MainScreen: View {
         if isControlAction,
            syncSettings.connectionMethod == .bluetooth,
            let seq = msg.actionSeq {
-            lastAppliedControlActionSeq = max(lastAppliedControlActionSeq, seq)
-            print("[BLE Child] applied control action=\(msg.action) seq=\(seq)")
             syncSettings.bleDriftManager.sendControlAck(seq: seq)
+        }
+        if isControlAction, let seq = msg.actionSeq {
+            lastAppliedControlSeq = max(lastAppliedControlSeq, seq)
+            lastAppliedControlKind = msg.action
+            if msg.action == .pause || msg.action == .reset {
+                ignoreRunningUpdatesUntil = now + 0.25
+            }
         }
         if phase == .running || phase == .paused {
             let displayElapsed = isChildDevice ? childDisplayElapsed : elapsed
