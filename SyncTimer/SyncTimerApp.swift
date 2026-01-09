@@ -9417,23 +9417,17 @@ struct ConnectionPage: View {
     }
 
     private var joinQRButton: some View {
-        Button {
+        GlassCircleIconButton(
+            systemName: "qrcode",
+            tint: settings.flashColor,
+            accessibilityLabel: syncSettings.role == .parent ? "Generate Join QR" : "Join via QR",
+            accessibilityHint: syncSettings.role == .parent
+                ? "Opens a share sheet for children to join."
+                : "Opens a join sheet to scan a QR or pick a room."
+        ) {
             Haptics.light()
             showJoinSheet = true
-        } label: {
-            ZStack {
-                LiquidGlassCircle(diameter: 44, tint: settings.flashColor)
-                Image(systemName: "qrcode")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(settings.flashColor)
-                    .symbolRenderingMode(.hierarchical)
-            }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(syncSettings.role == .parent ? "Generate Join QR" : "Join via QR")
-        .accessibilityHint(syncSettings.role == .parent
-                           ? "Opens a share sheet for children to join."
-                           : "Opens a join sheet to scan a QR or pick a room.")
     }
     var body: some View {
         VStack(spacing: 0) {
@@ -11257,20 +11251,14 @@ private enum AppAsset {
 
             Spacer()
 
-            Button {
+            GlassCircleIconButton(
+                systemName: "xmark",
+                tint: settings.flashColor,
+                accessibilityLabel: "Dismiss"
+            ) {
                 dismiss()
                 Haptics.selection()
-            } label: {
-                ZStack {
-                    LiquidGlassCircle(diameter: 44, tint: settings.flashColor)
-                    Image(systemName: "xmark")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(settings.flashColor)
-                        .symbolRenderingMode(.hierarchical)
-                }
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Dismiss")
         }
     }
 
@@ -11941,17 +11929,15 @@ private enum AppAsset {
                             .buttonStyle(.plain)
                             .accessibilityLabel("Share Join QR")
 
-                            Button(action: onDismiss) {
-                                ZStack {
-                                    LiquidGlassCircle(diameter: 48, tint: accentColor)
-                                    Image(systemName: "xmark")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundColor(accentColor)
-                                        .symbolRenderingMode(.hierarchical)
-                                }
+                            GlassCircleIconButton(
+                                systemName: "xmark",
+                                tint: accentColor,
+                                size: 48,
+                                iconPointSize: 16,
+                                accessibilityLabel: "Close"
+                            ) {
+                                onDismiss()
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Close")
 
                             if let onPrint {
                                 Button(action: onPrint) {
@@ -13321,6 +13307,44 @@ struct FallingIconsOverlay: UIViewRepresentable {
 //──────────────────────────────────────────────────────────────
 // MARK: – LiquidGlassCircle (SDK-safe “liquid glass” button)
 //──────────────────────────────────────────────────────────────
+private struct GlassCircleIconButton: View {
+    let systemName: String
+    let tint: Color
+    var size: CGFloat = 44
+    var iconPointSize: CGFloat = 18
+    var iconWeight: Font.Weight = .semibold
+    var accessibilityLabel: String
+    var accessibilityHint: String? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                if #available(iOS 26.0, *) {
+                    let shape = Circle()
+                    shape
+                        .fill(Color.clear)
+                        .glassEffect(.regular.tint(tint), in: shape)
+                        .overlay(shape.stroke(Color.primary.opacity(0.08), lineWidth: 1))
+                } else {
+                    LiquidGlassCircle(diameter: size, tint: tint)
+                }
+
+                Image(systemName: systemName)
+                    .font(.system(size: iconPointSize, weight: iconWeight))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.white)
+            }
+            .frame(width: size, height: size)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(accessibilityHint ?? "")
+        .frame(width: max(size, 44), height: max(size, 44))
+    }
+}
+
 private struct LiquidGlassCircle: View {
     let diameter: CGFloat
     let tint: Color
