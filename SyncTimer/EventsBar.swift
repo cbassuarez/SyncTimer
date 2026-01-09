@@ -158,6 +158,94 @@ private struct SymbolBounceIfHighContrast: ViewModifier {
     }
 }
 
+//──────────────────────────────────────────────────────────────
+// MARK: – LiquidGlassCircle (SDK-safe “liquid glass” button)
+//──────────────────────────────────────────────────────────────
+private struct GlassCircleIconButton: View {
+    let systemName: String
+    let tint: Color
+    var size: CGFloat = 44
+    var iconPointSize: CGFloat = 18
+    var iconWeight: Font.Weight = .semibold
+    var accessibilityLabel: String
+    var accessibilityHint: String? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                if #available(iOS 26.0, *) {
+                    let shape = Circle()
+                    shape
+                        .fill(Color.clear)
+                        .glassEffect(.regular.tint(tint), in: shape)
+                        .overlay(shape.stroke(Color.primary.opacity(0.08), lineWidth: 1))
+                } else {
+                    LiquidGlassCircle(diameter: size, tint: tint)
+                }
+
+                Image(systemName: systemName)
+                    .font(.system(size: iconPointSize, weight: iconWeight))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.white)
+            }
+            .frame(width: size, height: size)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(accessibilityHint ?? "")
+        .frame(width: max(size, 44), height: max(size, 44))
+    }
+}
+
+private struct LiquidGlassCircle: View {
+    let diameter: CGFloat
+    let tint: Color
+    var body: some View {
+        let shape = Circle()
+        ZStack {
+            // Core glass body (ultra-thin material)
+            shape
+                .fill(.ultraThinMaterial)
+            // Rim lighting
+            shape
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.22),
+                            Color.white.opacity(0.06)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+            // Subtle internal highlight
+            shape
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.10),
+                            Color.white.opacity(0.00)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .padding(diameter * 0.06)
+            // Tint wash (very light)
+            shape
+                .stroke(tint.opacity(0.35), lineWidth: 1)
+                .blur(radius: 0.2)
+        }
+        .frame(width: diameter, height: diameter)
+        .shadow(color: .black.opacity(0.10), radius: 8, x: 0, y: 4)
+        .clipShape(shape)
+        .contentShape(shape)
+    }
+}
+
 
 
 struct EventsBar: View {
@@ -230,11 +318,7 @@ struct EventsBar: View {
                     Button {
                         attemptOpenCueSheets()
                     } label: {
-                        Label {
-                            Text("Cue Sheets…")
-                        } icon: {
-                            CueSheetsIcon(accent: cueSheetAccent)
-                        }
+                        Label("Cue Sheets…", systemImage: "arrow.up.document")
                     }
                 }
                 // ─── Rectangular “+” button → opens Cue Sheets ─────────────────
@@ -249,25 +333,20 @@ struct EventsBar: View {
             .offset(y: 0)
             // Trailing attach button (paperclip). Small, low emphasis, 44pt hit target.
             .overlay(alignment: .trailing) {
-                Button {
-                    attemptOpenCueSheets()
-                } label: {
-                    CueSheetsIcon(accent: cueSheetAccent, size: 30)
-                        .frame(width: addWidth, height: barHeight)
-
-                }
-                .id("CueSheetsButton") // keep identity stable during mode morphs
-                .buttonStyle(CueSheetsInsetPlateStyle(cornerRadius: 8))
-                .zIndex(9999) //ensure the button wins hit test
-                // Win any gesture races with underlying content
-                .highPriorityGesture(TapGesture().onEnded { attemptOpenCueSheets() })
-                .simultaneousGesture(TapGesture().onEnded { attemptOpenCueSheets() })
-                .allowsHitTesting(true)
+                GlassCircleIconButton(
+                    systemName: "arrow.up.document",
+                    tint: cueSheetAccent,
+                    size: 44,
+                    iconPointSize: 18,
+                    accessibilityLabel: "Cue Sheets",
+                    accessibilityHint: "Attach or load a cue sheet for this timer",
+                    action: {
+                        attemptOpenCueSheets()
+                    }
+                )
                 .padding(.trailing, 8)
                 .opacity((isPaused && !isCounting) ? 1.0 : 0.35)
-                //.disabled(!isPaused || isCounting)
-                .accessibilityLabel("Cue Sheets")
-                .accessibilityHint("Attach or load a cue sheet for this timer")
+                .disabled(!isPaused || isCounting)
             }
         }
         .frame(height: 60)  // fix overall bar height at 60
@@ -300,145 +379,6 @@ private struct EventsBarCycleGlassPlate: ViewModifier {
 private enum Haptics {
     static func light()   { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
     static func warning() { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
-}
-
-private struct CueSheetsInsetPlateStyle: ButtonStyle {
-    var cornerRadius: CGFloat = 8
-
-    func makeBody(configuration: Configuration) -> some View {
-        let shape   = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        let pressed = configuration.isPressed
-
-        // White plate (not gray/muddy), with a clear pressed delta.
-        let baseWhite     = Color.white.opacity(pressed ? 0.14 : 0.2)
-        let pressedDim    = Color.black.opacity(pressed ? 0.40 : 0.00)   // tiny “down” darken
-        let keylineTop    = Color.white.opacity(pressed ? 0.28 : 0.42)
-        let keylineBottom = Color.black.opacity(pressed ? 0.22 : 0.14)
-
-        // Lift vs recess
-        let outerOpacity  = pressed ? 0.10 : 0.36
-        let outerRadius   = pressed ? 4.0  : 14.0
-        let outerY        = pressed ? 1.5  : 9.0
-
-        let innerOpacity  = pressed ? 0.65 : 0.18
-        let innerLine     = pressed ? 2.2  : 1.0
-        let innerBlur     = pressed ? 2.0  : 2.8
-        let innerOffset   = pressed ? 2.2  : 0.8
-
-        let sheenOpacity  = pressed ? 0.12 : 0.36
-
-        return configuration.label
-            .environment(\.cueSheetsIsPressed, pressed)
-            // micro motion: “goes down”
-            .scaleEffect(pressed ? 0.85 : 1.0)
-            .offset(y: pressed ? 1.5 : 0.0)
-
-            // 1) White base plate (silhouette guarantee)
-            .background(baseWhite, in: shape)
-            .overlay(pressedDim, in: shape)
-
-            // 2) Glass texture (subtle; not responsible for silhouette)
-            .background {
-                if #available(iOS 26.0, *) {
-                    shape
-                        .fill(.clear)
-                        .glassEffect(.regular, in: shape)
-                } else {
-                    shape.fill(.regularMaterial)
-                }
-            }
-
-            // 3) Edges + depth (this is where pressed/unpressed happens)
-            .overlay {
-                // Inner shadow (bottom/right) — barely present when unpressed, strong when pressed
-                shape
-                    .stroke(Color.black.opacity(innerOpacity), lineWidth: innerLine)
-                    .blur(radius: innerBlur)
-                    .offset(x: innerOffset, y: innerOffset)
-                    .mask(
-                        shape.fill(
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .clear, location: 0.0),
-                                    .init(color: .black, location: 1.0),
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                    )
-
-                // Top sheen (stronger when unpressed)
-                shape
-                    .stroke(
-                        LinearGradient(
-                            stops: [
-                                .init(color: .white.opacity(sheenOpacity), location: 0.0),
-                                .init(color: .clear, location: 0.55),
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ),
-                        lineWidth: 1
-                    )
-                    .blendMode(.screen)
-
-                // Keylines (keep the silhouette readable even on glassy bars)
-                shape.stroke(keylineTop, lineWidth: 1)
-                shape.stroke(keylineBottom, lineWidth: 1).blur(radius: 0.25)
-            }
-
-            // Outer lift (collapses when pressed)
-            .shadow(color: .black.opacity(outerOpacity), radius: outerRadius, x: 0, y: outerY)
-
-            .contentShape(shape)
-            .animation(.snappy(duration: 0.14), value: pressed)
-    }
-}
-
-
-
-// MARK: - Cue sheets icon
-private struct CueSheetsIsPressedKey: EnvironmentKey {
-    static let defaultValue: Bool = false
-}
-
-private extension EnvironmentValues {
-    var cueSheetsIsPressed: Bool {
-        get { self[CueSheetsIsPressedKey.self] }
-        set { self[CueSheetsIsPressedKey.self] = newValue }
-    }
-}
-
-private struct CueSheetsIcon: View {
-    @Environment(\.cueSheetsIsPressed) private var isPressed
-
-    var accent: Color
-    var size: CGFloat = 36  // ⟵ bigger by default (fills the button better)
-
-    var body: some View {
-        let image: Image = {
-            if #available(iOS 17.0, *) {
-                return Image(systemName: "arrow.up.document", variableValue: 1.0) //or document.viewfinder
-            } else {
-                return Image(systemName: "arrow.up.document")
-            }
-        }()
-
-        image
-            .font(.system(size: size, weight: .regular))   // ⟵ SF Symbol size is driven by font
-            .symbolRenderingMode(.palette)
-            // keep gradients ON, but boost saturation/contrast to avoid washout on materials
-            .foregroundStyle(
-                accent.opacity(isPressed ? 0.5 : 1.0).gradient,
-                Color.black.opacity(isPressed ? 0.35 : 0.65)
-            )
-            .saturation(1.2)
-            .contrast(1.1)
-            .accessibilityHidden(true)
-            .transaction { $0.animation = nil }   // keep symbol static; let parent drive transitions
-            .compositingGroup() // keep palette + gradients in one layer during fades
-    }
 }
 
 // MARK: - Local helpers
