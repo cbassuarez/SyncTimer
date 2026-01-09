@@ -352,11 +352,11 @@ final class BLEDriftManager: NSObject {
         let tReq = Date().timeIntervalSince1970
         let eReq = owner?.getCurrentElapsed() ?? 0
         lastPacketAt = tReq  // activity on the link
-        let packet = DriftRequest(requestTimestamp: tReq, elapsedSeconds: eReq)
-        guard let data = try? JSONEncoder().encode(packet) else { return }
+        let request = DriftRequest(requestTimestamp: tReq, elapsedSeconds: eReq)
+        guard let data = try? JSONEncoder().encode(request) else { return }
 
-        let packet = OutboundPacket(data: data, isControl: false, actionSeq: nil)
-        enqueueLowPriorityPacket(packet)
+        let outbound = OutboundPacket(data: data, isControl: false, actionSeq: nil)
+        enqueueLowPriorityPacket(outbound)
     }
 
     /// Parent receives child’s write here
