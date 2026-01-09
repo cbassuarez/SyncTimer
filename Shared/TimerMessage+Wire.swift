@@ -68,9 +68,11 @@ public struct TimerMessage: Codable, Equatable {
         /// one-shot edge for cue/zero-flash haptic (optional)
         public var flashNow: Bool?
         public var display: TimerDisplayWire?
-        public var assetManifest: [CueAssetManifestItem]?
-        public var assetRequests: [UUID]?
-        public var assetChunks: [CueAssetChunk]?
+    public var assetManifest: [CueAssetManifestItem]?
+    public var assetRequests: [UUID]?
+    public var assetChunks: [CueAssetChunk]?
+    public var resetToken: Int?
+    public var clearLoadedSheet: Bool?
     /// Optional, only set by the **parent**. Mirrored read-only on children.
         var notesParent: String?
     public init(action: Action,
@@ -93,7 +95,9 @@ public struct TimerMessage: Codable, Equatable {
                       display: TimerDisplayWire? = nil,
                       assetManifest: [CueAssetManifestItem]? = nil,
                       assetRequests: [UUID]? = nil,
-                      assetChunks: [CueAssetChunk]? = nil) {
+                      assetChunks: [CueAssetChunk]? = nil,
+                      resetToken: Int? = nil,
+                      clearLoadedSheet: Bool? = nil) {
           self.action            = action
           self.timestamp         = timestamp
           self.phase             = phase
@@ -115,5 +119,7 @@ public struct TimerMessage: Codable, Equatable {
         self.assetManifest     = assetManifest
         self.assetRequests     = assetRequests
         self.assetChunks       = assetChunks
+        self.resetToken        = resetToken
+        self.clearLoadedSheet  = clearLoadedSheet
       }
 }

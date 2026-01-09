@@ -4142,6 +4142,8 @@ struct MainScreen: View {
     @State private var loadedCueSheetID: UUID? = nil
     @State private var loadedCueSheet: CueSheet? = nil
     @State private var pendingPlaybackState: PlaybackState? = nil
+    @State private var resetTokenCounter: Int = 0
+    @State private var lastResetTokenSeen: Int? = nil
     
     func apply(_ sheet: CueSheet) {
 
@@ -7455,20 +7457,22 @@ struct MainScreen: View {
         
         // Broadcast reset to children if we’re the parent
         if syncSettings.role == .parent && syncSettings.isEnabled {
-            let snap = encodeCurrentEvents() // (stops, cues, restarts)
+            resetTokenCounter += 1
             var m = TimerMessage(
                 action: .reset,
                 timestamp: Date().timeIntervalSince1970,
                 phase: "idle",
                 remaining: 0,
-                stopEvents: snap.stops,
+                stopEvents: [],
                 anchorElapsed: nil,
                 parentLockEnabled: syncSettings.parentLockEnabled,
                 isStopActive: false,
                 stopRemainingActive: nil,
-                cueEvents: snap.cues,
-                restartEvents: snap.restarts,
-                sheetLabel: cueBadge.label
+                cueEvents: [],
+                restartEvents: [],
+                sheetLabel: "",
+                resetToken: resetTokenCounter,
+                clearLoadedSheet: true
             )
             m.notesParent = parentNotePayload
             syncSettings.broadcastToChildren(m)
@@ -7560,6 +7564,7 @@ struct MainScreen: View {
                 // One-way latency from parent timestamp → “now”
                 let now = Date().timeIntervalSince1970
                 let delta = max(0, now - msg.timestamp) // never negative
+                let isSheetLoaded = (loadedCueSheetID != nil)
         
         // Rebuild *all* events from wires
                 rawStops = msg.stopEvents.map { StopEvent(eventTime: $0.eventTime, duration: $0.duration) }
@@ -7567,7 +7572,9 @@ struct MainScreen: View {
                 let rstList: [Event] = (msg.restartEvents ?? []).map { .restart(RestartEvent(restartTime: $0.restartTime)) }
                 var combined: [Event] = rawStops.map(Event.stop) + cueList + rstList
                 combined.sort { $0.fireTime < $1.fireTime }
-                events = combined
+                if !isSheetLoaded {
+                    events = combined
+                }
                 syncSettings.stopWires = msg.stopEvents
         
         // Mirror parent's note and sheet label when provided
@@ -7606,6 +7613,19 @@ struct MainScreen: View {
                                 elapsed = 0
                                 stopActive = false
                                 stopRemaining = 0
+                    if let resetToken = msg.resetToken, resetToken != lastResetTokenSeen {
+                        lastResetTokenSeen = resetToken
+                        cueDisplay.reset()
+                        isMessageExpanded = false
+                        syncSettings.stopWires = []
+                        rawStops = []
+                        if msg.clearLoadedSheet == true {
+                            loadedCueSheetID = nil
+                            loadedCueSheet = nil
+                            events = []
+                            cueBadge.clear()
+                        }
+                    }
             
         case .update:
             if msg.phase == "countdown" {
@@ -7626,7 +7646,9 @@ struct MainScreen: View {
                             let stops = msg.stopEvents.map { Event.stop(StopEvent(eventTime: $0.eventTime, duration: $0.duration)) }
                             let cueEv = (msg.cueEvents ?? []).map { Event.cue(CueEvent(cueTime: $0.cueTime)) }
                             let rstEv = (msg.restartEvents ?? []).map { Event.restart(RestartEvent(restartTime: $0.restartTime)) }
-                            events = (stops + cueEv + rstEv).sorted { $0.fireTime < $1.fireTime }
+                            if !isSheetLoaded {
+                                events = (stops + cueEv + rstEv).sorted { $0.fireTime < $1.fireTime }
+                            }
                             rawStops = stops.compactMap { if case let .stop(s) = $0 { s } else { nil } }
                         }
             // If the parent entered a stop, mirror it locally.
@@ -7644,7 +7666,9 @@ struct MainScreen: View {
                                 let stops = msg.stopEvents.map { Event.stop(StopEvent(eventTime: $0.eventTime, duration: $0.duration)) }
                                 let cues  = (msg.cueEvents ?? []).map { Event.cue(CueEvent(cueTime: $0.cueTime)) }
                                 let rsts  = (msg.restartEvents ?? []).map { Event.restart(RestartEvent(restartTime: $0.restartTime)) }
-                                events = (stops + cues + rsts).sorted { $0.fireTime < $1.fireTime }
+                                if !isSheetLoaded {
+                                    events = (stops + cues + rsts).sorted { $0.fireTime < $1.fireTime }
+                                }
                     rawStops = stops.compactMap {
                         if case let .stop(s) = $0 { return s } else { return nil }
                     }

@@ -47,7 +47,7 @@ enum SyncMessage: Codable {
         return CueSheet(rawData: data)
         #else
         var (sheet, assets) = try CueXML.readWithAssets(data)
-        CueLibraryStore.ingestEmbeddedAssetsFromDisk(for: &sheet, blobs: assets)
+        CueLibraryStore.shared.ingestEmbeddedAssets(for: &sheet, blobs: assets)
         return sheet
         #endif
     }
