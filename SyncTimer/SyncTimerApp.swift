@@ -647,6 +647,7 @@ final class SyncSettings: ObservableObject {
     private var syncEnvelopeSeq: Int = 0
     private var lastReceivedSyncSeq: Int = -1
     private var receiveBuffers: [ObjectIdentifier: Data] = [:]
+    private var actionSeqCounter: UInt64 = 0
 
     private var wcCancellables: Set<AnyCancellable> = []
 
@@ -671,6 +672,15 @@ final class SyncSettings: ObservableObject {
 
     private func resetSyncSequence() {
         lastReceivedSyncSeq = -1
+    }
+
+    private func isControlAction(_ action: TimerMessage.Action) -> Bool {
+        switch action {
+        case .start, .pause, .reset:
+            return true
+        case .update, .addEvent:
+            return false
+        }
     }
     
     // Cancel any active retry
@@ -1553,19 +1563,27 @@ final class SyncSettings: ObservableObject {
     // ── BROADCAST A JSON-ENCODED MESSAGE TO “ALL CHILDREN” (parent only) ──
         func broadcastToChildren(_ msg: TimerMessage) {
             guard role == .parent else { return }
+            var outbound = msg
+            if isControlAction(outbound.action) {
+                if outbound.actionSeq == nil {
+                    actionSeqCounter &+= 1
+                    outbound.actionSeq = actionSeqCounter
+                }
+                outbound.actionKind = outbound.action
+            }
             let encoder = JSONEncoder()
-            guard let data = try? encoder.encode(msg) else { return }
+            guard let data = try? encoder.encode(outbound) else { return }
             let framed = data + Data([0x0A])   // newline-delimit each JSON packet
     
             // ① Existing LAN path (TCP/Bonjour)
             for conn in childConnections {
                 conn.send(content: framed, completion: .contentProcessed({ _ in }))
             }
-            ConnectivityManager.shared.send(msg)
+            ConnectivityManager.shared.send(outbound)
     
             // ② NEW: BLE path (notify subscribed centrals)
             if connectionMethod == .bluetooth {
-                bleDriftManager.sendTimerMessageToChildren(msg)
+                bleDriftManager.sendTimerMessageToChildren(outbound)
             }
         }
 
@@ -4216,6 +4234,7 @@ struct MainScreen: View {
     @State private var playbackStopAnchorElapsedNs: UInt64? = nil
     @State private var playbackStopAnchorUptimeNs: UInt64? = nil
     @State private var lastAppliedPlaybackSeq: UInt64 = 0
+    @State private var lastAppliedControlActionSeq: UInt64 = 0
     @State private var lastStopFinalSettleSeq: UInt64? = nil
     @State private var lastStopBurstSeq: UInt64? = nil
     @State private var lastStopAnchorElapsedNs: UInt64? = nil
@@ -6983,7 +7002,9 @@ struct MainScreen: View {
         guard playbackStopAnchorElapsedNs == nil else { return }
         playbackStopAnchorUptimeNs = DispatchTime.now().uptimeNanoseconds
         playbackStopAnchorElapsedNs = elapsedToNs(elapsedSeconds)
-        if syncSettings.role == .parent, syncSettings.isEnabled {
+        if syncSettings.role == .parent,
+           syncSettings.isEnabled,
+           syncSettings.connectionMethod != .bluetooth {
             syncSettings.clockSyncService?.requestBurstSyncSamples(count: stopSettleBurstCount,
                                                                    spacingMs: stopSettleBurstSpacingMs)
         }
@@ -7044,8 +7065,10 @@ struct MainScreen: View {
         guard phase != .running else { return }
         let token = seq ?? 0
         if let last = lastStopBurstSeq, last == token { return }
-        syncSettings.clockSyncService?.requestBurstSyncSamples(count: stopSettleBurstCount,
-                                                               spacingMs: stopSettleBurstSpacingMs)
+        if syncSettings.connectionMethod != .bluetooth {
+            syncSettings.clockSyncService?.requestBurstSyncSamples(count: stopSettleBurstCount,
+                                                                   spacingMs: stopSettleBurstSpacingMs)
+        }
         lastStopBurstSeq = token
     }
 
@@ -7666,7 +7689,9 @@ struct MainScreen: View {
                 syncSettings.broadcastToChildren(m)
             }
             broadcastPlaybackStateIfNeeded()
-            if syncSettings.role == .parent && syncSettings.isEnabled {
+            if syncSettings.role == .parent,
+               syncSettings.isEnabled,
+               syncSettings.connectionMethod != .bluetooth {
                 syncSettings.clockSyncService?.requestBurstSyncSamples(count: 3, spacingMs: 40)
             }
             
@@ -7919,6 +7944,16 @@ struct MainScreen: View {
     func applyIncomingTimerMessage(_ msg: TimerMessage) {
         guard syncSettings.role == .child else { return }
         
+        let isControlAction = (msg.action == .pause || msg.action == .reset || msg.action == .start)
+        if isControlAction, syncSettings.connectionMethod == .bluetooth {
+            let receiveTime = Date().timeIntervalSince1970
+            if let seq = msg.actionSeq {
+                print("[BLE Child] control recv action=\(msg.action) seq=\(seq) t=\(receiveTime)")
+            } else {
+                print("[BLE Child] control recv action=\(msg.action) seq=<nil> t=\(receiveTime)")
+            }
+        }
+
         // Centisecond quantizer to keep visuals identical across devices
                 @inline(__always) func qcs(_ t: TimeInterval) -> TimeInterval {
                     return Double(Int((t * 100).rounded())) / 100.0
@@ -8050,6 +8085,13 @@ struct MainScreen: View {
                     rebuildChildDisplayEvents()
 
                 }
+        if isControlAction,
+           syncSettings.connectionMethod == .bluetooth,
+           let seq = msg.actionSeq {
+            lastAppliedControlActionSeq = max(lastAppliedControlActionSeq, seq)
+            print("[BLE Child] applied control action=\(msg.action) seq=\(seq)")
+            syncSettings.bleDriftManager.sendControlAck(seq: seq)
+        }
         if phase == .running || phase == .paused {
             let displayElapsed = isChildDevice ? childDisplayElapsed : elapsed
             consumeDecorativesUpTo(displayElapsed)

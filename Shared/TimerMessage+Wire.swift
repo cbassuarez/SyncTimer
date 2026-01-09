@@ -42,6 +42,8 @@ public struct TimerMessage: Codable, Equatable {
     }
 
     public var action   : Action
+    public var actionSeq: UInt64?
+    public var actionKind: Action?
     public var timestamp: TimeInterval
     public var phase    : String
     public var remaining: TimeInterval
@@ -74,6 +76,8 @@ public struct TimerMessage: Codable, Equatable {
     /// Optional, only set by the **parent**. Mirrored read-only on children.
         var notesParent: String?
     public init(action: Action,
+                  actionSeq: UInt64? = nil,
+                  actionKind: Action? = nil,
                   timestamp: TimeInterval,
                   phase: String,
                   remaining: TimeInterval,
@@ -95,6 +99,8 @@ public struct TimerMessage: Codable, Equatable {
                       assetRequests: [UUID]? = nil,
                       assetChunks: [CueAssetChunk]? = nil) {
           self.action            = action
+          self.actionSeq         = actionSeq
+          self.actionKind        = actionKind
           self.timestamp         = timestamp
           self.phase             = phase
           self.remaining         = remaining
