@@ -4143,9 +4143,13 @@ struct MainScreen: View {
     @State private var loadedCueSheet: CueSheet? = nil
     @State private var pendingPlaybackState: PlaybackState? = nil
     
-    @State private var sheetDecorativeEvents: [Event] = []   // .message + .image from the loaded sheet
+    @State private var childDecorativeSchedule: [Event] = [] // .message + .image from the loaded sheet
+    @State private var childDecorativeCursor: Int = 0
     @State private var childWireCues: [Event] = []           // last-known cue wires from parent
     @State private var childWireRestarts: [Event] = []       // last-known restart wires from parent
+    private var isChildDevice: Bool {
+        syncSettings.role == .child || settings.simulateChildMode
+    }
     
     func apply(_ sheet: CueSheet) {
 
@@ -4181,26 +4185,22 @@ struct MainScreen: View {
                 }
             }
         
-        sheetDecorativeEvents = mapped.filter {
+        let decorative = mapped.filter {
             if case .message = $0 { return true }
             if case .image   = $0 { return true }
             return false
         }
 
-        childWireCues = mapped.filter {
-            if case .cue = $0 { return true }
-            return false
-        }
-
-        childWireRestarts = mapped.filter {
-            if case .restart = $0 { return true }
-            return false
-        }
-
-        events = mapped
-        // Keep rawStops in sync so the stop loop/timer logic continues to work
-        rawStops = mapped.compactMap {
-            if case let .stop(s) = $0 { return s } else { return nil }
+        if isChildDevice {
+            childDecorativeSchedule = decorative.sorted { $0.fireTime < $1.fireTime }
+            childDecorativeCursor = 0
+            rebuildChildDisplayEvents()
+        } else {
+            events = mapped
+            // Keep rawStops in sync so the stop loop/timer logic continues to work
+            rawStops = mapped.compactMap {
+                if case let .stop(s) = $0 { return s } else { return nil }
+            }
         }
     }
 
@@ -6914,6 +6914,10 @@ struct MainScreen: View {
 
         // 2) Advance the main clock (do this BEFORE event checks)
         elapsed = Date().timeIntervalSince(startDate ?? Date())
+        if isChildDevice {
+            consumeDecorativesUpTo(elapsed)
+            return
+        }
         cueDisplay.apply(elapsed: elapsed)
         
         // 4) Handle next due event
@@ -7580,15 +7584,38 @@ struct MainScreen: View {
         }
     }
     
-    private func rebuildChildEventsFromCaches() {
+    private func rebuildChildDisplayEvents() {
         var combined: [Event] =
             rawStops.map(Event.stop) +
             childWireCues +
-            childWireRestarts +
-            sheetDecorativeEvents
-
+            childWireRestarts
+        if childDecorativeCursor < childDecorativeSchedule.count {
+            combined += childDecorativeSchedule[childDecorativeCursor...]
+        }
         combined.sort { $0.fireTime < $1.fireTime }
         events = combined
+    }
+
+    private func quantizeCentiseconds(_ time: TimeInterval) -> TimeInterval {
+        Double(Int((time * 100).rounded())) / 100.0
+    }
+
+    private func consumeDecorativesUpTo(_ elapsedTime: TimeInterval) {
+        cueDisplay.apply(elapsed: elapsedTime)
+        let target = quantizeCentiseconds(elapsedTime)
+        var newCursor = childDecorativeCursor
+        while newCursor < childDecorativeSchedule.count {
+            let eventTime = quantizeCentiseconds(childDecorativeSchedule[newCursor].fireTime)
+            if eventTime <= target {
+                newCursor += 1
+            } else {
+                break
+            }
+        }
+        if newCursor != childDecorativeCursor {
+            childDecorativeCursor = newCursor
+            rebuildChildDisplayEvents()
+        }
     }
 
     func applyIncomingTimerMessage(_ msg: TimerMessage) {
@@ -7602,7 +7629,6 @@ struct MainScreen: View {
                 let now = Date().timeIntervalSince1970
                 let delta = max(0, now - msg.timestamp) // never negative
         
-        // Rebuild *all* events from wires
         // Always refresh stops (TimerMessage always carries these)
         rawStops = msg.stopEvents.map { StopEvent(eventTime: $0.eventTime, duration: $0.duration) }
         syncSettings.stopWires = msg.stopEvents
@@ -7615,10 +7641,7 @@ struct MainScreen: View {
             childWireRestarts = rstWires.map { .restart(RestartEvent(restartTime: $0.restartTime)) }
         }
 
-        // Rebuild full list (wire stops/cues/restarts + sheet message/image)
-        rebuildChildEventsFromCaches()
-
-                syncSettings.stopWires = msg.stopEvents
+        rebuildChildDisplayEvents()
         
         // Mirror parent's note and sheet label when provided
                 notesParent = msg.notesParent ?? ""
@@ -7656,6 +7679,12 @@ struct MainScreen: View {
                                 elapsed = 0
                                 stopActive = false
                                 stopRemaining = 0
+                    childDecorativeCursor = 0
+                    cueDisplay.reset()
+                    if let sheet = loadedCueSheet {
+                        cueDisplay.buildTimeline(from: sheet)
+                    }
+                    rebuildChildDisplayEvents()
             
         case .update:
             if msg.phase == "countdown" {
@@ -7684,9 +7713,12 @@ struct MainScreen: View {
                         }
                 case .addEvent:
                     // caches were already updated at the top of this function (when arrays are present)
-                    rebuildChildEventsFromCaches()
+                    rebuildChildDisplayEvents()
 
                 }
+        if phase == .running || phase == .paused {
+            consumeDecorativesUpTo(elapsed)
+        }
     }
     
 
