@@ -7509,6 +7509,16 @@ struct MainScreen: View {
             cueBadge.setFallbackLabel(sheetBadgeLabel(for: sheet), broadcast: true)
             NotificationCenter.default.post(name: .didLoadCueSheet, object: sheet)
             CueLibraryStore.shared.prefetchImages(in: sheet)
+            #if DEBUG
+            let assetIDs = Set(sheet.events.compactMap { event -> UUID? in
+                if case .image(let payload)? = event.payload { return payload.assetID }
+                return nil
+            })
+            if !assetIDs.isEmpty {
+                let missing = assetIDs.filter { CueLibraryStore.assetDataFromDisk(id: $0) == nil }.count
+                print("🧩 [Assets] missing \(missing)/\(assetIDs.count) local images")
+            }
+            #endif
 
             if let pending = pending,
                pending.sheetID == sheet.id,

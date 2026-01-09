@@ -30,12 +30,20 @@ final class BLEDriftManager: NSObject {
     private var peripheralManager: CBPeripheralManager!
     private var driftCharacteristic: CBMutableCharacteristic?
     private var driftTimer: Timer?
+    private var notifyQueue: [Data] = []
+    private var isFlushing = false
     
     
     // MARK: – Child (Central) side
     private var centralManager: CBCentralManager!
     private var discoveredPeripheral: CBPeripheral?
     private var driftCharOnPeripheral: CBCharacteristic?
+    private struct Reassembly {
+        var chunkCount: Int
+        var chunks: [Int: Data]
+        var lastUpdated: TimeInterval
+    }
+    private var reassembly: [UUID: Reassembly] = [:]
     
     // Remember whether we’re supposed to be “started” as parent or child.
     // Once powered on, the delegate method will pick up this flag.
@@ -305,6 +313,38 @@ final class BLEDriftManager: NSObject {
             )
         }
     }
+
+    private func enqueueAndFlush(_ packet: Data) {
+        notifyQueue.append(packet)
+        flushNotifyQueue()
+    }
+
+    private func flushNotifyQueue() {
+        guard shouldActAsParent,
+              let characteristic = driftCharacteristic,
+              !(characteristic.subscribedCentrals?.isEmpty ?? true)
+        else { return }
+        guard !isFlushing else { return }
+        isFlushing = true
+        while !notifyQueue.isEmpty {
+            let next = notifyQueue[0]
+            let sent = peripheralManager.updateValue(next,
+                                                     for: characteristic,
+                                                     onSubscribedCentrals: nil)
+            if !sent {
+                #if DEBUG
+                print("📡 [BLE] backpressure: queued \(notifyQueue.count) packets")
+                #endif
+                break
+            }
+            notifyQueue.removeFirst()
+        }
+        isFlushing = false
+    }
+
+    private var maxNotifyLen: Int {
+        peripheralManager.maximumUpdateValueLength
+    }
 }
 
 // ───────────────────────────────────────────────────────────────────
@@ -387,6 +427,10 @@ extension BLEDriftManager: CBPeripheralManagerDelegate {
             }
             peripheral.respond(to: req, withResult: .success)
         }
+    }
+
+    func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager) {
+        flushNotifyQueue()
     }
 }
 
@@ -613,7 +657,7 @@ extension BLEDriftManager: CBCentralManagerDelegate, CBPeripheralDelegate {
             // Only bother if at least one child is subscribed
             if (characteristic.subscribedCentrals?.isEmpty ?? true) { return }
             guard let data = try? JSONEncoder().encode(msg) else { return }
-            _ = peripheralManager.updateValue(data, for: characteristic, onSubscribedCentrals: nil)
+            enqueueAndFlush(data)
         }
 
         /// Child → parent (optional symmetry; harmless if unused)
@@ -627,7 +671,42 @@ extension BLEDriftManager: CBCentralManagerDelegate, CBPeripheralDelegate {
             guard shouldActAsParent, let characteristic = driftCharacteristic else { return }
             if (characteristic.subscribedCentrals?.isEmpty ?? true) { return }
             guard let data = try? JSONEncoder().encode(envelope) else { return }
-            _ = peripheralManager.updateValue(data, for: characteristic, onSubscribedCentrals: nil)
+            let maxLen = maxNotifyLen
+            if data.count <= maxLen {
+                #if DEBUG
+                print("📡 [BLE] SyncEnvelope \(data.count) bytes (unchunked)")
+                #endif
+                enqueueAndFlush(data)
+                return
+            }
+
+            let headerLen = 23
+            let maxPayload = maxLen - headerLen
+            guard maxPayload > 0 else {
+                #if DEBUG
+                print("⚠️ [BLE] SyncEnvelope \(data.count) bytes could not chunk (maxNotifyLen=\(maxLen))")
+                #endif
+                return
+            }
+            let messageID = UUID()
+            let chunkCount = Int(ceil(Double(data.count) / Double(maxPayload)))
+            #if DEBUG
+            print("📡 [BLE] SyncEnvelope \(data.count) bytes → \(chunkCount) chunks")
+            #endif
+            for index in 0..<chunkCount {
+                let start = index * maxPayload
+                let end = min(start + maxPayload, data.count)
+                let payload = data.subdata(in: start..<end)
+                var frame = Data()
+                frame.append(0xFF)
+                frame.append(0x01)
+                frame.append(0x01)
+                frame.append(contentsOf: messageID.uuidBytes)
+                frame.append(contentsOf: UInt16(index).bigEndianBytes)
+                frame.append(contentsOf: UInt16(chunkCount).bigEndianBytes)
+                frame.append(payload)
+                enqueueAndFlush(frame)
+            }
         }
 
         func sendSyncEnvelopeToParent(_ envelope: SyncEnvelope) {
@@ -646,29 +725,11 @@ extension BLEDriftManager: CBCentralManagerDelegate, CBPeripheralDelegate {
         guard let data = characteristic.value else { return }
         lastPacketAt = Date().timeIntervalSince1970
 
-        // ① Try full timer control first (parent → child)
-        if let msg = try? JSONDecoder().decode(TimerMessage.self, from: data) {
-            DispatchQueue.main.async { [weak self] in
-                self?.owner?.onReceiveTimer?(msg)
-                self?.owner?.setEstablished(true) // keep lamp green while control flows
-            }
+        if data.first == 0xFF {
+            handleChunkedPacket(data)
             return
         }
-        if let envelope = try? JSONDecoder().decode(SyncEnvelope.self, from: data) {
-            DispatchQueue.main.async { [weak self] in
-                self?.owner?.receiveSyncEnvelope(envelope)
-                self?.owner?.setEstablished(true)
-            }
-            return
-        }
-        // ② Fall back to drift protocol
-        if let req = try? JSONDecoder().decode(DriftRequest.self, from: data) {
-            handleDriftRequest(req)
-        } else if let _ = try? JSONDecoder().decode(Double.self, from: data) {
-                    handleDriftCorrection(data)
-                } else {
-                    print("Child: Unexpected BLE packet")
-                }
+        handleIncomingData(data)
     }
     private func cleanupPeripheral(_ peripheral: CBPeripheral) {
         driftCharOnPeripheral   = nil
@@ -676,6 +737,135 @@ extension BLEDriftManager: CBCentralManagerDelegate, CBPeripheralDelegate {
     }
 }
 
+private extension BLEDriftManager {
+    func handleChunkedPacket(_ data: Data) {
+        let headerLen = 23
+        guard data.count >= headerLen else {
+            #if DEBUG
+            print("⚠️ [BLE] chunk header too short (\(data.count) bytes)")
+            #endif
+            return
+        }
+        let version = data[1]
+        guard version == 0x01 else {
+            #if DEBUG
+            print("⚠️ [BLE] chunk version unsupported: \(version)")
+            #endif
+            return
+        }
+        let kind = data[2]
+        guard kind == 0x01 else {
+            #if DEBUG
+            print("⚠️ [BLE] chunk kind unsupported: \(kind)")
+            #endif
+            return
+        }
+        let uuidBytes = Array(data[3..<19])
+        let messageID = UUID(uuidBytes: uuidBytes)
+        guard let chunkIndex = readUInt16(from: data, offset: 19),
+              let chunkCount = readUInt16(from: data, offset: 21)
+        else { return }
+        let chunkIndexInt = Int(chunkIndex)
+        let chunkCountInt = Int(chunkCount)
+        guard chunkCountInt > 0, chunkIndexInt < chunkCountInt else {
+            #if DEBUG
+            print("⚠️ [BLE] chunk index out of range \(chunkIndexInt)/\(chunkCountInt)")
+            #endif
+            return
+        }
+        let payload = data.subdata(in: headerLen..<data.count)
+        let now = Date().timeIntervalSince1970
+        pruneReassembly(now: now)
+        var entry = reassembly[messageID] ?? Reassembly(chunkCount: chunkCountInt,
+                                                        chunks: [:],
+                                                        lastUpdated: now)
+        if entry.chunkCount != chunkCountInt {
+            entry = Reassembly(chunkCount: chunkCountInt, chunks: [:], lastUpdated: now)
+        }
+        entry.chunks[chunkIndexInt] = payload
+        entry.lastUpdated = now
+        reassembly[messageID] = entry
+        guard entry.chunks.count == chunkCountInt else { return }
+
+        var assembled = Data()
+        for index in 0..<chunkCountInt {
+            guard let chunk = entry.chunks[index] else { return }
+            assembled.append(chunk)
+        }
+        reassembly.removeValue(forKey: messageID)
+        if !handleIncomingData(assembled) {
+            #if DEBUG
+            print("⚠️ [BLE] reassembly decode failed \(messageID)")
+            #endif
+        }
+    }
+
+    func pruneReassembly(now: TimeInterval) {
+        let staleIDs = reassembly.filter { now - $0.value.lastUpdated > 5.0 }.map(\.key)
+        for id in staleIDs {
+            reassembly.removeValue(forKey: id)
+        }
+    }
+
+    @discardableResult
+    func handleIncomingData(_ data: Data) -> Bool {
+        let decoder = JSONDecoder()
+        if let msg = try? decoder.decode(TimerMessage.self, from: data) {
+            DispatchQueue.main.async { [weak self] in
+                self?.owner?.onReceiveTimer?(msg)
+                self?.owner?.setEstablished(true) // keep lamp green while control flows
+            }
+            return true
+        }
+        if let envelope = try? decoder.decode(SyncEnvelope.self, from: data) {
+            DispatchQueue.main.async { [weak self] in
+                self?.owner?.receiveSyncEnvelope(envelope)
+                self?.owner?.setEstablished(true)
+            }
+            return true
+        }
+        if let req = try? decoder.decode(DriftRequest.self, from: data) {
+            handleDriftRequest(req)
+            return true
+        }
+        if let _ = try? decoder.decode(Double.self, from: data) {
+            handleDriftCorrection(data)
+            return true
+        }
+        print("Child: Unexpected BLE packet")
+        return false
+    }
+
+    func readUInt16(from data: Data, offset: Int) -> UInt16? {
+        guard data.count >= offset + 2 else { return nil }
+        return (UInt16(data[offset]) << 8) | UInt16(data[offset + 1])
+    }
+}
+
 extension Notification.Name {
     static let driftCorrectionReceived = Notification.Name("driftCorrectionReceived")
+}
+
+private extension UUID {
+    init(uuidBytes: [UInt8]) {
+        if uuidBytes.count == 16 {
+            self = UUID(uuid: (uuidBytes[0], uuidBytes[1], uuidBytes[2], uuidBytes[3],
+                               uuidBytes[4], uuidBytes[5], uuidBytes[6], uuidBytes[7],
+                               uuidBytes[8], uuidBytes[9], uuidBytes[10], uuidBytes[11],
+                               uuidBytes[12], uuidBytes[13], uuidBytes[14], uuidBytes[15]))
+        } else {
+            self = UUID()
+        }
+    }
+
+    var uuidBytes: [UInt8] {
+        withUnsafeBytes(of: uuid) { Array($0) }
+    }
+}
+
+private extension UInt16 {
+    var bigEndianBytes: [UInt8] {
+        let value = self.bigEndian
+        return [UInt8(value >> 8), UInt8(value & 0x00FF)]
+    }
 }
