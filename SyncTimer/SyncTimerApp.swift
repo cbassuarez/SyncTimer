@@ -54,6 +54,7 @@ extension Notification.Name {
     /// Toasts etc. after "Open in SyncTimer" imports an XML
     static let didImportCueSheet = Notification.Name("didImportCueSheet")
     /// A cue sheet has been loaded (either local load or broadcast-accept)
+    static let whatsNewOpenCueSheets = Notification.Name("whatsNewOpenCueSheets")
 }
 
 extension SyncSettings.SyncConnectionMethod: SegmentedOption {
@@ -5749,6 +5750,9 @@ struct MainScreen: View {
                     guard let sheet = note.object as? CueSheet else { return }
                     mapEvents(from: sheet)
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .whatsNewOpenCueSheets)) { _ in
+                    showCueSheets = true
+                }
             // Stable SwiftUI sheet presenter (medium/large detents are defined inside CueSheetsSheet)
                 .sheet(isPresented: $showCueSheets) {
                     CueSheetsSheet(
@@ -9070,6 +9074,7 @@ struct ConnectionPage: View {
     @State private var isWifiAvailable = false
     private let wifiMonitor = NWPathMonitor(requiredInterfaceType: .wifi)
     @State private var showJoinSheet = false
+    @AppStorage("whatsnew.pendingJoin") private var pendingJoinFromWhatsNew: Bool = false
     
     // Treat default/sentinel ports as "unset" for display-only
         private func isUnsetPort(_ s: String) -> Bool {
@@ -9617,6 +9622,10 @@ struct ConnectionPage: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(20)
         .onAppear {
+            if pendingJoinFromWhatsNew {
+                pendingJoinFromWhatsNew = false
+                showJoinSheet = true
+            }
               ensureValidListenPortIfNeeded()
               wifiMonitor.pathUpdateHandler = { path in
                 DispatchQueue.main.async {
@@ -9628,6 +9637,11 @@ struct ConnectionPage: View {
             .onDisappear {
               wifiMonitor.cancel()
             }
+        .onChange(of: pendingJoinFromWhatsNew) { newValue in
+            guard newValue else { return }
+            pendingJoinFromWhatsNew = false
+            showJoinSheet = true
+        }
         
         // ── placeholder blinking logic ─────────────────────────────────
         .onReceive(placeholderTimer) { _ in
@@ -12623,6 +12637,7 @@ struct AboutPage: View {
     let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
     let build   = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
     @EnvironmentObject private var appSettings: AppSettings
+    @EnvironmentObject private var whatsNewCoordinator: WhatsNewCoordinator
     
     
     
@@ -12773,6 +12788,14 @@ struct AboutPage: View {
                 .padding(.bottom, 8)
 
                 
+                Divider().opacity(0.5)
+                Button {
+                    whatsNewCoordinator.forcePresent(currentVersion: WhatsNewCoordinator.currentVersionString)
+                } label: {
+                    Label("What’s New", systemImage: "sparkles")
+                        .font(.custom("Roboto-Regular", size: 16))
+                        .tint(appSettings.appTheme == .dark ? .white : .gray)
+                }
                 Divider().opacity(0.5)
                 Text("Roboto font family\nCopyright 2011 Google Inc.\nApache License 2.0")
                     .font(.custom("Roboto-Light", size: 14))
@@ -14005,11 +14028,13 @@ struct ContentView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var syncSettings: SyncSettings
     @EnvironmentObject private var joinRouter: JoinRouter
+    @EnvironmentObject private var whatsNewCoordinator: WhatsNewCoordinator
     @Environment(\.openURL) private var openURL
     
     @AppStorage("settingsPage") private var settingsPage = 0
     @State private var showSettings = false
     @State private var mainMode: ViewMode = .sync
+    @AppStorage("whatsnew.pendingJoin") private var pendingJoinFromWhatsNew: Bool = false
     
     @AppStorage("hasSeenWalkthrough") private var hasSeenWalkthrough: Bool = false
     @State private var showSyncErrorAlert = false
@@ -14147,6 +14172,19 @@ innerBody
             .environmentObject(syncSettings)
             .preferredColorScheme(settings.appTheme == .dark ? .dark : .light)
         }
+        .sheet(isPresented: $whatsNewCoordinator.isPresented, onDismiss: {
+            whatsNewCoordinator.markSeen(currentVersion: WhatsNewCoordinator.currentVersionString)
+        }) {
+            WhatsNewSheet(
+                onJoinNow: { openJoinFromWhatsNew() },
+                onOpenCueSheets: { openCueSheetsFromWhatsNew() },
+                onTestSync: { openTestSyncFromWhatsNew() },
+                onViewReleaseNotes: { openURL(ReleaseNotes.url) },
+                onDismiss: { dismissWhatsNew() }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
         .alert(isPresented: $showSyncErrorAlert) {
             Alert(title: Text("Cannot Start Sync"),
                   message: Text(syncErrorMessage),
@@ -14183,6 +14221,7 @@ innerBody
             }
         }
         .onAppear {
+            whatsNewCoordinator.checkAndPresentIfNeeded(currentVersion: WhatsNewCoordinator.currentVersionString)
             guard !didCheckJoinHandoff else { return }
             didCheckJoinHandoff = true
             joinRouter.ingestAppGroupPendingIfAny()
@@ -14201,10 +14240,40 @@ innerBody
             guard established, syncSettings.role == .child else { return }
             persistChildRoomOnEstablished()
         }
+        .onChange(of: whatsNewCoordinator.isPresented) { isPresented in
+            if isPresented {
+                showSettings = false
+            }
+        }
         .environmentObject(childRoomsStore)
     }
 
     private static let appStoreURLString = "https://apps.apple.com/app/id0000000000"
+
+    private func dismissWhatsNew() {
+        whatsNewCoordinator.markSeen(currentVersion: WhatsNewCoordinator.currentVersionString)
+        whatsNewCoordinator.isPresented = false
+    }
+
+    private func openJoinFromWhatsNew() {
+        dismissWhatsNew()
+        settingsPage = 2
+        pendingJoinFromWhatsNew = true
+        showSettings = true
+    }
+
+    private func openCueSheetsFromWhatsNew() {
+        dismissWhatsNew()
+        mainMode = .sync
+        showSettings = false
+        NotificationCenter.default.post(name: .whatsNewOpenCueSheets, object: nil)
+    }
+
+    private func openTestSyncFromWhatsNew() {
+        dismissWhatsNew()
+        mainMode = .sync
+        showSettings = false
+    }
 
     private func applyJoinIfReady() {
         guard let request = joinRouter.pending else { return }
@@ -14451,6 +14520,7 @@ struct SyncTimerApp: App {
     @StateObject private var clockSync = ClockSyncService()
     @StateObject private var syncSettings = SyncSettings()
     @StateObject private var joinRouter = JoinRouter()
+    @StateObject private var whatsNewCoordinator = WhatsNewCoordinator()
     @AppStorage("settingsPage") private var settingsPage = 0
     @State private var editingTarget: EditableField? = nil
     @State private var inputText       = ""
@@ -14544,6 +14614,7 @@ if WCSession.isSupported() {
                     .environmentObject(clockSync)
                     .environmentObject(cueBadge)
                     .environmentObject(joinRouter)
+                    .environmentObject(whatsNewCoordinator)
                     .preferredColorScheme(appSettings.appTheme == .dark ? .dark : .light)
                     .dynamicTypeSize(.small ... .large)
             // “Open in SyncTimer” from Files/Share Sheet (XML only)
