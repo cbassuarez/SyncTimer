@@ -15,6 +15,8 @@ struct JoinHandoffStoreTests {
             hostUUIDs: [host],
             roomLabel: "Test Room",
             deviceNames: ["Host 1"],
+            peerIP: nil,
+            peerPort: nil,
             selectedHostUUID: nil,
             minBuild: nil,
             sourceURL: "https://synctimerapp.com/join"
@@ -37,6 +39,8 @@ struct JoinHandoffStoreTests {
             hostUUIDs: [host],
             roomLabel: nil,
             deviceNames: ["Host 1"],
+            peerIP: nil,
+            peerPort: nil,
             selectedHostUUID: nil,
             minBuild: nil,
             sourceURL: "https://synctimerapp.com/join"
@@ -60,6 +64,8 @@ struct JoinHandoffStoreTests {
             hostUUIDs: [host],
             roomLabel: nil,
             deviceNames: ["Host 1"],
+            peerIP: nil,
+            peerPort: nil,
             selectedHostUUID: nil,
             minBuild: nil,
             sourceURL: "https://synctimerapp.com/join"

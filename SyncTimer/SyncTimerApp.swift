@@ -9942,6 +9942,8 @@ private struct JoinTabView: View {
                 errorCard(message: scanError)
             } else if let request = lastRequest {
                 joinActionsCard(for: request)
+            } else if let joinError = joinRouter.lastJoinUserFacingError {
+                incompleteWiFiCard(message: joinError)
             }
         }
         .onAppear {
@@ -10023,6 +10025,9 @@ private struct JoinTabView: View {
     }
 
     private var statusText: String {
+        if joinRouter.lastJoinUserFacingError != nil {
+            return "Wi-Fi join needs IP/Port."
+        }
         if let scanError {
             return "Invalid QR. Try again."
         }
@@ -10121,6 +10126,7 @@ private struct JoinTabView: View {
         isScanning = true
         lastRequest = nil
         lastJoinRequest = nil
+        joinRouter.clearJoinUserFacingError()
         scanResetToken = UUID()
     }
 
@@ -10175,6 +10181,28 @@ private struct JoinTabView: View {
                 resetScanner()
             }
             .font(.custom("Roboto-SemiBold", size: 14))
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private func incompleteWiFiCard(message: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(message)
+                .font(.custom("Roboto-Regular", size: 14))
+            HStack(spacing: 10) {
+                Button("Switch to Nearby") {
+                    joinRouter.retryIncompleteWiFiAsNearby()
+                }
+                .font(.custom("Roboto-SemiBold", size: 14))
+                Button("Rescan") {
+                    resetScanner()
+                }
+                .font(.custom("Roboto-SemiBold", size: 14))
+            }
+            .buttonStyle(.borderless)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -10588,6 +10616,11 @@ private struct GenerateJoinQRSheet: View {
         // single shared label (even if multiple hosts/device_names)
         items.append(.init(name: "room_label", value: roomLabelForSharing))
 
+        if let endpoint = wifiJoinEndpoint {
+            items.append(.init(name: "ip", value: endpoint.ip))
+            items.append(.init(name: "port", value: String(endpoint.port)))
+        }
+
         // Legacy hint only if bonjour is actually the stored method
         if syncSettings.connectionMethod == .bonjour {
             items.append(.init(name: "transport_hint", value: "bonjour"))
@@ -10643,6 +10676,16 @@ private struct GenerateJoinQRSheet: View {
         return !(49153...65534).contains(p)
     }
 
+    private func generateEphemeralPort() -> UInt16 {
+        UInt16.random(in: 49153...65534)
+    }
+
+    private func ensureValidListenPortIfNeeded() {
+        if isUnsetPort(syncSettings.listenPort) {
+            syncSettings.listenPort = String(generateEphemeralPort())
+        }
+    }
+
     private func connectionLabel(for method: SyncSettings.SyncConnectionMethod) -> String {
         switch method {
         case .network:   return "Wi-Fi"
@@ -10654,6 +10697,18 @@ private struct GenerateJoinQRSheet: View {
 
     private var ipString: String {
         getLocalIPAddress() ?? "Not on Wi-Fi"
+    }
+
+    private var wifiJoinEndpoint: (ip: String, port: UInt16)? {
+        guard joinMode == "wifi" else { return nil }
+        guard let ip = getLocalIPAddress(), !ip.isEmpty else { return nil }
+        guard let port = UInt16(syncSettings.listenPort),
+              (49153...65534).contains(port) else { return nil }
+        return (ip, port)
+    }
+
+    private var isWiFiJoinReady: Bool {
+        joinMode != "wifi" || wifiJoinEndpoint != nil
     }
 
     private func hapticSuccess() {
@@ -10999,6 +11054,9 @@ private enum AppAsset {
         Haptics.light()
         stopSyncIfRunning()
         syncSettings.connectionMethod = desired
+        if desired == .network {
+            ensureValidListenPortIfNeeded()
+        }
     }
 
 
@@ -11196,6 +11254,7 @@ private enum AppAsset {
                              detail: String? = nil,
                              leadingSymbol: String,
                              key: CopyKey? = nil,
+                             disabled: Bool = false,
                              action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
@@ -11237,6 +11296,8 @@ private enum AppAsset {
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.primary.opacity(0.08), lineWidth: 1))
         }
         .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.55 : 1.0)
     }
 
     private var headerView: some View {
@@ -11461,9 +11522,15 @@ private enum AppAsset {
 
             // Primary + Secondary actions (reduced above-the-fold weight)
             VStack(spacing: 10) {
+                if !isWiFiJoinReady, joinMode == "wifi" {
+                    Text("Connect to Wi-Fi to share a Wi-Fi join link.")
+                        .font(.custom("Roboto-Regular", size: 12))
+                        .foregroundColor(.secondary)
+                }
+
                 glassPrimaryButton(label: "Show QR",
                                    systemImage: "qrcode",
-                                   disabled: (syncSettings.role != .parent)) {
+                                   disabled: (syncSettings.role != .parent || !isWiFiJoinReady)) {
                     Haptics.light()
                     if reduceMotion {
                         showQRModal = true
@@ -11492,22 +11559,22 @@ private enum AppAsset {
                     }
                     .simultaneousGesture(TapGesture().onEnded { Haptics.light() })
                     .buttonStyle(.plain)
-                    .disabled(syncSettings.role != .parent)
-                    .opacity(syncSettings.role != .parent ? 0.55 : 1.0)
+                    .disabled(syncSettings.role != .parent || !isWiFiJoinReady)
+                    .opacity(syncSettings.role != .parent || !isWiFiJoinReady ? 0.55 : 1.0)
 
                     #if canImport(UIKit)
                     glassSecondaryButton(label: "Print", systemImage: "printer") {
                         Haptics.light()
                         printJoinQR()
                     }
-                    .disabled(syncSettings.role != .parent)
-                    .opacity(syncSettings.role != .parent ? 0.55 : 1.0)
+                    .disabled(syncSettings.role != .parent || !isWiFiJoinReady)
+                    .opacity(syncSettings.role != .parent || !isWiFiJoinReady ? 0.55 : 1.0)
                     #endif
                 }
 
                 .buttonStyle(.plain)
-                .disabled(syncSettings.role != .parent)
-                .opacity(syncSettings.role != .parent ? 0.55 : 1.0)
+                .disabled(syncSettings.role != .parent || !isWiFiJoinReady)
+                .opacity(syncSettings.role != .parent || !isWiFiJoinReady ? 0.55 : 1.0)
             }
             
             
@@ -11537,7 +11604,8 @@ private enum AppAsset {
                     advancedRow(title: "Copy Join link",
                                 detail: nil,
                                 leadingSymbol: "link",
-                                key: .link) {
+                                key: .link,
+                                disabled: (syncSettings.role != .parent || !isWiFiJoinReady)) {
                         copyToPasteboard(joinAppClipURLString, key: .link, toast: "Join link copied")
                     }
 
@@ -11805,6 +11873,11 @@ private enum AppAsset {
 
         // optional: keep system dimming but prevent weird “card” feel
         .presentationBackgroundInteraction(.disabled)
+        .onAppear {
+            if joinMode == "wifi" {
+                ensureValidListenPortIfNeeded()
+            }
+        }
     }
 
     private struct JoinQRStageOverlay: View {
@@ -13873,6 +13946,16 @@ innerBody
             allowed: Set(request.hostUUIDs),
             selected: request.selectedHostUUID
         )
+        if resolvedMethod == .network {
+            guard let ip = request.peerIP?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !ip.isEmpty,
+                  let port = request.peerPort else {
+                joinRouter.recordIncompleteWiFiJoin(request)
+                return
+            }
+            syncSettings.peerIP = ip
+            syncSettings.peerPort = String(port)
+        }
         syncSettings.startChild()
         if resolvedMethod == .bluetooth, syncSettings.tapPairingAvailable {
                     syncSettings.beginTapPairing()
