@@ -1,48 +1,68 @@
 import Foundation
 
 struct Room: Identifiable, Codable, Equatable {
-    let id: UUID
+    var id: UUID { hostUUID }
     let createdAt: Date
     var lastUsed: Date
-    var name: String
-    var hostUUID: String
+    var label: String
+    var hostUUID: UUID
     var connectionMethod: SyncSettings.SyncConnectionMethod
     var role: SyncSettings.Role
     var listenPort: String
+    var labelUpdatedAt: Date?
+    var isLabelBroadcastEnabled: Bool
 
-    init(name: String,
-         hostUUID: String,
+    init(label: String,
+         hostUUID: UUID,
          connectionMethod: SyncSettings.SyncConnectionMethod,
          role: SyncSettings.Role,
-         listenPort: String) {
-        self.id = UUID()
+         listenPort: String,
+         labelUpdatedAt: Date? = nil,
+         isLabelBroadcastEnabled: Bool = true) {
         self.createdAt = Date()
         self.lastUsed = Date()
-        self.name = name
+        self.label = label
         self.hostUUID = hostUUID
         self.connectionMethod = connectionMethod
         self.role = role
         self.listenPort = listenPort
+        self.labelUpdatedAt = labelUpdatedAt
+        self.isLabelBroadcastEnabled = isLabelBroadcastEnabled
     }
 
     private enum CodingKeys: String, CodingKey {
         case id
         case createdAt
         case lastUsed
+        case label
         case name
         case hostUUID
         case connectionMethod
         case role
         case listenPort
+        case labelUpdatedAt
+        case isLabelBroadcastEnabled
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(UUID.self, forKey: .id)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         lastUsed = try container.decode(Date.self, forKey: .lastUsed)
-        name = try container.decode(String.self, forKey: .name)
-        hostUUID = try container.decode(String.self, forKey: .hostUUID)
+        if let labelValue = try container.decodeIfPresent(String.self, forKey: .label) {
+            label = labelValue
+        } else {
+            label = try container.decode(String.self, forKey: .name)
+        }
+        if let uuid = try container.decodeIfPresent(UUID.self, forKey: .hostUUID) {
+            hostUUID = uuid
+        } else if let raw = try container.decodeIfPresent(String.self, forKey: .hostUUID),
+                  let uuid = UUID(uuidString: raw) {
+            hostUUID = uuid
+        } else if let legacyId = try container.decodeIfPresent(UUID.self, forKey: .id) {
+            hostUUID = legacyId
+        } else {
+            hostUUID = UUID()
+        }
         listenPort = try container.decode(String.self, forKey: .listenPort)
 
         let connectionRaw = try container.decode(String.self, forKey: .connectionMethod)
@@ -50,18 +70,22 @@ struct Room: Identifiable, Codable, Equatable {
 
         let roleRaw = try container.decode(String.self, forKey: .role)
         role = roleRaw == "child" ? .child : .parent
+        labelUpdatedAt = try container.decodeIfPresent(Date.self, forKey: .labelUpdatedAt)
+        isLabelBroadcastEnabled = try container.decodeIfPresent(Bool.self, forKey: .isLabelBroadcastEnabled) ?? true
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(lastUsed, forKey: .lastUsed)
-        try container.encode(name, forKey: .name)
+        try container.encode(label, forKey: .label)
+        try container.encode(label, forKey: .name)
         try container.encode(hostUUID, forKey: .hostUUID)
         try container.encode(listenPort, forKey: .listenPort)
         try container.encode(connectionMethod.rawValue, forKey: .connectionMethod)
         try container.encode(role == .child ? "child" : "parent", forKey: .role)
+        try container.encodeIfPresent(labelUpdatedAt, forKey: .labelUpdatedAt)
+        try container.encode(isLabelBroadcastEnabled, forKey: .isLabelBroadcastEnabled)
     }
 }
 
@@ -78,7 +102,7 @@ final class RoomsStore: ObservableObject {
     func load() {
         guard let data = UserDefaults.standard.data(forKey: key),
               let decoded = try? JSONDecoder().decode([Room].self, from: data) else { return }
-        rooms = decoded
+        rooms = dedupedRooms(from: decoded)
     }
 
     func save() {
@@ -92,20 +116,106 @@ final class RoomsStore: ObservableObject {
         save()
     }
 
+    func upsert(hostUUID: UUID,
+                label: String,
+                connectionMethod: SyncSettings.SyncConnectionMethod,
+                role: SyncSettings.Role,
+                listenPort: String,
+                labelUpdatedAt: Date? = nil,
+                isLabelBroadcastEnabled: Bool? = nil) {
+        if let idx = rooms.firstIndex(where: { $0.hostUUID == hostUUID }) {
+            rooms[idx].label = label
+            rooms[idx].connectionMethod = connectionMethod
+            rooms[idx].role = role
+            rooms[idx].listenPort = listenPort
+            if let labelUpdatedAt {
+                rooms[idx].labelUpdatedAt = labelUpdatedAt
+            }
+            if let isLabelBroadcastEnabled {
+                rooms[idx].isLabelBroadcastEnabled = isLabelBroadcastEnabled
+            }
+            save()
+            return
+        }
+
+        let room = Room(
+            label: label,
+            hostUUID: hostUUID,
+            connectionMethod: connectionMethod,
+            role: role,
+            listenPort: listenPort,
+            labelUpdatedAt: labelUpdatedAt,
+            isLabelBroadcastEnabled: isLabelBroadcastEnabled ?? true
+        )
+        rooms.append(room)
+        save()
+    }
+
+    func rename(hostUUID: UUID, newLabel: String, updatedAt: Date = Date()) {
+        let trimmed = RoomsStore.normalizeLabel(newLabel)
+        guard !trimmed.isEmpty else { return }
+        if let idx = rooms.firstIndex(where: { $0.hostUUID == hostUUID }) {
+            rooms[idx].label = trimmed
+            rooms[idx].labelUpdatedAt = updatedAt
+            save()
+        }
+    }
+
     func delete(_ room: Room) {
-        rooms.removeAll { $0.id == room.id }
+        rooms.removeAll { $0.hostUUID == room.hostUUID }
         save()
     }
 
     func updateLastUsed(_ room: Room) {
-        if let idx = rooms.firstIndex(of: room) {
+        if let idx = rooms.firstIndex(where: { $0.hostUUID == room.hostUUID }) {
             rooms[idx].lastUsed = Date()
             save()
         }
     }
+
+    func room(for hostUUID: UUID) -> Room? {
+        rooms.first { $0.hostUUID == hostUUID }
+    }
+
+    static func loadRoomLabel(hostUUID: UUID,
+                              defaults: UserDefaults = .standard,
+                              key: String = "saved_rooms_v1") -> (label: String, isBroadcastEnabled: Bool)? {
+        guard let data = defaults.data(forKey: key),
+              let decoded = try? JSONDecoder().decode([Room].self, from: data) else { return nil }
+        guard let room = decoded.first(where: { $0.hostUUID == hostUUID }) else { return nil }
+        return (room.label, room.isLabelBroadcastEnabled)
+    }
+
+    private static func normalizeLabel(_ raw: String) -> String {
+        let parts = raw.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        return parts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func dedupedRooms(from rooms: [Room]) -> [Room] {
+        var merged: [UUID: Room] = [:]
+        for room in rooms {
+            if var existing = merged[room.hostUUID] {
+                if room.lastUsed > existing.lastUsed {
+                    existing = room
+                }
+                merged[room.hostUUID] = existing
+            } else {
+                merged[room.hostUUID] = room
+            }
+        }
+        return Array(merged.values)
+    }
 }
 
 struct ChildSavedRoom: Identifiable, Codable, Equatable {
+    enum LabelSource: String, Codable {
+        case parent
+        case joinLink
+        case bonjour
+        case legacy
+        case unknown
+    }
+
     let id: UUID
     var label: String
     var preferredTransport: SyncSettings.SyncConnectionMethod
@@ -114,6 +224,10 @@ struct ChildSavedRoom: Identifiable, Codable, Equatable {
     var peerPort: String?
     let createdAt: Date
     var lastUsedAt: Date?
+    var labelSource: LabelSource
+    var previousLabel: String?
+    var renamedAt: Date?
+    var lastSeenLabelRevision: Int?
 
     init(label: String,
          preferredTransport: SyncSettings.SyncConnectionMethod,
@@ -128,6 +242,10 @@ struct ChildSavedRoom: Identifiable, Codable, Equatable {
         self.peerPort = peerPort
         self.createdAt = Date()
         self.lastUsedAt = Date()
+        self.labelSource = .unknown
+        self.previousLabel = nil
+        self.renamedAt = nil
+        self.lastSeenLabelRevision = nil
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -139,6 +257,10 @@ struct ChildSavedRoom: Identifiable, Codable, Equatable {
         case peerPort
         case createdAt
         case lastUsedAt
+        case labelSource
+        case previousLabel
+        case renamedAt
+        case lastSeenLabelRevision
     }
 
     init(from decoder: Decoder) throws {
@@ -150,6 +272,10 @@ struct ChildSavedRoom: Identifiable, Codable, Equatable {
         peerPort = try container.decodeIfPresent(String.self, forKey: .peerPort)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         lastUsedAt = try container.decodeIfPresent(Date.self, forKey: .lastUsedAt)
+        labelSource = try container.decodeIfPresent(LabelSource.self, forKey: .labelSource) ?? .unknown
+        previousLabel = try container.decodeIfPresent(String.self, forKey: .previousLabel)
+        renamedAt = try container.decodeIfPresent(Date.self, forKey: .renamedAt)
+        lastSeenLabelRevision = try container.decodeIfPresent(Int.self, forKey: .lastSeenLabelRevision)
 
         let transportRaw = try container.decode(String.self, forKey: .preferredTransport)
         preferredTransport = SyncSettings.SyncConnectionMethod(rawValue: transportRaw) ?? .bluetooth
@@ -165,6 +291,10 @@ struct ChildSavedRoom: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(peerPort, forKey: .peerPort)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(lastUsedAt, forKey: .lastUsedAt)
+        try container.encode(labelSource, forKey: .labelSource)
+        try container.encodeIfPresent(previousLabel, forKey: .previousLabel)
+        try container.encodeIfPresent(renamedAt, forKey: .renamedAt)
+        try container.encodeIfPresent(lastSeenLabelRevision, forKey: .lastSeenLabelRevision)
     }
 }
 
@@ -190,6 +320,7 @@ final class ChildRoomsStore: ObservableObject {
         do {
             let decoded = try JSONDecoder().decode([ChildSavedRoom].self, from: data)
             rooms = decoded
+            dedupe()
             print("[ChildRoomsStore] load: decoded \(decoded.count) rooms (bytes \(data.count))")
         } catch {
             print("[ChildRoomsStore] load: decode failed (\(data.count) bytes) error=\(error)")
@@ -198,6 +329,7 @@ final class ChildRoomsStore: ObservableObject {
         guard let data = defaults.data(forKey: key),
               let decoded = try? JSONDecoder().decode([ChildSavedRoom].self, from: data) else { return }
         rooms = decoded
+        dedupe()
         #endif
     }
 
@@ -225,14 +357,12 @@ final class ChildRoomsStore: ObservableObject {
     func upsert(_ room: ChildSavedRoom) {
         let now = Date()
         if let hostUUID = room.hostUUID {
-            if let idx = rooms.firstIndex(where: {
-                $0.hostUUID == hostUUID && $0.preferredTransport == room.preferredTransport
-            }) {
+            if let idx = rooms.firstIndex(where: { $0.hostUUID == hostUUID }) {
                 rooms[idx].label = room.label
                 rooms[idx].preferredTransport = room.preferredTransport
                 rooms[idx].hostUUID = room.hostUUID
-                rooms[idx].peerIP = room.peerIP
-                rooms[idx].peerPort = room.peerPort
+                rooms[idx].peerIP = room.peerIP ?? rooms[idx].peerIP
+                rooms[idx].peerPort = room.peerPort ?? rooms[idx].peerPort
                 rooms[idx].lastUsedAt = now
                 save()
                 return
@@ -257,7 +387,7 @@ final class ChildRoomsStore: ObservableObject {
         var newRoom = room
         newRoom.lastUsedAt = now
         rooms.append(newRoom)
-        save()
+        dedupe()
     }
 
     func delete(_ room: ChildSavedRoom) {
@@ -270,5 +400,121 @@ final class ChildRoomsStore: ObservableObject {
             rooms[idx].lastUsedAt = Date()
             save()
         }
+    }
+
+    func upsertConnected(hostUUID: UUID,
+                         authoritativeLabel: String?,
+                         labelSource: ChildSavedRoom.LabelSource,
+                         labelRevision: Int? = nil,
+                         preferredTransport: SyncSettings.SyncConnectionMethod,
+                         peerIP: String?,
+                         peerPort: String?) {
+        let now = Date()
+        let cleanedLabel = ChildRoomsStore.cleanedLabel(authoritativeLabel)
+        if let idx = rooms.firstIndex(where: { $0.hostUUID == hostUUID }) {
+            rooms[idx].preferredTransport = preferredTransport
+            rooms[idx].peerIP = ChildRoomsStore.cleanedHint(peerIP) ?? rooms[idx].peerIP
+            rooms[idx].peerPort = ChildRoomsStore.cleanedHint(peerPort) ?? rooms[idx].peerPort
+            rooms[idx].lastUsedAt = now
+            if let cleanedLabel {
+                let existingNorm = ChildRoomsStore.normalizedLabel(rooms[idx].label)
+                let newNorm = ChildRoomsStore.normalizedLabel(cleanedLabel)
+                if !newNorm.isEmpty && existingNorm != newNorm {
+                    rooms[idx].previousLabel = rooms[idx].label
+                    rooms[idx].label = cleanedLabel
+                    rooms[idx].renamedAt = now
+                    rooms[idx].labelSource = labelSource
+                }
+            }
+            if let labelRevision {
+                rooms[idx].lastSeenLabelRevision = labelRevision
+            }
+            save()
+            return
+        }
+
+        var room = ChildSavedRoom(
+            label: cleanedLabel ?? "Room \(hostUUID.uuidString.suffix(4))",
+            preferredTransport: preferredTransport,
+            hostUUID: hostUUID,
+            peerIP: ChildRoomsStore.cleanedHint(peerIP),
+            peerPort: ChildRoomsStore.cleanedHint(peerPort)
+        )
+        room.labelSource = labelSource
+        room.lastSeenLabelRevision = labelRevision
+        room.lastUsedAt = now
+        rooms.append(room)
+        dedupe()
+    }
+
+    func dedupe() {
+        guard !rooms.isEmpty else { return }
+        var merged: [UUID: ChildSavedRoom] = [:]
+        var passthrough: [ChildSavedRoom] = []
+
+        for room in rooms {
+            guard let hostUUID = room.hostUUID else {
+                passthrough.append(room)
+                continue
+            }
+            if let existing = merged[hostUUID] {
+                merged[hostUUID] = merge(existing, room)
+            } else {
+                merged[hostUUID] = room
+            }
+        }
+
+        let deduped = Array(merged.values) + passthrough
+        if deduped != rooms {
+            rooms = deduped
+            save()
+        }
+    }
+
+    private func merge(_ lhs: ChildSavedRoom, _ rhs: ChildSavedRoom) -> ChildSavedRoom {
+        let lhsDate = lhs.lastUsedAt ?? lhs.createdAt
+        let rhsDate = rhs.lastUsedAt ?? rhs.createdAt
+        let primary = lhsDate >= rhsDate ? lhs : rhs
+        let secondary = lhsDate >= rhsDate ? rhs : lhs
+        var merged = primary
+        if merged.peerIP == nil || merged.peerIP?.isEmpty == true {
+            merged.peerIP = secondary.peerIP
+        }
+        if merged.peerPort == nil || merged.peerPort?.isEmpty == true {
+            merged.peerPort = secondary.peerPort
+        }
+        if merged.previousLabel == nil {
+            merged.previousLabel = secondary.previousLabel
+        }
+        if merged.renamedAt == nil {
+            merged.renamedAt = secondary.renamedAt
+        }
+        if merged.lastSeenLabelRevision == nil {
+            merged.lastSeenLabelRevision = secondary.lastSeenLabelRevision
+        }
+        if merged.labelSource == .unknown {
+            merged.labelSource = secondary.labelSource
+        }
+        if merged.label.isEmpty {
+            merged.label = secondary.label
+        }
+        return merged
+    }
+
+    private static func normalizedLabel(_ raw: String) -> String {
+        let parts = raw.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        return parts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func cleanedLabel(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = normalizedLabel(raw)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func cleanedHint(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
