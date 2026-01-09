@@ -19,6 +19,7 @@ private enum TXTKey {
     static let phase     = "phase"
     static let remaining = "remaining"
     static let rawEvents = "events"
+    static let roomLabel = "roomLabel"
 }
 
 
@@ -198,8 +199,24 @@ final class BonjourSyncManager: NSObject {
             dict["hostUUID"] = Data(settings.localPeerID.uuidString.utf8)
             // always advertise yourself at full strength:
             dict["rssi"] = Data("3".utf8)
+            if let labelInfo = RoomsStore.loadRoomLabel(hostUUID: settings.localPeerID),
+               labelInfo.isBroadcastEnabled {
+                let trimmed = trimmedLabelForTXT(labelInfo.label)
+                if !trimmed.isEmpty {
+                    dict[TXTKey.roomLabel] = Data(trimmed.utf8)
+                }
+            }
 
             return NetService.data(fromTXTRecord: dict)    }
+
+    private func trimmedLabelForTXT(_ raw: String) -> String {
+        let parts = raw.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        let normalized = parts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.count > 40 {
+            return String(normalized.prefix(40))
+        }
+        return normalized
+    }
 
     // MARK: – Child APIs
     func startBrowsing() {

@@ -1065,6 +1065,7 @@ final class SyncSettings: ObservableObject {
         static let role      = "role"
         static let timestamp = "ts"
         static let hostUUID  = "hostUUID"
+        static let roomLabel = "roomLabel"
     }
     
     /// Called by BonjourSyncManager when a service is resolved
@@ -1175,6 +1176,12 @@ final class SyncSettings: ObservableObject {
     @Published var joinAllowedHostUUIDs: Set<UUID>? = nil
     @Published var joinSelectedHostUUID: UUID? = nil
     @Published var pendingHostJoinRequest: HostJoinRequestV1? = nil
+    @Published var lastJoinHostUUID: UUID? = nil
+    @Published var lastJoinLabelCandidate: String? = nil
+    @Published var lastJoinDeviceNameCandidate: String? = nil
+    @Published var lastJoinLabelRevision: Int? = nil
+    @Published var lastBonjourRoomLabel: String? = nil
+    @Published var lastBonjourHostUUID: UUID? = nil
     
     /// Existing API to add prior-discovered BLE/Bonjour peers
     func addDiscoveredService(name: String, role: Role, signal: Int) {
@@ -1209,6 +1216,25 @@ final class SyncSettings: ObservableObject {
         joinSelectedHostUUID = nil
     }
 
+    func stashJoinLabelCandidate(hostUUID: UUID,
+                                 roomLabel: String?,
+                                 deviceName: String?,
+                                 labelRevision: Int? = nil) {
+        lastJoinHostUUID = hostUUID
+        lastJoinLabelCandidate = roomLabel
+        lastJoinDeviceNameCandidate = deviceName
+        lastJoinLabelRevision = labelRevision
+    }
+
+    func clearJoinLabelCandidate() {
+        lastJoinHostUUID = nil
+        lastJoinLabelCandidate = nil
+        lastJoinDeviceNameCandidate = nil
+        lastJoinLabelRevision = nil
+        lastBonjourRoomLabel = nil
+        lastBonjourHostUUID = nil
+    }
+
     func connectChildOverLAN(host: String, port: UInt16) {
         guard role == .child else { return }
         peerIP = host
@@ -1235,6 +1261,12 @@ final class SyncSettings: ObservableObject {
             guard resolvedHostUUID == selected else { return false }
         } else if allowed.count > 1 {
             return false
+        }
+        if let labelData = txt[TXTKey.roomLabel],
+           let label = String(data: labelData, encoding: .utf8),
+           !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lastBonjourRoomLabel = label
+            lastBonjourHostUUID = resolvedHostUUID
         }
 
         if let connection = clientConnection {
@@ -9376,12 +9408,18 @@ struct ConnectionPage: View {
         stopSyncIfNeeded()
         syncSettings.role = .child
         syncSettings.connectionMethod = transport
+        let deviceName = request.deviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        syncSettings.stashJoinLabelCandidate(
+            hostUUID: request.hostUUID,
+            roomLabel: nil,
+            deviceName: deviceName
+        )
         if transport == .bluetooth {
             syncSettings.setJoinTargetHostUUID(request.hostUUID)
         } else {
             syncSettings.clearJoinConstraints()
         }
-        if let deviceName = request.deviceName, !deviceName.isEmpty {
+        if let deviceName, !deviceName.isEmpty {
             syncSettings.pairingDeviceName = deviceName
         }
         startSyncIfNeeded()
@@ -9400,6 +9438,9 @@ struct ConnectionPage: View {
             syncSettings.setJoinTargetHostUUID(hostUUID)
         } else {
             syncSettings.clearJoinConstraints()
+        }
+        if let hostUUID = room.hostUUID {
+            syncSettings.stashJoinLabelCandidate(hostUUID: hostUUID, roomLabel: nil, deviceName: nil)
         }
         startSyncIfNeeded()
     }
@@ -10097,7 +10138,6 @@ private struct JoinTabView: View {
         #if canImport(UIKit)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         #endif
-        persistLegacyRoomIfNeeded(request)
         onJoinRequest(request, preferredTransport)
     }
 
@@ -10109,7 +10149,6 @@ private struct JoinTabView: View {
         #if canImport(UIKit)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         #endif
-        persistJoinRoomIfPossible(request)
         joinRouter.ingestParsed(request)
     }
 
@@ -10178,68 +10217,6 @@ private struct JoinTabView: View {
         case .invalidPath:
             return "Unsupported SyncTimer link."
         }
-    }
-
-    private func persistLegacyRoomIfNeeded(_ request: HostJoinRequestV1) {
-        let label = legacyRoomLabel(for: request)
-        let room = ChildSavedRoom(
-            label: label,
-            preferredTransport: preferredTransport,
-            hostUUID: request.hostUUID
-        )
-        roomsStore.upsert(room)
-        #if DEBUG
-        print("[JoinTabView] persist legacy: hostUUID=\(request.hostUUID) transport=\(preferredTransport.rawValue) label='\(label)'")
-        #endif
-    }
-
-    private func persistJoinRoomIfPossible(_ request: JoinRequestV1) {
-        guard let hostUUID = resolvedHostUUID(for: request) else {
-            #if DEBUG
-            print("[JoinTabView] persist join: deferred (needs host selection) requestId=\(request.requestId)")
-            #endif
-            return
-        }
-        let transport = transportForJoin(request.mode)
-        let label = joinRoomLabel(for: request, hostUUID: hostUUID)
-        let room = ChildSavedRoom(
-            label: label,
-            preferredTransport: transport,
-            hostUUID: hostUUID,
-            peerIP: request.peerIP,
-            peerPort: request.peerPort.map { String($0) }
-        )
-        roomsStore.upsert(room)
-        #if DEBUG
-        print("[JoinTabView] persist join: hostUUID=\(hostUUID) transport=\(transport.rawValue) peer=\(request.peerIP ?? "nil"):\(request.peerPort.map { String($0) } ?? "nil") label='\(label)'")
-        #endif
-    }
-
-    private func resolvedHostUUID(for request: JoinRequestV1) -> UUID? {
-        if let selected = request.selectedHostUUID {
-            return selected
-        }
-        if request.hostUUIDs.count == 1 {
-            return request.hostUUIDs.first
-        }
-        return nil
-    }
-
-    private func legacyRoomLabel(for request: HostJoinRequestV1) -> String {
-        let label = request.deviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let fallback = "Room \(request.hostUUID.uuidString.suffix(4))"
-        return (label?.isEmpty == false) ? label! : fallback
-    }
-
-    private func joinRoomLabel(for request: JoinRequestV1, hostUUID: UUID) -> String {
-        let label = request.roomLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if label?.isEmpty == false {
-            return label!
-        }
-        if let deviceName = request.deviceNames.first, !deviceName.isEmpty {
-            return deviceName
-        }
-        return "Room \(hostUUID.uuidString.suffix(4))"
     }
 
     private func transportForJoin(_ mode: String) -> SyncSettings.SyncConnectionMethod {
@@ -10362,9 +10339,23 @@ private struct ChildRoomsTabView: View {
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(room.label)
-                                        .font(.custom("Roboto-SemiBold", size: 16))
-                                        .foregroundColor(.primary)
+                                    HStack(spacing: 6) {
+                                        Text(room.label)
+                                            .font(.custom("Roboto-SemiBold", size: 16))
+                                            .foregroundColor(.primary)
+                                        if room.renamedAt != nil, room.previousLabel != nil {
+                                            Text("RENAMED")
+                                                .font(.custom("Roboto-Medium", size: 9))
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(Color.orange.opacity(0.18), in: Capsule())
+                                        }
+                                    }
+                                    if let previous = room.previousLabel, room.renamedAt != nil {
+                                        Text("was \(previous)")
+                                            .font(.custom("Roboto-Light", size: 11))
+                                            .foregroundColor(.secondary)
+                                    }
                                     if let hostUUID = room.hostUUID {
                                         Text("Host …\(hostUUID.uuidString.suffix(4))")
                                             .font(.custom("Roboto-Light", size: 11))
@@ -10387,6 +10378,12 @@ private struct ChildRoomsTabView: View {
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
+                            Button {
+                                onJoinRoom(room)
+                                roomsStore.updateLastUsed(room)
+                            } label: {
+                                Label("Join", systemImage: "arrow.down.circle")
+                            }
                             Button(role: .destructive) {
                                 roomsStore.delete(room)
                             } label: {
@@ -10519,9 +10516,11 @@ private struct GenerateJoinQRSheet: View {
         self.hostShareURL = hostShareURL
         self.onRequestEnableSync = onRequestEnableSync
     }
-    @State private var activeRoomLabel: String = "Join Room"   // in-memory default
-    @State private var showingSaveRoomPrompt = false
-    @State private var draftRoomLabel: String = "Join Room"
+    @State private var isEditingRoomLabel = false
+    @State private var roomLabelDraft: String = ""
+    @FocusState private var roomLabelFocused: Bool
+    @State private var roomToRename: Room? = nil
+    @State private var renameDraft: String = ""
 
 #if canImport(UIKit)
     private func printJoinQR() {
@@ -10542,18 +10541,13 @@ private struct GenerateJoinQRSheet: View {
 
 #endif
     private func sanitizeRoomLabel(_ raw: String) -> String {
-        // strip newlines + normalize whitespace
         let parts = raw.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-        var s = parts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if s.isEmpty { s = "Join Room" }
-        // max 32 characters (emoji OK, grapheme-safe)
-        if s.count > 32 { s = String(s.prefix(32)) }
-        return s
+        let s = parts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty ? "Join Room" : s
     }
 
     private var roomLabelForSharing: String {
-        sanitizeRoomLabel(activeRoomLabel)
+        sanitizeRoomLabel(currentRoomLabel)
     }
 
     private func makePrintedJoinQRUIImage(from string: String,
@@ -10732,7 +10726,44 @@ private struct GenerateJoinQRSheet: View {
 
     private var joinAppClipURLString: String { joinAppClipURL.absoluteString }
 
+    private func joinAppClipURL(for room: Room) -> URL {
+        var c = URLComponents()
+        c.scheme = "https"
+        c.host = "synctimerapp.com"
+        c.path = "/join"
+
+        let mode = (room.connectionMethod == .bluetooth) ? "nearby" : "wifi"
+        var items: [URLQueryItem] = [
+            .init(name: "v", value: "1"),
+            .init(name: "mode", value: mode),
+            .init(name: "hosts", value: room.hostUUID.uuidString)
+        ]
+
+        if !deviceName.isEmpty {
+            items.append(.init(name: "device_names", value: deviceName))
+        }
+        items.append(.init(name: "room_label", value: sanitizeRoomLabel(room.label)))
+
+        if let endpoint = wifiJoinEndpoint(forPort: room.listenPort), mode == "wifi" {
+            items.append(.init(name: "ip", value: endpoint.ip))
+            items.append(.init(name: "port", value: String(endpoint.port)))
+        }
+
+        if room.connectionMethod == .bonjour {
+            items.append(.init(name: "transport_hint", value: "bonjour"))
+        }
+
+        if let buildStr = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+           let build = Int(buildStr), build > 0 {
+            items.append(.init(name: "min_build", value: String(build)))
+        }
+
+        c.queryItems = items
+        return c.url ?? prefillGeneratorURL
+    }
+
     private var uuidSuffix: String { String(hostUUIDString.suffix(8)).uppercased() }
+    private var hostUUID: UUID? { UUID(uuidString: hostUUIDString) }
 
     private var normalizedConnectionMethod: SyncSettings.SyncConnectionMethod {
         switch syncSettings.connectionMethod {
@@ -10788,6 +10819,11 @@ private struct GenerateJoinQRSheet: View {
         }
     }
 
+    private func showRenamePrompt(for room: Room) {
+        renameDraft = room.label
+        roomToRename = room
+    }
+
 
     private var ipString: String {
         getLocalIPAddress() ?? "Not on Wi-Fi"
@@ -10797,6 +10833,13 @@ private struct GenerateJoinQRSheet: View {
         guard joinMode == "wifi" else { return nil }
         guard let ip = getLocalIPAddress(), !ip.isEmpty else { return nil }
         guard let port = UInt16(syncSettings.listenPort),
+              (49153...65534).contains(port) else { return nil }
+        return (ip, port)
+    }
+
+    private func wifiJoinEndpoint(forPort portString: String) -> (ip: String, port: UInt16)? {
+        guard let ip = getLocalIPAddress(), !ip.isEmpty else { return nil }
+        guard let port = UInt16(portString),
               (49153...65534).contains(port) else { return nil }
         return (ip, port)
     }
@@ -10860,7 +10903,6 @@ private struct GenerateJoinQRSheet: View {
         else { syncSettings.startChild() }
 
         roomsStore.updateLastUsed(room)
-        activeRoomLabel = sanitizeRoomLabel(room.name) // override (your #6)
 
         showQRModal = false
         showCopiedToast = false
@@ -10873,6 +10915,52 @@ private struct GenerateJoinQRSheet: View {
                 selectedTab = .create
             }
         }
+    }
+
+    private var currentRoomLabel: String {
+        guard let hostUUID, let room = roomsStore.room(for: hostUUID) else {
+            return "Join Room"
+        }
+        return room.label
+    }
+
+    private func ensureActiveRoom() {
+        guard let hostUUID else { return }
+        let label = roomsStore.room(for: hostUUID)?.label ?? "Join Room"
+        roomsStore.upsert(
+            hostUUID: hostUUID,
+            label: label,
+            connectionMethod: normalizedConnectionMethod,
+            role: syncSettings.role,
+            listenPort: syncSettings.listenPort
+        )
+    }
+
+    private func syncActiveRoomSettings() {
+        guard let hostUUID else { return }
+        let label = roomsStore.room(for: hostUUID)?.label ?? "Join Room"
+        roomsStore.upsert(
+            hostUUID: hostUUID,
+            label: label,
+            connectionMethod: normalizedConnectionMethod,
+            role: syncSettings.role,
+            listenPort: syncSettings.listenPort
+        )
+    }
+
+    private func beginRoomLabelEdit() {
+        roomLabelDraft = currentRoomLabel
+        isEditingRoomLabel = true
+        roomLabelFocused = true
+    }
+
+    private func commitRoomLabelEdit() {
+        guard let hostUUID else { return }
+        let trimmed = sanitizeRoomLabel(roomLabelDraft)
+        roomsStore.rename(hostUUID: hostUUID, newLabel: trimmed)
+        roomLabelDraft = trimmed
+        isEditingRoomLabel = false
+        roomLabelFocused = false
     }
 
     // MARK: - QR image
@@ -11151,6 +11239,7 @@ private enum AppAsset {
         if desired == .network {
             ensureValidListenPortIfNeeded()
         }
+        syncActiveRoomSettings()
     }
 
 
@@ -11181,6 +11270,7 @@ private enum AppAsset {
         Haptics.light()
         stopSyncIfRunning()
         syncSettings.role = role
+        syncActiveRoomSettings()
     }
 
     private func toggleRole() {
@@ -11595,16 +11685,64 @@ private enum AppAsset {
             
             Divider().opacity(0.95)
 
-            Text(roomLabelForSharing)
-                .font(.custom("Roboto-SemiBold", size: 18))
-                .padding(.top, 2)
+            glassCard {
+                Button {
+                    beginRoomLabelEdit()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "pencil.line")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.secondary)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Room name")
+                                .font(.custom("Roboto-Regular", size: 12))
+                                .foregroundColor(.secondary)
+                            if isEditingRoomLabel {
+                                TextField("Join Room", text: $roomLabelDraft)
+                                    .font(.custom("Roboto-SemiBold", size: 18))
+                                    .focused($roomLabelFocused)
+                                    .submitLabel(.done)
+                                    .onSubmit {
+                                        commitRoomLabelEdit()
+                                    }
+                            } else {
+                                Text(currentRoomLabel)
+                                    .font(.custom("Roboto-SemiBold", size: 18))
+                                    .foregroundColor(.primary)
+                            }
+                        }
+                        Spacer()
+                        if isEditingRoomLabel {
+                            Text("Return to save")
+                                .font(.custom("Roboto-Light", size: 11))
+                                .foregroundColor(.secondary)
+                        } else {
+                            Image(systemName: "pencil")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            .onChange(of: roomLabelFocused) { focused in
+                if !focused, isEditingRoomLabel {
+                    commitRoomLabelEdit()
+                }
+            }
 
             
             glassPrimaryButton(label: "Save Room",
                                systemImage: "tray.and.arrow.down",
                                disabled: syncSettings.role != .parent) {
-                draftRoomLabel = roomLabelForSharing   // default in prompt
-                showingSaveRoomPrompt = true
+                guard let hostUUID else { return }
+                roomsStore.upsert(
+                    hostUUID: hostUUID,
+                    label: roomLabelForSharing,
+                    connectionMethod: normalizedConnectionMethod,
+                    role: syncSettings.role,
+                    listenPort: syncSettings.listenPort
+                )
             }
 
             
@@ -11786,6 +11924,23 @@ private enum AppAsset {
                     glassCard {
                         roomRow(room)
                     }
+                    .contextMenu {
+                        Button {
+                            showRenamePrompt(for: room)
+                        } label: {
+                            Label("Rename", systemImage: "pencil")
+                        }
+
+                        ShareLink(item: joinAppClipURL(for: room)) {
+                            Label("Share", systemImage: "square.and.arrow.up")
+                        }
+
+                        Button(role: .destructive) {
+                            roomsStore.delete(room)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
                     .swipeActions {
                         Button(role: .destructive) {
                             roomsStore.delete(room)
@@ -11807,18 +11962,26 @@ private enum AppAsset {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text(room.name)
+                    Text(room.label)
                         .font(.custom("Roboto-SemiBold", size: 16))
                     Spacer()
                     Text(connectionLabel(for: room.connectionMethod))
                         .font(.custom("Roboto-Regular", size: 12))
                         .foregroundColor(.secondary)
                 }
-                Text("Port \(room.listenPort) • \(room.lastUsed.formatted(date: .numeric, time: .shortened))")
+                Text("Host …\(room.hostUUID.uuidString.suffix(4)) • Port \(room.listenPort) • \(room.lastUsed.formatted(date: .numeric, time: .shortened))")
                     .font(.custom("Roboto-Regular", size: 12))
                     .foregroundColor(.secondary)
             }
             Spacer()
+            Button {
+                showRenamePrompt(for: room)
+            } label: {
+                Image(systemName: "pencil")
+                    .font(.system(size: 13, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+            }
+            .buttonStyle(.plain)
             Button {
                 loadRoom(room)
             } label: {
@@ -11942,26 +12105,27 @@ private enum AppAsset {
                 }
             }
         }
-        .alert("Room name", isPresented: $showingSaveRoomPrompt) {
-            TextField("Join Room", text: $draftRoomLabel)
+        .alert("Rename Room", isPresented: Binding(
+            get: { roomToRename != nil },
+            set: { isPresented in
+                if !isPresented {
+                    roomToRename = nil
+                }
+            }
+        )) {
+            TextField("Room name", text: $renameDraft)
             Button("Save") {
-                let finalName = sanitizeRoomLabel(draftRoomLabel)
-                activeRoomLabel = finalName // becomes active when saved (in-memory)
-
-                let room = Room(
-                    name: finalName,
-                    hostUUID: hostUUIDString,
-                    connectionMethod: normalizedConnectionMethod,
-                    role: syncSettings.role,
-                    listenPort: syncSettings.listenPort
-                )
-                roomsStore.add(room)
+                guard let room = roomToRename else { return }
+                roomsStore.rename(hostUUID: room.hostUUID, newLabel: renameDraft)
+                if room.hostUUID == hostUUID {
+                    roomLabelDraft = sanitizeRoomLabel(renameDraft)
+                }
+                roomToRename = nil
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("Max 32 characters. Newlines are removed.")
+            Text("Newlines are removed.")
         }
-
         // iOS 16+ (works on iOS 26): remove default sheet material background
         .presentationBackground(.clear)
 
@@ -11971,6 +12135,7 @@ private enum AppAsset {
             if joinMode == "wifi" {
                 ensureValidListenPortIfNeeded()
             }
+            ensureActiveRoom()
         }
     }
 
@@ -14009,6 +14174,10 @@ innerBody
         .onChange(of: joinRouter.pending?.requestId) { _ in
             applyJoinIfReady()
         }
+        .onChange(of: syncSettings.isEstablished) { established in
+            guard established, syncSettings.role == .child else { return }
+            persistChildRoomOnEstablished()
+        }
         .environmentObject(childRoomsStore)
     }
 
@@ -14019,7 +14188,7 @@ innerBody
         guard !request.needsHostSelection else { return }
         guard handledJoinRequestId != request.requestId else { return }
 
-        persistChildRoomIfPossible(request)
+        stashJoinLabelIfPossible(request)
         handledJoinRequestId = request.requestId
         let resolvedMethod: SyncSettings.SyncConnectionMethod
         switch request.mode {
@@ -14064,37 +14233,86 @@ innerBody
         joinRouter.markConsumed()
     }
 
-    private func persistChildRoomIfPossible(_ request: JoinRequestV1) {
+    private func persistChildRoomOnEstablished() {
+        guard let hostUUID = syncSettings.joinSelectedHostUUID ?? syncSettings.lastJoinHostUUID else { return }
+        let resolvedLabel = resolveAuthoritativeLabel(for: hostUUID)
+        let transport: SyncSettings.SyncConnectionMethod = (syncSettings.connectionMethod == .bonjour) ? .network : syncSettings.connectionMethod
+        let peerIP = syncSettings.peerIP.trimmingCharacters(in: .whitespacesAndNewlines)
+        let peerPort = syncSettings.peerPort.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        childRoomsStore.upsertConnected(
+            hostUUID: hostUUID,
+            authoritativeLabel: resolvedLabel.label,
+            labelSource: resolvedLabel.source,
+            labelRevision: syncSettings.lastJoinLabelRevision,
+            preferredTransport: transport,
+            peerIP: peerIP.isEmpty ? nil : peerIP,
+            peerPort: peerPort.isEmpty ? nil : peerPort
+        )
+        syncSettings.clearJoinLabelCandidate()
+    }
+
+    private func resolveAuthoritativeLabel(for hostUUID: UUID) -> (label: String?, source: ChildSavedRoom.LabelSource) {
+        if let candidate = normalizedLabel(syncSettings.lastJoinLabelCandidate), !candidate.isEmpty {
+            return (candidate, .joinLink)
+        }
+        if syncSettings.lastBonjourHostUUID == hostUUID,
+           let bonjourLabel = normalizedLabel(syncSettings.lastBonjourRoomLabel),
+           !bonjourLabel.isEmpty {
+            return (bonjourLabel, .bonjour)
+        }
+        if let deviceName = normalizedLabel(syncSettings.lastJoinDeviceNameCandidate), !deviceName.isEmpty {
+            return (deviceName, .legacy)
+        }
+        return (nil, .unknown)
+    }
+
+    private func normalizedLabel(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let parts = raw.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        let trimmed = parts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func stashJoinLabelIfPossible(_ request: JoinRequestV1) {
         guard let hostUUID = request.selectedHostUUID ?? (request.hostUUIDs.count == 1 ? request.hostUUIDs.first : nil) else {
             #if DEBUG
-            print("[ContentView] persist join: deferred (needs host selection) requestId=\(request.requestId)")
+            print("[ContentView] stash join: deferred (needs host selection) requestId=\(request.requestId)")
             #endif
             return
         }
-        let transport = transportForJoin(request.mode)
-        let label = joinRoomLabel(for: request, hostUUID: hostUUID)
-        let room = ChildSavedRoom(
-            label: label,
-            preferredTransport: transport,
+        let label = joinRoomLabelCandidate(for: request, hostUUID: hostUUID)
+        let deviceName = joinDeviceNameCandidate(for: request, hostUUID: hostUUID)
+        syncSettings.stashJoinLabelCandidate(
             hostUUID: hostUUID,
-            peerIP: request.peerIP,
-            peerPort: request.peerPort.map { String($0) }
+            roomLabel: label,
+            deviceName: deviceName,
+            labelRevision: nil
         )
-        childRoomsStore.upsert(room)
         #if DEBUG
-        print("[ContentView] persist join: hostUUID=\(hostUUID) transport=\(transport.rawValue) peer=\(request.peerIP ?? "nil"):\(request.peerPort.map { String($0) } ?? "nil") label='\(label)'")
+        print("[ContentView] stash join: hostUUID=\(hostUUID) peer=\(request.peerIP ?? "nil"):\(request.peerPort.map { String($0) } ?? "nil") label='\(label ?? "nil")'")
         #endif
     }
 
-    private func joinRoomLabel(for request: JoinRequestV1, hostUUID: UUID) -> String {
+    private func joinRoomLabelCandidate(for request: JoinRequestV1, hostUUID: UUID) -> String? {
         let label = request.roomLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
         if label?.isEmpty == false {
-            return label!
+            return label
+        }
+        return nil
+    }
+
+    private func joinDeviceNameCandidate(for request: JoinRequestV1, hostUUID: UUID) -> String? {
+        if let selected = request.selectedHostUUID,
+           let index = request.hostUUIDs.firstIndex(of: selected),
+           request.deviceNames.indices.contains(index) {
+            let name = request.deviceNames[index]
+            return name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : name
         }
         if let deviceName = request.deviceNames.first, !deviceName.isEmpty {
             return deviceName
         }
-        return "Room \(hostUUID.uuidString.suffix(4))"
+        return nil
     }
 
     private func transportForJoin(_ mode: String) -> SyncSettings.SyncConnectionMethod {
