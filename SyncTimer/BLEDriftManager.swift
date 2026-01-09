@@ -21,6 +21,12 @@ struct DriftResponse: Codable {
 }
 
 final class BLEDriftManager: NSObject {
+    private struct OutboundPacket {
+        let data: Data
+        let isControl: Bool
+        let actionSeq: UInt64?
+    }
+
     // Weak reference back to your SyncSettings (so you can read “elapsed”)
     private weak var owner: SyncSettings?
     var central: CBCentralManager { centralManager }
@@ -45,6 +51,16 @@ final class BLEDriftManager: NSObject {
         private var linkWatchdog: Timer?
         private var lastPacketAt: TimeInterval = 0
         private var childIsNotifying = false
+
+    // MARK: – Parent outbox + control squelch
+    private let controlSquelchDuration: TimeInterval = 0.25
+    private var controlSquelchUntil: TimeInterval = 0
+    private var highPriQueue: [OutboundPacket] = []
+    private var lowPriLatestPacket: OutboundPacket?
+    private var lastAckedActionSeq: UInt64 = 0
+    private var controlSendTimes: [UInt64: TimeInterval] = [:]
+    private var controlReassertWorkItems: [UInt64: [DispatchWorkItem]] = [:]
+    private let controlAckPrefix: UInt8 = 0xA1
     
     // MARK: – Discovery helpers (keep amber when SYNC is ON)
         private func restartScanIfChild() {
@@ -224,6 +240,109 @@ final class BLEDriftManager: NSObject {
             }
     }
 
+    private func isControlAction(_ action: TimerMessage.Action) -> Bool {
+        switch action {
+        case .start, .pause, .reset:
+            return true
+        case .update, .addEvent:
+            return false
+        }
+    }
+
+    private func enqueueControlPacket(_ packet: OutboundPacket) {
+        let now = Date().timeIntervalSince1970
+        controlSquelchUntil = now + controlSquelchDuration
+        lowPriLatestPacket = nil
+        highPriQueue.append(packet)
+        flushOutbox()
+    }
+
+    private func enqueueLowPriorityPacket(_ packet: OutboundPacket) {
+        let now = Date().timeIntervalSince1970
+        guard now >= controlSquelchUntil else { return }
+        lowPriLatestPacket = packet
+        flushOutbox()
+    }
+
+    private func flushOutbox() {
+        guard shouldActAsParent,
+              let driftChar = driftCharacteristic,
+              !(driftChar.subscribedCentrals?.isEmpty ?? true)
+        else { return }
+        while !highPriQueue.isEmpty {
+            let packet = highPriQueue[0]
+            let ok = peripheralManager.updateValue(packet.data,
+                                                   for: driftChar,
+                                                   onSubscribedCentrals: nil)
+            if packet.isControl {
+                print("[BLE Parent] control updateValue bytes=\(packet.data.count) ok=\(ok) seq=\(packet.actionSeq ?? 0)")
+            }
+            if !ok { return }
+            highPriQueue.removeFirst()
+        }
+        if let packet = lowPriLatestPacket {
+            let ok = peripheralManager.updateValue(packet.data,
+                                                   for: driftChar,
+                                                   onSubscribedCentrals: nil)
+            if ok {
+                lowPriLatestPacket = nil
+            }
+        }
+    }
+
+    private func cancelControlReasserts(for seq: UInt64) {
+        if let items = controlReassertWorkItems.removeValue(forKey: seq) {
+            items.forEach { $0.cancel() }
+        }
+        controlSendTimes[seq] = nil
+    }
+
+    private func scheduleControlReasserts(data: Data, seq: UInt64) {
+        cancelControlReasserts(for: seq)
+        let startTime = Date().timeIntervalSince1970
+        controlSendTimes[seq] = startTime
+        let deadline = startTime + 1.0
+        let delays: [TimeInterval] = [0.02, 0.04, 0.08, 0.14, 0.22, 0.32]
+        var workItems: [DispatchWorkItem] = []
+
+        for delay in delays {
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                let now = Date().timeIntervalSince1970
+                guard now < deadline else { return }
+                guard self.lastAckedActionSeq < seq else { return }
+                let packet = OutboundPacket(data: data, isControl: true, actionSeq: seq)
+                self.enqueueControlPacket(packet)
+            }
+            workItems.append(work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        }
+
+        let cleanup = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if self.lastAckedActionSeq < seq {
+                print("[BLE Parent] control seq \(seq) reassert timeout (no ACK)")
+            }
+            self.cancelControlReasserts(for: seq)
+        }
+        workItems.append(cleanup)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: cleanup)
+        controlReassertWorkItems[seq] = workItems
+    }
+
+    private func decodeControlAck(_ data: Data) -> UInt64? {
+        guard data.count == 9, data.first == controlAckPrefix else { return nil }
+        let seqData = data.dropFirst()
+        return seqData.reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+    }
+
+    private func makeControlAck(seq: UInt64) -> Data {
+        var seqBE = seq.bigEndian
+        var data = Data([controlAckPrefix])
+        withUnsafeBytes(of: &seqBE) { data.append(contentsOf: $0) }
+        return data
+    }
+
 
     /// Every 5 s (once a child has subscribed) we send a DriftRequest
     private func sendDriftRequestIfNeeded() {
@@ -233,16 +352,27 @@ final class BLEDriftManager: NSObject {
         let tReq = Date().timeIntervalSince1970
         let eReq = owner?.getCurrentElapsed() ?? 0
         lastPacketAt = tReq  // activity on the link
-        let packet = DriftRequest(requestTimestamp: tReq, elapsedSeconds: eReq)
-        guard let data = try? JSONEncoder().encode(packet) else { return }
+        let request = DriftRequest(requestTimestamp: tReq, elapsedSeconds: eReq)
+        guard let data = try? JSONEncoder().encode(request) else { return }
 
-        peripheralManager.updateValue(data,
-                                      for: driftChar,
-                                      onSubscribedCentrals: nil)
+        let outbound = OutboundPacket(data: data, isControl: false, actionSeq: nil)
+        enqueueLowPriorityPacket(outbound)
     }
 
     /// Parent receives child’s write here
     private func handleWriteFromChild(_ data: Data) {
+        if let ackSeq = decodeControlAck(data) {
+            lastPacketAt = Date().timeIntervalSince1970
+            lastAckedActionSeq = max(lastAckedActionSeq, ackSeq)
+            if let sendTime = controlSendTimes[ackSeq] {
+                let delta = Date().timeIntervalSince1970 - sendTime
+                print(String(format: "[BLE Parent] ACK seq=%llu Δ=%.3fs", ackSeq, delta))
+            } else {
+                print("[BLE Parent] ACK seq=\(ackSeq)")
+            }
+            cancelControlReasserts(for: ackSeq)
+            return
+        }
         // First try decode as DriftResponse
         if let resp = try? JSONDecoder().decode(DriftResponse.self, from: data) {
             lastPacketAt = Date().timeIntervalSince1970
@@ -276,9 +406,8 @@ final class BLEDriftManager: NSObject {
             if let corrData = try? JSONEncoder().encode(correction),
                let driftChar = driftCharacteristic
             {
-                peripheralManager.updateValue(corrData,
-                                              for: driftChar,
-                                              onSubscribedCentrals: nil)
+                let packet = OutboundPacket(data: corrData, isControl: false, actionSeq: nil)
+                enqueueLowPriorityPacket(packet)
             }
         }
     }
@@ -347,6 +476,12 @@ extension BLEDriftManager: CBPeripheralManagerDelegate {
         } else {
             print("Parent: Advertising \(timerServiceUUID)")
         }
+    }
+
+    func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager) {
+        let lowCount = (lowPriLatestPacket == nil) ? 0 : 1
+        print("[BLE Parent] peripheralManagerIsReady flush high=\(highPriQueue.count) low=\(lowCount)")
+        flushOutbox()
     }
 
     func peripheralManager(_ peripheral: CBPeripheralManager,
@@ -619,7 +754,19 @@ extension BLEDriftManager: CBCentralManagerDelegate, CBPeripheralDelegate {
             // Only bother if at least one child is subscribed
             if (characteristic.subscribedCentrals?.isEmpty ?? true) { return }
             guard let data = try? JSONEncoder().encode(msg) else { return }
-            _ = peripheralManager.updateValue(data, for: characteristic, onSubscribedCentrals: nil)
+            let isControl = isControlAction(msg.action)
+            let packet = OutboundPacket(data: data, isControl: isControl, actionSeq: msg.actionSeq)
+            if isControl {
+                if let seq = msg.actionSeq {
+                    print("[BLE Parent] enqueue control action=\(msg.action) seq=\(seq)")
+                    scheduleControlReasserts(data: data, seq: seq)
+                } else {
+                    print("[BLE Parent] enqueue control action=\(msg.action) seq=<nil>")
+                }
+                enqueueControlPacket(packet)
+            } else {
+                enqueueLowPriorityPacket(packet)
+            }
         }
 
         /// Child → parent (optional symmetry; harmless if unused)
@@ -629,11 +776,19 @@ extension BLEDriftManager: CBCentralManagerDelegate, CBPeripheralDelegate {
             p.writeValue(data, for: c, type: .withoutResponse)
         }
 
+        func sendControlAck(seq: UInt64) {
+            guard let p = discoveredPeripheral, let c = driftCharOnPeripheral else { return }
+            let data = makeControlAck(seq: seq)
+            p.writeValue(data, for: c, type: .withoutResponse)
+            print("[BLE Child] ACK send seq=\(seq) bytes=\(data.count)")
+        }
+
         func sendSyncEnvelopeToChildren(_ envelope: SyncEnvelope) {
             guard shouldActAsParent, let characteristic = driftCharacteristic else { return }
             if (characteristic.subscribedCentrals?.isEmpty ?? true) { return }
             guard let data = try? JSONEncoder().encode(envelope) else { return }
-            _ = peripheralManager.updateValue(data, for: characteristic, onSubscribedCentrals: nil)
+            let packet = OutboundPacket(data: data, isControl: false, actionSeq: nil)
+            enqueueLowPriorityPacket(packet)
         }
 
         func sendSyncEnvelopeToParent(_ envelope: SyncEnvelope) {
