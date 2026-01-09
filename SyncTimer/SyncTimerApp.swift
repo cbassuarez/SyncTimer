@@ -9584,25 +9584,27 @@ struct ConnectionPage: View {
           Text(syncErrorMessage)
         }
         .sheet(isPresented: $showJoinSheet) {
-            if syncSettings.role == .parent {
-                GenerateJoinQRSheet(
-                    deviceName: hostDeviceName,
-                    hostUUIDString: hostUUIDString,
-                    hostShareURL: hostShareURL,
-                    onRequestEnableSync: {
-                        guard !syncSettings.isEnabled else { return }
-                        toggleSyncMode()
-                    }
-                )
-            } else {
-                ChildJoinSheet(
-                    onJoinRequest: { request, transport in
-                        startChildJoin(request, transport: transport)
-                    },
-                    onJoinRoom: { room in
-                        startChildRoom(room)
-                    }
-                )
+            Group {
+                if syncSettings.role == .parent {
+                    GenerateJoinQRSheet(
+                        deviceName: hostDeviceName,
+                        hostUUIDString: hostUUIDString,
+                        hostShareURL: hostShareURL,
+                        onRequestEnableSync: {
+                            guard !syncSettings.isEnabled else { return }
+                            toggleSyncMode()
+                        }
+                    )
+                } else {
+                    ChildJoinSheet(
+                        onJoinRequest: { request, transport in
+                            startChildJoin(request, transport: transport)
+                        },
+                        onJoinRoom: { room in
+                            startChildRoom(room)
+                        }
+                    )
+                }
             }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
