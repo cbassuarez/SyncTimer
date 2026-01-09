@@ -172,26 +172,91 @@ struct ChildSavedRoom: Identifiable, Codable, Equatable {
 final class ChildRoomsStore: ObservableObject {
     @Published var rooms: [ChildSavedRoom] = []
 
-    private let key = "child_rooms_v1"
+    private let defaults: UserDefaults
+    private let key: String
 
-    init() {
+    init(defaults: UserDefaults = .standard, key: String = "child_rooms_v1") {
+        self.defaults = defaults
+        self.key = key
         load()
     }
 
     func load() {
-        guard let data = UserDefaults.standard.data(forKey: key),
+        #if DEBUG
+        guard let data = defaults.data(forKey: key) else {
+            print("[ChildRoomsStore] load: no data for key '\(key)'")
+            return
+        }
+        do {
+            let decoded = try JSONDecoder().decode([ChildSavedRoom].self, from: data)
+            rooms = decoded
+            print("[ChildRoomsStore] load: decoded \(decoded.count) rooms (bytes \(data.count))")
+        } catch {
+            print("[ChildRoomsStore] load: decode failed (\(data.count) bytes) error=\(error)")
+        }
+        #else
+        guard let data = defaults.data(forKey: key),
               let decoded = try? JSONDecoder().decode([ChildSavedRoom].self, from: data) else { return }
         rooms = decoded
+        #endif
     }
 
     func save() {
-        if let encoded = try? JSONEncoder().encode(rooms) {
-            UserDefaults.standard.set(encoded, forKey: key)
+        #if DEBUG
+        do {
+            let encoded = try JSONEncoder().encode(rooms)
+            defaults.set(encoded, forKey: key)
+            print("[ChildRoomsStore] save: saved \(rooms.count) rooms (bytes \(encoded.count)) to key '\(key)'")
+        } catch {
+            print("[ChildRoomsStore] save: encode failed error=\(error)")
         }
+        #else
+        if let encoded = try? JSONEncoder().encode(rooms) {
+            defaults.set(encoded, forKey: key)
+        }
+        #endif
     }
 
     func add(_ room: ChildSavedRoom) {
         rooms.append(room)
+        save()
+    }
+
+    func upsert(_ room: ChildSavedRoom) {
+        let now = Date()
+        if let hostUUID = room.hostUUID {
+            if let idx = rooms.firstIndex(where: {
+                $0.hostUUID == hostUUID && $0.preferredTransport == room.preferredTransport
+            }) {
+                rooms[idx].label = room.label
+                rooms[idx].preferredTransport = room.preferredTransport
+                rooms[idx].hostUUID = room.hostUUID
+                rooms[idx].peerIP = room.peerIP
+                rooms[idx].peerPort = room.peerPort
+                rooms[idx].lastUsedAt = now
+                save()
+                return
+            }
+        } else if let peerIP = room.peerIP, let peerPort = room.peerPort {
+            if let idx = rooms.firstIndex(where: {
+                $0.peerIP == peerIP &&
+                $0.peerPort == peerPort &&
+                $0.preferredTransport == room.preferredTransport
+            }) {
+                rooms[idx].label = room.label
+                rooms[idx].preferredTransport = room.preferredTransport
+                rooms[idx].hostUUID = room.hostUUID
+                rooms[idx].peerIP = room.peerIP
+                rooms[idx].peerPort = room.peerPort
+                rooms[idx].lastUsedAt = now
+                save()
+                return
+            }
+        }
+
+        var newRoom = room
+        newRoom.lastUsedAt = now
+        rooms.append(newRoom)
         save()
     }
 
