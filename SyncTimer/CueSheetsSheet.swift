@@ -323,7 +323,7 @@ struct CueSheetsSheet: View {
                 onLoad(sheet)
                 isPresented = false
             }
-            Button("Load and broadcast (cues are buggy)") {
+            Button("Load & broadcast") {
                 onLoad(sheet)      // local first
                 onBroadcast(sheet) // then broadcast
                 isPresented = false
