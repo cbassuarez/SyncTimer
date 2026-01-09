@@ -9923,6 +9923,10 @@ private struct JoinTabView: View {
     @State private var lastRequest: HostJoinRequestV1? = nil
     @State private var lastJoinRequest: JoinRequestV1? = nil
     @State private var preferredTransport: SyncSettings.SyncConnectionMethod = .bluetooth
+    @State private var renameText: String = ""
+    @State private var renameTargetKey: RoomKey? = nil
+    @State private var renameInitialLabel: String = ""
+    @State private var showRenamePrompt: Bool = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -9942,6 +9946,8 @@ private struct JoinTabView: View {
                 errorCard(message: scanError)
             } else if let request = lastRequest {
                 joinActionsCard(for: request)
+            } else if let _ = lastJoinRequest, let key = renameTargetKey {
+                renameActionsCard(label: renameInitialLabel, key: key)
             } else if let joinError = joinRouter.lastJoinUserFacingError {
                 incompleteWiFiCard(message: joinError)
             }
@@ -9949,11 +9955,29 @@ private struct JoinTabView: View {
         .onAppear {
             refreshCameraPermission()
         }
+        .onChange(of: joinRouter.pending?.selectedHostUUID) { _ in
+            if let request = joinRouter.pending, lastJoinRequest?.requestId == request.requestId {
+                handleResolvedJoinRoom(request)
+            }
+        }
         .onChange(of: pendingRequest?.hostUUID) { _ in
             if let request = pendingRequest {
                 pendingRequest = nil
                 handleJoin(request)
             }
+        }
+        .alert("Rename Room", isPresented: $showRenamePrompt) {
+            TextField("Room name", text: $renameText)
+            Button("Done") {
+                let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let key = renameTargetKey,
+                      !trimmed.isEmpty,
+                      trimmed != renameInitialLabel else { return }
+                roomsStore.renameRoom(key: key, to: trimmed)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Give this room a name you’ll recognize.")
         }
     }
 
@@ -10109,7 +10133,7 @@ private struct JoinTabView: View {
         #if canImport(UIKit)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         #endif
-        persistJoinRoomIfPossible(request)
+        handleResolvedJoinRoom(request)
         joinRouter.ingestParsed(request)
     }
 
@@ -10182,36 +10206,29 @@ private struct JoinTabView: View {
 
     private func persistLegacyRoomIfNeeded(_ request: HostJoinRequestV1) {
         let label = legacyRoomLabel(for: request)
-        let room = ChildSavedRoom(
-            label: label,
-            preferredTransport: preferredTransport,
-            hostUUID: request.hostUUID
-        )
-        roomsStore.upsert(room)
+        let key = RoomKey.fromLegacyRequest(request, transport: preferredTransport)
+        roomsStore.upsertObservedRoom(key: key, observedLabel: label, source: .remote)
+        prepareRenameIfNeeded(key: key, label: label)
         #if DEBUG
         print("[JoinTabView] persist legacy: hostUUID=\(request.hostUUID) transport=\(preferredTransport.rawValue) label='\(label)'")
         #endif
     }
 
-    private func persistJoinRoomIfPossible(_ request: JoinRequestV1) {
-        guard let hostUUID = resolvedHostUUID(for: request) else {
+    private func handleResolvedJoinRoom(_ request: JoinRequestV1) {
+        guard let key = RoomKey.fromJoinRequest(request) else {
             #if DEBUG
             print("[JoinTabView] persist join: deferred (needs host selection) requestId=\(request.requestId)")
             #endif
             return
         }
-        let transport = transportForJoin(request.mode)
+        let hostUUID = resolvedHostUUID(for: request)
         let label = joinRoomLabel(for: request, hostUUID: hostUUID)
-        let room = ChildSavedRoom(
-            label: label,
-            preferredTransport: transport,
-            hostUUID: hostUUID,
-            peerIP: request.peerIP,
-            peerPort: request.peerPort.map { String($0) }
-        )
-        roomsStore.upsert(room)
+        roomsStore.upsertObservedRoom(key: key, observedLabel: label, source: .remote)
+        prepareRenameIfNeeded(key: key, label: label)
         #if DEBUG
-        print("[JoinTabView] persist join: hostUUID=\(hostUUID) transport=\(transport.rawValue) peer=\(request.peerIP ?? "nil"):\(request.peerPort.map { String($0) } ?? "nil") label='\(label)'")
+        let hostUUIDLog = hostUUID?.uuidString ?? "nil"
+        let transport = transportForJoin(request.mode)
+        print("[JoinTabView] persist join: hostUUID=\(hostUUIDLog) transport=\(transport.rawValue) peer=\(request.peerIP ?? "nil"):\(request.peerPort.map { String($0) } ?? "nil") label='\(label)'")
         #endif
     }
 
@@ -10231,7 +10248,7 @@ private struct JoinTabView: View {
         return (label?.isEmpty == false) ? label! : fallback
     }
 
-    private func joinRoomLabel(for request: JoinRequestV1, hostUUID: UUID) -> String {
+    private func joinRoomLabel(for request: JoinRequestV1, hostUUID: UUID?) -> String {
         let label = request.roomLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
         if label?.isEmpty == false {
             return label!
@@ -10239,7 +10256,16 @@ private struct JoinTabView: View {
         if let deviceName = request.deviceNames.first, !deviceName.isEmpty {
             return deviceName
         }
-        return "Room \(hostUUID.uuidString.suffix(4))"
+        if let hostUUID {
+            return "Room \(hostUUID.uuidString.suffix(4))"
+        }
+        return "Room"
+    }
+
+    private func prepareRenameIfNeeded(key: RoomKey, label: String) {
+        renameTargetKey = key
+        renameInitialLabel = label
+        renameText = label
     }
 
     private func transportForJoin(_ mode: String) -> SyncSettings.SyncConnectionMethod {
@@ -10319,16 +10345,27 @@ private struct JoinTabView: View {
                 .font(.custom("Roboto-SemiBold", size: 14))
             }
             .buttonStyle(.borderless)
-            Button("Save Room") {
-                let label = request.deviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let fallback = "Room \(request.hostUUID.uuidString.suffix(4))"
-                let name = (label?.isEmpty == false) ? label! : fallback
-                let room = ChildSavedRoom(
-                    label: name,
-                    preferredTransport: preferredTransport,
-                    hostUUID: request.hostUUID
-                )
-                roomsStore.upsert(room)
+            Button("Rename Room") {
+                let label = legacyRoomLabel(for: request)
+                let key = RoomKey.fromLegacyRequest(request, transport: preferredTransport)
+                prepareRenameIfNeeded(key: key, label: label)
+                showRenamePrompt = true
+            }
+            .font(.custom("Roboto-SemiBold", size: 14))
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private func renameActionsCard(label: String, key: RoomKey) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Want to rename this room?")
+                .font(.custom("Roboto-Medium", size: 14))
+            Button("Rename Room") {
+                prepareRenameIfNeeded(key: key, label: label)
+                showRenamePrompt = true
             }
             .font(.custom("Roboto-SemiBold", size: 14))
         }
@@ -10341,6 +10378,10 @@ private struct JoinTabView: View {
 private struct ChildRoomsTabView: View {
     @ObservedObject var roomsStore: ChildRoomsStore
     let onJoinRoom: (ChildSavedRoom) -> Void
+    @State private var renameText: String = ""
+    @State private var renameTargetKey: RoomKey? = nil
+    @State private var renameInitialLabel: String = ""
+    @State private var showRenamePrompt: Bool = false
 
     var body: some View {
         if roomsStore.rooms.isEmpty {
@@ -10362,9 +10403,16 @@ private struct ChildRoomsTabView: View {
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(room.label)
+                                    Text(room.effectiveLabel)
                                         .font(.custom("Roboto-SemiBold", size: 16))
                                         .foregroundColor(.primary)
+                                    if room.shouldShowRenamedBadge() {
+                                        Text("RENAMED")
+                                            .font(.custom("Roboto-SemiBold", size: 10))
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.secondary.opacity(0.2), in: Capsule())
+                                    }
                                     if let hostUUID = room.hostUUID {
                                         Text("Host …\(hostUUID.uuidString.suffix(4))")
                                             .font(.custom("Roboto-Light", size: 11))
@@ -10386,7 +10434,26 @@ private struct ChildRoomsTabView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing) {
+                            Button("Rename") {
+                                if let key = room.roomKey {
+                                    renameTargetKey = key
+                                    renameInitialLabel = room.effectiveLabel
+                                    renameText = room.effectiveLabel
+                                    showRenamePrompt = true
+                                }
+                            }
+                            .tint(.blue)
+                        }
                         .contextMenu {
+                            Button("Rename") {
+                                if let key = room.roomKey {
+                                    renameTargetKey = key
+                                    renameInitialLabel = room.effectiveLabel
+                                    renameText = room.effectiveLabel
+                                    showRenamePrompt = true
+                                }
+                            }
                             Button(role: .destructive) {
                                 roomsStore.delete(room)
                             } label: {
@@ -10396,6 +10463,19 @@ private struct ChildRoomsTabView: View {
                     }
                 }
             }
+        }
+        .alert("Rename Room", isPresented: $showRenamePrompt) {
+            TextField("Room name", text: $renameText)
+            Button("Done") {
+                let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let key = renameTargetKey,
+                      !trimmed.isEmpty,
+                      trimmed != renameInitialLabel else { return }
+                roomsStore.renameRoom(key: key, to: trimmed)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Choose a new name for this room.")
         }
     }
 }
@@ -14065,28 +14145,23 @@ innerBody
     }
 
     private func persistChildRoomIfPossible(_ request: JoinRequestV1) {
-        guard let hostUUID = request.selectedHostUUID ?? (request.hostUUIDs.count == 1 ? request.hostUUIDs.first : nil) else {
+        guard let key = RoomKey.fromJoinRequest(request) else {
             #if DEBUG
             print("[ContentView] persist join: deferred (needs host selection) requestId=\(request.requestId)")
             #endif
             return
         }
-        let transport = transportForJoin(request.mode)
+        let hostUUID = request.selectedHostUUID ?? (request.hostUUIDs.count == 1 ? request.hostUUIDs.first : nil)
         let label = joinRoomLabel(for: request, hostUUID: hostUUID)
-        let room = ChildSavedRoom(
-            label: label,
-            preferredTransport: transport,
-            hostUUID: hostUUID,
-            peerIP: request.peerIP,
-            peerPort: request.peerPort.map { String($0) }
-        )
-        childRoomsStore.upsert(room)
+        childRoomsStore.upsertObservedRoom(key: key, observedLabel: label, source: .remote)
         #if DEBUG
-        print("[ContentView] persist join: hostUUID=\(hostUUID) transport=\(transport.rawValue) peer=\(request.peerIP ?? "nil"):\(request.peerPort.map { String($0) } ?? "nil") label='\(label)'")
+        let transport = transportForJoin(request.mode)
+        let hostUUIDLog = hostUUID?.uuidString ?? "nil"
+        print("[ContentView] persist join: hostUUID=\(hostUUIDLog) transport=\(transport.rawValue) peer=\(request.peerIP ?? "nil"):\(request.peerPort.map { String($0) } ?? "nil") label='\(label)'")
         #endif
     }
 
-    private func joinRoomLabel(for request: JoinRequestV1, hostUUID: UUID) -> String {
+    private func joinRoomLabel(for request: JoinRequestV1, hostUUID: UUID?) -> String {
         let label = request.roomLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
         if label?.isEmpty == false {
             return label!
@@ -14094,7 +14169,10 @@ innerBody
         if let deviceName = request.deviceNames.first, !deviceName.isEmpty {
             return deviceName
         }
-        return "Room \(hostUUID.uuidString.suffix(4))"
+        if let hostUUID {
+            return "Room \(hostUUID.uuidString.suffix(4))"
+        }
+        return "Room"
     }
 
     private func transportForJoin(_ mode: String) -> SyncSettings.SyncConnectionMethod {
