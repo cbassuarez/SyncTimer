@@ -32,7 +32,8 @@ enum SyncMessage: Codable {
         #if os(watchOS)
         return sheet.rawData.base64EncodedString()
         #else
-        let data = CueXML.write(sheet)
+        let blobs = CueLibraryStore.assetBlobsFromDisk(for: sheet)
+        let data = CueXML.write(sheet, assets: blobs)
         return data.base64EncodedString()
         #endif
     }
@@ -45,7 +46,9 @@ enum SyncMessage: Codable {
         #if os(watchOS)
         return CueSheet(rawData: data)
         #else
-        return try CueXML.read(data)
+        var (sheet, assets) = try CueXML.readWithAssets(data)
+        CueLibraryStore.ingestEmbeddedAssetsFromDisk(for: &sheet, blobs: assets)
+        return sheet
         #endif
     }
 

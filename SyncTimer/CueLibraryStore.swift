@@ -169,15 +169,38 @@ extension CueLibraryStore {
     }
 
     nonisolated static func assetDataFromDisk(id: UUID) -> Data? {
+        guard let meta = assetMetaFromDisk(id: id) else { return nil }
+        let dataURL = assetDataURLFromDisk(for: meta)
+        return try? Data(contentsOf: dataURL)
+    }
+
+    nonisolated static func assetMetaFromDisk(id: UUID) -> AssetMeta? {
+        let metaURL = assetMetaURLFromDisk(for: id)
+        guard let metaData = try? Data(contentsOf: metaURL) else { return nil }
+        return try? JSONDecoder().decode(AssetMeta.self, from: metaData)
+    }
+
+    nonisolated static func exportAssetBlobFromDisk(id: UUID) -> CueXML.AssetBlob? {
+        guard let meta = assetMetaFromDisk(id: id),
+              let data = try? Data(contentsOf: assetDataURLFromDisk(for: meta)) else { return nil }
+        let sha = SHA256.hash(data: data).compactMap { String(format: "%02x", $0) }.joined()
+        return CueXML.AssetBlob(id: meta.id, mime: meta.mime, sha256: sha, data: data)
+    }
+
+    private nonisolated static func assetsBaseURL() -> URL {
         let baseURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("CueSheets", isDirectory: true)
         let assetsURL = baseURL.appendingPathComponent("Assets", isDirectory: true)
         try? FileManager.default.createDirectory(at: assetsURL, withIntermediateDirectories: true)
-        let metaURL = assetsURL.appendingPathComponent("\(id.uuidString).json")
-        guard let metaData = try? Data(contentsOf: metaURL),
-              let meta = try? JSONDecoder().decode(AssetMeta.self, from: metaData) else { return nil }
-        let dataURL = assetsURL.appendingPathComponent("\(meta.id.uuidString).\(meta.ext)")
-        return try? Data(contentsOf: dataURL)
+        return assetsURL
+    }
+
+    private nonisolated static func assetMetaURLFromDisk(for id: UUID) -> URL {
+        assetsBaseURL().appendingPathComponent("\(id.uuidString).json")
+    }
+
+    private nonisolated static func assetDataURLFromDisk(for meta: AssetMeta) -> URL {
+        assetsBaseURL().appendingPathComponent("\(meta.id.uuidString).\(meta.ext)")
     }
 
     nonisolated static func cachedImage(id: UUID) -> UIImage? {
@@ -262,6 +285,22 @@ extension CueLibraryStore {
         return CueXML.AssetBlob(id: meta.id, mime: meta.mime, sha256: sha, data: data)
     }
 
+    func assetBlobs(for sheet: CueSheet) -> [CueXML.AssetBlob] {
+        let assetIDs = Set(sheet.events.compactMap { event in
+            if case .image(let payload)? = event.payload { return payload.assetID }
+            return nil
+        })
+        return assetIDs.compactMap { exportAssetBlob(id: $0) }
+    }
+
+    nonisolated static func assetBlobsFromDisk(for sheet: CueSheet) -> [CueXML.AssetBlob] {
+        let assetIDs = Set(sheet.events.compactMap { event in
+            if case .image(let payload)? = event.payload { return payload.assetID }
+            return nil
+        })
+        return assetIDs.compactMap { exportAssetBlobFromDisk(id: $0) }
+    }
+
     func garbageCollectUnusedAssets() {
         let used = referencedAssetIDs()
         guard let metas = try? FileManager.default.contentsOfDirectory(at: assetsURL, includingPropertiesForKeys: nil) else { return }
@@ -290,7 +329,7 @@ extension CueLibraryStore {
         return ids
     }
 
-    private func ingestEmbeddedAssets(for sheet: inout CueSheet, blobs: [CueXML.AssetBlob]) {
+    func ingestEmbeddedAssets(for sheet: inout CueSheet, blobs: [CueXML.AssetBlob]) {
         guard !blobs.isEmpty else { return }
         var remap: [UUID: UUID] = [:]
         for blob in blobs {
@@ -308,6 +347,38 @@ extension CueLibraryStore {
             try? blob.data.write(to: assetDataURL(for: meta), options: .atomic)
             if let encoded = try? JSONEncoder().encode(meta) {
                 try? encoded.write(to: assetMetaURL(for: meta.id), options: .atomic)
+            }
+            if targetID != blob.id {
+                remap[blob.id] = targetID
+            }
+        }
+        guard !remap.isEmpty else { return }
+        for idx in sheet.events.indices {
+            if case .image(let payload)? = sheet.events[idx].payload,
+               let newID = remap[payload.assetID] {
+                sheet.events[idx].payload = .image(.init(assetID: newID, contentMode: payload.contentMode, caption: payload.caption))
+            }
+        }
+    }
+
+    nonisolated static func ingestEmbeddedAssetsFromDisk(for sheet: inout CueSheet, blobs: [CueXML.AssetBlob]) {
+        guard !blobs.isEmpty else { return }
+        var remap: [UUID: UUID] = [:]
+        for blob in blobs {
+            var targetID = blob.id
+            if let existing = assetMetaFromDisk(id: blob.id) {
+                if existing.sha256 != blob.sha256 {
+                    targetID = UUID()
+                }
+            }
+            let ext: String
+            if blob.mime.contains("jpeg") { ext = "jpg" }
+            else if blob.mime.contains("png") { ext = "png" }
+            else { ext = URL(fileURLWithPath: blob.mime).pathExtension.isEmpty ? "bin" : URL(fileURLWithPath: blob.mime).pathExtension }
+            let meta = AssetMeta(id: targetID, mime: blob.mime, ext: ext, sha256: blob.sha256, byteCount: blob.data.count, created: Date())
+            try? blob.data.write(to: assetDataURLFromDisk(for: meta), options: .atomic)
+            if let encoded = try? JSONEncoder().encode(meta) {
+                try? encoded.write(to: assetMetaURLFromDisk(for: meta.id), options: .atomic)
             }
             if targetID != blob.id {
                 remap[blob.id] = targetID
