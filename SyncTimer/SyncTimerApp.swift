@@ -633,7 +633,13 @@ final class SyncSettings: ObservableObject {
     // Singleton-ish access (only if you already use a shared pattern)
         static let shared = SyncSettings()
     // Injected from App root; used by `receiveLoop` to process beacons
-    weak var clockSyncService: ClockSyncService?
+    weak var clockSyncService: ClockSyncService? {
+        didSet {
+            clockSyncService?.burstRequestHandler = { [weak self] count, spacingMs in
+                self?.requestBeaconBurst(count: count, spacingMs: spacingMs)
+            }
+        }
+    }
 
     // Auto-retry state (child, .network only)
     private var reconnectWorkItem: DispatchWorkItem?
@@ -776,6 +782,61 @@ final class SyncSettings: ObservableObject {
     private func endKeepAlive() {
         syncKeepAlive?.cancel()
         syncKeepAlive = nil
+    }
+
+    private func makeBeaconEnvelope() -> BeaconEnvelope {
+        if let env = clockSyncService?.makeBeacon(parentUUID: localPeerID.uuidString) {
+            return env
+        }
+        return BeaconEnvelope(
+            type: .beacon,
+            uuidP: localPeerID.uuidString,
+            uuidC: nil,
+            seq: UInt64(Date().timeIntervalSince1970 * 1000) & 0xFFFFFFFF,
+            tP_send: ProcessInfo.processInfo.systemUptime,
+            tC_recv: nil,
+            tC_echoSend: nil,
+            tP_recv: nil
+        )
+    }
+
+    private func sendBeaconToChildren() {
+        let env = makeBeaconEnvelope()
+        guard let data = try? JSONEncoder().encode(env) else { return }
+        let framed = data + Data([0x0A])
+        for conn in childConnections {
+            conn.send(content: framed, completion: .contentProcessed({ _ in }))
+        }
+    }
+
+    private func requestBeaconBurst(count: Int, spacingMs: Int) {
+        guard role == .parent,
+              isEnabled,
+              connectionMethod != .bluetooth,
+              count > 0 else { return }
+        beaconBurstCancellable?.cancel()
+        isBeaconBurstActive = true
+        var remaining = count
+        sendBeaconToChildren()
+        remaining -= 1
+        guard remaining > 0 else {
+            isBeaconBurstActive = false
+            return
+        }
+        let interval = max(0.01, Double(spacingMs) / 1000.0)
+        beaconBurstCancellable = Timer.publish(every: interval, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                if remaining <= 0 {
+                    self.beaconBurstCancellable?.cancel()
+                    self.beaconBurstCancellable = nil
+                    self.isBeaconBurstActive = false
+                    return
+                }
+                self.sendBeaconToChildren()
+                remaining -= 1
+            }
     }
     
     @AppStorage("localNickname") var localNickname: String = NicknameGenerator.make()
@@ -1093,6 +1154,8 @@ final class SyncSettings: ObservableObject {
     
     private var listener: NWListener?
     private var beaconCancellable: AnyCancellable?
+    private var beaconBurstCancellable: AnyCancellable?
+    private var isBeaconBurstActive = false
     private var childConnections: [NWConnection] = []
     private var clientConnection: NWConnection?
     
@@ -1202,20 +1265,8 @@ final class SyncSettings: ObservableObject {
                         .autoconnect()
                         .sink { [weak self] _ in
                             guard let self = self, self.isEnabled else { return }
-                            let env = BeaconEnvelope(
-                                type: .beacon,
-                                uuidP: self.localPeerID.uuidString,
-                                uuidC: nil,
-                                seq: UInt64(Date().timeIntervalSince1970 * 1000) & 0xFFFFFFFF,
-                                tP_send: ProcessInfo.processInfo.systemUptime,
-                                tC_recv: nil,
-                                tC_echoSend: nil,
-                                tP_recv: nil
-                            )
-                            if let data = try? JSONEncoder().encode(env) {
-                                let framed = data + Data([0x0A])
-                                for conn in self.childConnections { conn.send(content: framed, completion: .contentProcessed({ _ in })) }
-                            }
+                            guard !self.isBeaconBurstActive else { return }
+                            self.sendBeaconToChildren()
                         }
                 }
         beginKeepAlive() // <—
@@ -1269,7 +1320,10 @@ final class SyncSettings: ObservableObject {
         case .bonjour:   bonjourManager.stopAdvertising()
         }
         beaconCancellable?.cancel()
-                beaconCancellable = nil
+        beaconCancellable = nil
+        beaconBurstCancellable?.cancel()
+        beaconBurstCancellable = nil
+        isBeaconBurstActive = false
         clockSyncService?.reset()
         endKeepAlive()   // <—
     }
@@ -4158,6 +4212,15 @@ struct MainScreen: View {
     @State private var loadedCueSheetID: UUID? = nil
     @State private var loadedCueSheet: CueSheet? = nil
     @State private var pendingPlaybackState: PlaybackState? = nil
+    @State private var playbackStateSeq: UInt64 = 0
+    @State private var playbackStopAnchorElapsedNs: UInt64? = nil
+    @State private var playbackStopAnchorUptimeNs: UInt64? = nil
+    @State private var lastAppliedPlaybackSeq: UInt64 = 0
+    @State private var lastStopFinalSettleSeq: UInt64? = nil
+    @State private var lastStopAnchorElapsedNs: UInt64? = nil
+    @State private var lastStopAnchorUptimeNs: UInt64? = nil
+    @State private var stopSettleCancellable: AnyCancellable? = nil
+    @State private var stopSettleFinalWorkItem: DispatchWorkItem? = nil
     
     @State private var childDecorativeSchedule: [Event] = [] // .message + .image from the loaded sheet
     @State private var childDecorativeCursor: Int = 0
@@ -4366,8 +4429,25 @@ struct MainScreen: View {
             let currentIndex = sorted.lastIndex { $0.at <= elapsed }
             let nextIndex = sorted.firstIndex { $0.at > elapsed }
             let startEpoch = startDate?.timeIntervalSince1970 ?? Date().timeIntervalSince1970 - elapsed
+            let playbackPhase: PlaybackPhase = {
+                switch phase {
+                case .running: return .running
+                case .paused: return .paused
+                case .idle, .countdown: return .idle
+                }
+            }()
+            if playbackPhase == .running {
+                clearPlaybackStopAnchor()
+            } else {
+                capturePlaybackStopAnchor(elapsedSeconds: elapsed)
+            }
+            playbackStateSeq &+= 1
             return PlaybackState(
-                isRunning: phase == .running,
+                isRunning: playbackPhase == .running,
+                phase: playbackPhase,
+                seq: playbackStateSeq,
+                masterUptimeNsAtStop: playbackPhase == .running ? nil : playbackStopAnchorUptimeNs,
+                elapsedAtStopNs: playbackPhase == .running ? nil : playbackStopAnchorElapsedNs,
                 startTime: startEpoch,
                 elapsedTime: elapsed,
                 currentEventID: currentIndex.map { sorted[$0].id },
@@ -4375,6 +4455,17 @@ struct MainScreen: View {
                 sheetID: sheet.id,
                 revision: sheetRevision(for: sheet)
             )
+        }
+
+        private func broadcastPlaybackStateIfNeeded() {
+            guard syncSettings.role == .parent,
+                  syncSettings.isEnabled,
+                  let sheet = loadedCueSheet else { return }
+            let state = makePlaybackState(for: sheet)
+            syncSettings.broadcastSyncMessage(.playbackState(state))
+            if settings.simulateChildMode {
+                applyIncomingSyncMessage(.playbackState(state))
+            }
         }
     // MARK: – toggleSyncMode (drop-in)
     private func toggleSyncMode() {
@@ -6878,6 +6969,72 @@ struct MainScreen: View {
         }
     }
 
+    private let stopSettleThresholdNs: UInt64 = 10_000_000
+    private let stopSettleDuration: TimeInterval = 0.12
+
+    private func elapsedToNs(_ seconds: TimeInterval) -> UInt64 {
+        UInt64(max(0, (seconds * 1_000_000_000).rounded()))
+    }
+
+    private func capturePlaybackStopAnchor(elapsedSeconds: TimeInterval) {
+        guard playbackStopAnchorElapsedNs == nil else { return }
+        playbackStopAnchorUptimeNs = DispatchTime.now().uptimeNanoseconds
+        playbackStopAnchorElapsedNs = elapsedToNs(elapsedSeconds)
+    }
+
+    private func clearPlaybackStopAnchor() {
+        playbackStopAnchorElapsedNs = nil
+        playbackStopAnchorUptimeNs = nil
+    }
+
+    private func applyStopAnchor(targetElapsedNs: UInt64, allowSlew: Bool) {
+        let targetSeconds = Double(targetElapsedNs) / 1_000_000_000
+        let currentSeconds = childDisplayElapsed
+        let deltaNs = Int64((currentSeconds - targetSeconds) * 1_000_000_000)
+        if !allowSlew || UInt64(abs(deltaNs)) <= stopSettleThresholdNs {
+            stopSettleCancellable?.cancel()
+            childDisplayElapsed = targetSeconds
+            elapsed = targetSeconds
+            return
+        }
+        startStopSettle(from: currentSeconds, to: targetSeconds, duration: stopSettleDuration)
+    }
+
+    private func startStopSettle(from: TimeInterval, to: TimeInterval, duration: TimeInterval) {
+        stopSettleCancellable?.cancel()
+        let startUptime = ProcessInfo.processInfo.systemUptime
+        stopSettleCancellable = Timer.publish(every: dt, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                let now = ProcessInfo.processInfo.systemUptime
+                let progress = min(1, (now - startUptime) / duration)
+                let value = from + (to - from) * progress
+                self.childDisplayElapsed = value
+                self.elapsed = value
+                if progress >= 1 {
+                    self.stopSettleCancellable?.cancel()
+                    self.stopSettleCancellable = nil
+                    self.childDisplayElapsed = to
+                    self.elapsed = to
+                }
+            }
+    }
+
+    private func scheduleStopAnchorReassertion(seq: UInt64?, targetElapsedNs: UInt64, count: Int, spacingMs: Int) {
+        stopSettleFinalWorkItem?.cancel()
+        let delay = max(0.05, Double(count * spacingMs) / 1000.0)
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            guard self.phase != .running else { return }
+            if let seq, self.lastStopFinalSettleSeq == seq { return }
+            self.applyStopAnchor(targetElapsedNs: targetElapsedNs, allowSlew: true)
+            self.lastStopFinalSettleSeq = seq
+        }
+        stopSettleFinalWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
     private func updateChildRunningElapsed(dt: TimeInterval) -> TimeInterval {
         let now = Date()
         if let targetStartDate = childTargetStartDate {
@@ -7461,6 +7618,7 @@ struct MainScreen: View {
             if settings.countdownResetMode == .manual {
                 // true “pause” style
                 phase = .paused
+                capturePlaybackStopAnchor(elapsedSeconds: elapsed)
                 // broadcast the pause so kids stop where they are
                 sendPause(to: countdownRemaining)
             } else {
@@ -7469,14 +7627,17 @@ struct MainScreen: View {
                 countdownDigits    = baseDigits
                 countdownRemaining = digitsToTime(baseDigits)
                 phase              = .idle
+                capturePlaybackStopAnchor(elapsedSeconds: elapsed)
                 // tell all children “you’re paused at the full-length value”
                 sendPause(to: countdownRemaining)
             }
+            broadcastPlaybackStateIfNeeded()
             
         case .running:
             ticker?.cancel()
             phase = .paused
             pausedElapsed = elapsed
+            capturePlaybackStopAnchor(elapsedSeconds: elapsed)
             // you already broadcast here:
             if syncSettings.role == .parent && syncSettings.isEnabled {
                 let m = TimerMessage(
@@ -7490,10 +7651,15 @@ struct MainScreen: View {
                 )
                 syncSettings.broadcastToChildren(m)
             }
+            broadcastPlaybackStateIfNeeded()
+            if syncSettings.role == .parent && syncSettings.isEnabled {
+                clockSync.requestBurstSyncSamples(count: 3, spacingMs: 40)
+            }
             
         case .paused:
             if countdownRemaining > 0 {
                 phase = .countdown
+                clearPlaybackStopAnchor()
                 startLoop()
                 if syncSettings.role == .parent && syncSettings.isEnabled {
                     let m = TimerMessage(
@@ -7510,6 +7676,7 @@ struct MainScreen: View {
                 }
             } else {
                 phase = .running
+                clearPlaybackStopAnchor()
                 startDate = Date().addingTimeInterval(-elapsed)
                 startLoop()
                 if syncSettings.role == .parent && syncSettings.isEnabled {
@@ -7551,6 +7718,11 @@ struct MainScreen: View {
         guard phase == .idle || phase == .paused else { return }
         ticker?.cancel()
         phase = .idle
+        clearPlaybackStopAnchor()
+        stopSettleCancellable?.cancel()
+        stopSettleFinalWorkItem?.cancel()
+        lastStopAnchorElapsedNs = nil
+        lastStopAnchorUptimeNs = nil
 
         // Rebuild cues/overlays from the currently loaded sheet so state mirrors a fresh load
         reloadCurrentCueSheet()
@@ -7626,13 +7798,28 @@ struct MainScreen: View {
                 return
             }
 
+            let wasRunning = phase == .running
+            if let seq = state.seq, seq <= lastAppliedPlaybackSeq {
+                return
+            }
+            if let seq = state.seq {
+                lastAppliedPlaybackSeq = seq
+            }
+
+            let incomingPhase = state.phase ?? (state.isRunning ? .running : (state.elapsedTime == 0 ? .idle : .paused))
             let delta = max(0, Date().timeIntervalSince(state.sentAt))
             var adjusted = state
-            if state.isRunning {
+            adjusted.isRunning = (incomingPhase == .running)
+            if incomingPhase == .running {
                 adjusted.elapsedTime += delta
             }
 
-            if adjusted.isRunning {
+            if incomingPhase == .running {
+                stopSettleCancellable?.cancel()
+                stopSettleFinalWorkItem?.cancel()
+                lastStopFinalSettleSeq = nil
+                lastStopAnchorElapsedNs = nil
+                lastStopAnchorUptimeNs = nil
                 let targetStart = Date().addingTimeInterval(-adjusted.elapsedTime)
                 childTargetStartDate = targetStart
                 if startDate == nil {
@@ -7645,11 +7832,28 @@ struct MainScreen: View {
                 startLoop()
             } else {
                 ticker?.cancel()
-                phase = adjusted.elapsedTime == 0 ? .idle : .paused
+                phase = incomingPhase == .idle ? .idle : .paused
                 childTargetStartDate = nil
                 startDate = nil
-                childDisplayElapsed = adjusted.elapsedTime
-                elapsed = adjusted.elapsedTime
+                if let anchorNs = adjusted.elapsedAtStopNs {
+                    adjusted.elapsedTime = Double(anchorNs) / 1_000_000_000
+                    let isNewAnchor = (anchorNs != lastStopAnchorElapsedNs)
+                        || (state.masterUptimeNsAtStop != lastStopAnchorUptimeNs)
+                    let shouldSlew = isNewAnchor || wasRunning
+                    // Stop anchor: snap/slew once into the authoritative elapsed, then freeze.
+                    applyStopAnchor(targetElapsedNs: anchorNs, allowSlew: shouldSlew)
+                    lastStopAnchorElapsedNs = anchorNs
+                    lastStopAnchorUptimeNs = state.masterUptimeNsAtStop
+                    if shouldSlew {
+                        scheduleStopAnchorReassertion(seq: state.seq,
+                                                      targetElapsedNs: anchorNs,
+                                                      count: 3,
+                                                      spacingMs: 40)
+                    }
+                } else {
+                    childDisplayElapsed = adjusted.elapsedTime
+                    elapsed = adjusted.elapsedTime
+                }
             }
 
             cueDisplay.syncPlaybackState(adjusted)

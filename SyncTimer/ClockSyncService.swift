@@ -27,6 +27,8 @@ public struct BeaconEnvelope: Codable {
 public final class ClockSyncService: ObservableObject {
     @Published public private(set) var currentOffset: Double = 0 // seconds
 
+    public var burstRequestHandler: ((Int, Int) -> Void)?
+
     // Shared mutable state guarded by a private serial queue
         private var kfPerParent: [String: ClockKalman] = [:]
         private var lastSeqPerParent: [String: UInt64] = [:]
@@ -48,6 +50,10 @@ public final class ClockSyncService: ObservableObject {
                               tC_recv: nil,
                               tC_echoSend: nil,
                               tP_recv: nil)
+    }
+
+    public func requestBurstSyncSamples(count: Int, spacingMs: Int) {
+        burstRequestHandler?(count, spacingMs)
     }
 
     // MARK: – Handle inbound envelope and produce any response envelope (echo/followup).
