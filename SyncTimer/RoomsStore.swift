@@ -104,3 +104,106 @@ final class RoomsStore: ObservableObject {
         }
     }
 }
+
+struct ChildSavedRoom: Identifiable, Codable, Equatable {
+    let id: UUID
+    var label: String
+    var preferredTransport: SyncSettings.SyncConnectionMethod
+    var hostUUID: UUID?
+    var peerIP: String?
+    var peerPort: String?
+    let createdAt: Date
+    var lastUsedAt: Date?
+
+    init(label: String,
+         preferredTransport: SyncSettings.SyncConnectionMethod,
+         hostUUID: UUID? = nil,
+         peerIP: String? = nil,
+         peerPort: String? = nil) {
+        self.id = UUID()
+        self.label = label
+        self.preferredTransport = preferredTransport
+        self.hostUUID = hostUUID
+        self.peerIP = peerIP
+        self.peerPort = peerPort
+        self.createdAt = Date()
+        self.lastUsedAt = Date()
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case label
+        case preferredTransport
+        case hostUUID
+        case peerIP
+        case peerPort
+        case createdAt
+        case lastUsedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        label = try container.decode(String.self, forKey: .label)
+        hostUUID = try container.decodeIfPresent(UUID.self, forKey: .hostUUID)
+        peerIP = try container.decodeIfPresent(String.self, forKey: .peerIP)
+        peerPort = try container.decodeIfPresent(String.self, forKey: .peerPort)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        lastUsedAt = try container.decodeIfPresent(Date.self, forKey: .lastUsedAt)
+
+        let transportRaw = try container.decode(String.self, forKey: .preferredTransport)
+        preferredTransport = SyncSettings.SyncConnectionMethod(rawValue: transportRaw) ?? .bluetooth
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(label, forKey: .label)
+        try container.encode(preferredTransport.rawValue, forKey: .preferredTransport)
+        try container.encodeIfPresent(hostUUID, forKey: .hostUUID)
+        try container.encodeIfPresent(peerIP, forKey: .peerIP)
+        try container.encodeIfPresent(peerPort, forKey: .peerPort)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(lastUsedAt, forKey: .lastUsedAt)
+    }
+}
+
+@MainActor
+final class ChildRoomsStore: ObservableObject {
+    @Published var rooms: [ChildSavedRoom] = []
+
+    private let key = "child_rooms_v1"
+
+    init() {
+        load()
+    }
+
+    func load() {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let decoded = try? JSONDecoder().decode([ChildSavedRoom].self, from: data) else { return }
+        rooms = decoded
+    }
+
+    func save() {
+        if let encoded = try? JSONEncoder().encode(rooms) {
+            UserDefaults.standard.set(encoded, forKey: key)
+        }
+    }
+
+    func add(_ room: ChildSavedRoom) {
+        rooms.append(room)
+        save()
+    }
+
+    func delete(_ room: ChildSavedRoom) {
+        rooms.removeAll { $0.id == room.id }
+        save()
+    }
+
+    func updateLastUsed(_ room: ChildSavedRoom) {
+        if let idx = rooms.firstIndex(of: room) {
+            rooms[idx].lastUsedAt = Date()
+            save()
+        }
+    }
+}
