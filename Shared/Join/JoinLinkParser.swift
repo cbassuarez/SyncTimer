@@ -78,6 +78,22 @@ enum JoinLinkParser {
             transportHint = "bonjour"
         }
 
+        var peerIP: String? = nil
+        var peerPort: UInt16? = nil
+        if mode == "wifi" {
+            if let rawIP = query["ip"] ?? query["peer_ip"] {
+                let trimmed = rawIP.trimmingCharacters(in: .whitespacesAndNewlines)
+                if isLikelyIPLiteral(trimmed) {
+                    peerIP = trimmed
+                }
+            }
+            if let rawPort = query["port"] ?? query["peer_port"],
+               let port = UInt16(rawPort),
+               isValidEphemeralPort(port) {
+                peerPort = port
+            }
+        }
+
         var minBuild: Int? = nil
         if let minBuildRaw = query["min_build"] {
             guard let parsed = Int(minBuildRaw) else {
@@ -98,10 +114,22 @@ enum JoinLinkParser {
             hostUUIDs: hostUUIDs,
             roomLabel: roomLabel,
             deviceNames: deviceNames,
+            peerIP: peerIP,
+            peerPort: peerPort,
             selectedHostUUID: nil,
             minBuild: minBuild,
             sourceURL: url.absoluteString
         )
         return .success(request)
+    }
+
+    private static func isLikelyIPLiteral(_ value: String) -> Bool {
+        guard !value.isEmpty else { return false }
+        let allowed = CharacterSet(charactersIn: "0123456789abcdefABCDEF:.")
+        return value.unicodeScalars.allSatisfy { allowed.contains($0) }
+    }
+
+    private static func isValidEphemeralPort(_ port: UInt16) -> Bool {
+        (49153...65534).contains(port)
     }
 }
