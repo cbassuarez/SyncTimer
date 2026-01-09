@@ -9464,19 +9464,21 @@ struct ConnectionPage: View {
                                     .fixedSize(horizontal: false, vertical: true)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 28)
-                if syncSettings.role == .parent {
-                    Text("Share a Join QR for children to connect.")
-                        .font(.custom("Roboto-Light", size: 12))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.bottom, 18)
-                } else {
-                    Text("Scan a parent Join QR to connect.")
-                        .font(.custom("Roboto-Light", size: 12))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.bottom, 18)
-                }
+                
+                // MARK: - HACK: WHEN YOU REFACTOR THE CONNECT PAGE, YOU SHOULD PROBABLY BRING THIS BACK
+//                if syncSettings.role == .parent {
+  //                  Text("Share a Join QR for children to connect.")
+    //                    .font(.custom("Roboto-Light", size: 12))
+      //                  .foregroundColor(.secondary)
+        //                .padding(.horizontal, 8)
+          //              .padding(.bottom, 18)
+            //    } else {
+  //                  Text("Scan a parent Join QR to connect.")
+    //                    .font(.custom("Roboto-Light", size: 12))
+      //                  .foregroundColor(.secondary)
+        //                .padding(.horizontal, 8)
+          //              .padding(.bottom, 18)
+            //    }
 
                 switch syncSettings.connectionMethod {
                 case .network:
@@ -13828,6 +13830,9 @@ innerBody
             guard !didCheckJoinHandoff else { return }
             didCheckJoinHandoff = true
             joinRouter.ingestAppGroupPendingIfAny()
+            if syncSettings.connectionMethod == .bonjour {
+                            syncSettings.connectionMethod = .network
+                        }
             applyJoinIfReady()
         }
         .onChange(of: joinRouter.pending?.selectedHostUUID) { _ in
@@ -13846,24 +13851,36 @@ innerBody
         guard handledJoinRequestId != request.requestId else { return }
 
         handledJoinRequestId = request.requestId
-        showSettings = false
-        mainMode = .sync
-
-        syncSettings.role = .child
-        syncSettings.isEnabled = true
+        let resolvedMethod: SyncSettings.SyncConnectionMethod
         switch request.mode {
         case "nearby", "bluetooth":
-            syncSettings.connectionMethod = .bluetooth
+            resolvedMethod = .bluetooth
         case "wifi":
-            syncSettings.connectionMethod = .bonjour
+            resolvedMethod = .network
         default:
-            syncSettings.connectionMethod = .bluetooth
+            resolvedMethod = .bluetooth
         }
+        
+        if syncSettings.isEnabled {
+                    if syncSettings.role == .parent { syncSettings.stopParent() }
+                    else { syncSettings.stopChild() }
+                    syncSettings.isEnabled = false
+                }
+
+                syncSettings.role = .child
+                syncSettings.connectionMethod = resolvedMethod
         syncSettings.applyJoinConstraints(
             allowed: Set(request.hostUUIDs),
             selected: request.selectedHostUUID
         )
         syncSettings.startChild()
+        if resolvedMethod == .bluetooth, syncSettings.tapPairingAvailable {
+                    syncSettings.beginTapPairing()
+                }
+                syncSettings.isEnabled = true
+
+                showSettings = false
+                mainMode = .sync
         joinRouter.markConsumed()
     }
 }
