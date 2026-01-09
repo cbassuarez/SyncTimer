@@ -639,7 +639,7 @@ extension HostJoinParseError: LocalizedError {
         case .invalidURL:
             return "That doesn’t look like a SyncTimer link."
         case .invalidHost, .invalidPath:
-            return "This QR isn’t a SyncTimer host link."
+            return "This isn’t a SyncTimer join link."
         case .invalidVersion:
             return "This join link is outdated."
         case .missingHostUUID, .invalidHostUUID:
@@ -693,6 +693,41 @@ enum HostJoinLinkParser {
                 sourceURL: url.absoluteString
             )
         )
+    }
+}
+
+private enum ChildJoinLinkParseResult {
+    case join(JoinRequestV1)
+    case legacy(HostJoinRequestV1)
+}
+
+private enum ChildJoinLinkParseError: Error, Equatable {
+    case notSyncTimerLink
+    case unsupportedSyncTimerLink
+    case joinError(JoinLinkParser.JoinLinkError)
+    case legacyError(HostJoinParseError)
+}
+
+private func parseChildJoinLink(url: URL, currentBuild: Int? = nil) -> Result<ChildJoinLinkParseResult, ChildJoinLinkParseError> {
+    guard url.host == "synctimerapp.com" else {
+        return .failure(.notSyncTimerLink)
+    }
+    switch JoinRequestV1.parse(url: url, currentBuild: currentBuild) {
+    case .success(let request):
+        return .success(.join(request))
+    case .failure(let error):
+        if case .invalidPath = error {
+            switch HostJoinLinkParser.parse(url: url) {
+            case .success(let request):
+                return .success(.legacy(request))
+            case .failure(let legacyError):
+                if case .invalidPath = legacyError {
+                    return .failure(.unsupportedSyncTimerLink)
+                }
+                return .failure(.legacyError(legacyError))
+            }
+        }
+        return .failure(.joinError(error))
     }
 }
 
@@ -9873,6 +9908,7 @@ private struct ChildJoinSheet: View {
 }
 
 private struct JoinTabView: View {
+    @EnvironmentObject private var joinRouter: JoinRouter
     @ObservedObject var roomsStore: ChildRoomsStore
     @Binding var pendingRequest: HostJoinRequestV1?
     let onJoinRequest: (HostJoinRequestV1, SyncSettings.SyncConnectionMethod) -> Void
@@ -9889,6 +9925,7 @@ private struct JoinTabView: View {
     @State private var scanError: String? = nil
     @State private var scanResetToken = UUID()
     @State private var lastRequest: HostJoinRequestV1? = nil
+    @State private var lastJoinRequest: JoinRequestV1? = nil
     @State private var preferredTransport: SyncSettings.SyncConnectionMethod = .bluetooth
 
     var body: some View {
@@ -9996,7 +10033,13 @@ private struct JoinTabView: View {
         if let request = lastRequest {
             return "Connecting to \(request.deviceName ?? "parent")…"
         }
-        return "Point the camera at the parent QR."
+        if let request = lastJoinRequest {
+            let label = request.roomLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let fallback = request.deviceNames.first ?? "room"
+            let name = (label?.isEmpty == false) ? label! : fallback
+            return "Connecting to \(name)…"
+        }
+        return "Point the camera at the join QR."
     }
 
     private var torchAvailable: Bool {
@@ -10019,24 +10062,46 @@ private struct JoinTabView: View {
     }
 
     private func handleScan(_ code: String) {
-        switch HostJoinLinkParser.parse(urlString: code) {
-        case .success(let request):
-            handleJoin(request)
-        case .failure(let error):
-            scanError = error.errorDescription ?? "Invalid link."
+        guard let url = normalizedURL(from: code) else {
+            scanError = "Not a SyncTimer link."
             isScanning = false
             lastRequest = nil
+            lastJoinRequest = nil
+            return
+        }
+        switch parseChildJoinLink(url: url) {
+        case .success(.join(let request)):
+            handleJoin(request)
+        case .success(.legacy(let request)):
+            handleJoin(request)
+        case .failure(let error):
+            scanError = scanErrorMessage(for: error)
+            isScanning = false
+            lastRequest = nil
+            lastJoinRequest = nil
         }
     }
 
     private func handleJoin(_ request: HostJoinRequestV1) {
         scanError = nil
         lastRequest = request
+        lastJoinRequest = nil
         isScanning = false
         #if canImport(UIKit)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         #endif
         onJoinRequest(request, preferredTransport)
+    }
+
+    private func handleJoin(_ request: JoinRequestV1) {
+        scanError = nil
+        lastRequest = nil
+        lastJoinRequest = request
+        isScanning = false
+        #if canImport(UIKit)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        #endif
+        joinRouter.ingestParsed(request)
     }
 
     private func pasteLink() {
@@ -10046,9 +10111,10 @@ private struct JoinTabView: View {
         let pasteboardText = ""
         #endif
         guard !pasteboardText.isEmpty else {
-            scanError = "Paste a SyncTimer host link."
+            scanError = "Paste a SyncTimer join link."
             isScanning = false
             lastRequest = nil
+            lastJoinRequest = nil
             return
         }
         handleScan(pasteboardText)
@@ -10058,7 +10124,50 @@ private struct JoinTabView: View {
         scanError = nil
         isScanning = true
         lastRequest = nil
+        lastJoinRequest = nil
         scanResetToken = UUID()
+    }
+
+    private func normalizedURL(from code: String) -> URL? {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let url = URL(string: trimmed) {
+            return url
+        }
+        if !trimmed.lowercased().hasPrefix("http"),
+           let url = URL(string: "https://\(trimmed)") {
+            return url
+        }
+        return nil
+    }
+
+    private func scanErrorMessage(for error: ChildJoinLinkParseError) -> String {
+        switch error {
+        case .notSyncTimerLink:
+            return "Not a SyncTimer link."
+        case .unsupportedSyncTimerLink:
+            return "Unsupported SyncTimer link."
+        case .joinError(let joinError):
+            return joinErrorMessage(for: joinError)
+        case .legacyError(let legacyError):
+            return legacyError.errorDescription ?? "Invalid link."
+        }
+    }
+
+    private func joinErrorMessage(for error: JoinLinkParser.JoinLinkError) -> String {
+        switch error {
+        case .invalidVersion:
+            return "This join link is outdated."
+        case .invalidMode:
+            return "Unsupported join mode."
+        case .invalidHosts:
+            return "This SyncTimer join link is missing host info."
+        case .invalidMinBuild:
+            return "This isn’t a SyncTimer join link."
+        case .updateRequired(let minBuild):
+            return "Update required (build \(minBuild)+) to join."
+        case .invalidPath:
+            return "Unsupported SyncTimer link."
+        }
     }
 
     @ViewBuilder
@@ -13718,7 +13827,14 @@ innerBody
 
         syncSettings.role = .child
         syncSettings.isEnabled = true
-        syncSettings.connectionMethod = request.mode == "nearby" ? .bluetooth : .bonjour
+        switch request.mode {
+        case "nearby", "bluetooth":
+            syncSettings.connectionMethod = .bluetooth
+        case "wifi":
+            syncSettings.connectionMethod = .bonjour
+        default:
+            syncSettings.connectionMethod = .bluetooth
+        }
         syncSettings.applyJoinConstraints(
             allowed: Set(request.hostUUIDs),
             selected: request.selectedHostUUID
@@ -13926,28 +14042,32 @@ if WCSession.isSupported() {
                     .dynamicTypeSize(.small ... .large)
             // “Open in SyncTimer” from Files/Share Sheet (XML only)
                     .onOpenURL { url in
-                                    if url.host == "synctimerapp.com", url.path == "/join" {
-                                        joinRouter.ingestUniversalLink(url)
+                                    switch parseChildJoinLink(url: url) {
+                                    case .success(.join(let request)):
+                                        joinRouter.ingestParsed(request)
                                         return
-                                    }
-                                    if url.host == "synctimerapp.com", url.path == "/host" {
-                                        if case .success(let request) = HostJoinLinkParser.parse(url: url) {
-                                            syncSettings.pendingHostJoinRequest = request
-                                        }
+                                    case .success(.legacy(let request)):
+                                        syncSettings.pendingHostJoinRequest = request
                                         return
+                                    case .failure(.joinError(let error)):
+                                        joinRouter.handleParseFailure(error)
+                                        return
+                                    default:
+                                        break
                                     }
                                     handleOpenURL(url)
                                 }
                     .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
                         guard let url = activity.webpageURL else { return }
-                        if url.host == "synctimerapp.com", url.path == "/join" {
-                            joinRouter.ingestUniversalLink(url)
-                            return
-                        }
-                        if url.host == "synctimerapp.com", url.path == "/host" {
-                            if case .success(let request) = HostJoinLinkParser.parse(url: url) {
-                                syncSettings.pendingHostJoinRequest = request
-                            }
+                        switch parseChildJoinLink(url: url) {
+                        case .success(.join(let request)):
+                            joinRouter.ingestParsed(request)
+                        case .success(.legacy(let request)):
+                            syncSettings.pendingHostJoinRequest = request
+                        case .failure(.joinError(let error)):
+                            joinRouter.handleParseFailure(error)
+                        default:
+                            break
                         }
                     }
 
