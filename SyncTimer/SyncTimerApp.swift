@@ -4143,6 +4143,10 @@ struct MainScreen: View {
     @State private var loadedCueSheet: CueSheet? = nil
     @State private var pendingPlaybackState: PlaybackState? = nil
     
+    @State private var sheetDecorativeEvents: [Event] = []   // .message + .image from the loaded sheet
+    @State private var childWireCues: [Event] = []           // last-known cue wires from parent
+    @State private var childWireRestarts: [Event] = []       // last-known restart wires from parent
+    
     func apply(_ sheet: CueSheet) {
 
         loadedCueSheetID = sheet.id
@@ -4176,6 +4180,23 @@ struct MainScreen: View {
                     return .cue(CueEvent(cueTime: se.at))
                 }
             }
+        
+        sheetDecorativeEvents = mapped.filter {
+            if case .message = $0 { return true }
+            if case .image   = $0 { return true }
+            return false
+        }
+
+        childWireCues = mapped.filter {
+            if case .cue = $0 { return true }
+            return false
+        }
+
+        childWireRestarts = mapped.filter {
+            if case .restart = $0 { return true }
+            return false
+        }
+
         events = mapped
         // Keep rawStops in sync so the stop loop/timer logic continues to work
         rawStops = mapped.compactMap {
@@ -6874,6 +6895,7 @@ struct MainScreen: View {
     }
     
     private func tickRunning() {
+        
         // 0) frame-accurate dt
         let nowUp = ProcessInfo.processInfo.systemUptime
         let dt = max(0, nowUp - (lastTickUptime ?? nowUp))
@@ -6902,19 +6924,22 @@ struct MainScreen: View {
                     stopActive = true
                     stopRemaining = s.duration
                     events.removeFirst()
-
-                    // (optional but nice for the child) tell kids a stop started *now*
+                    let snap = encodeCurrentEvents()
                     var stopMsg = TimerMessage(
                         action: .update,
                         timestamp: Date().timeIntervalSince1970,
                         phase: "stop",
-                        remaining: pausedElapsed,                 // parent’s elapsed at the moment stop began
-                        stopEvents: syncSettings.stopWires,
+                        remaining: pausedElapsed,
+                        stopEvents: snap.stops,
                         anchorElapsed: pausedElapsed,
                         parentLockEnabled: syncSettings.parentLockEnabled,
                         isStopActive: true,
-                        stopRemainingActive: s.duration
+                        stopRemainingActive: s.duration,
+                        cueEvents: snap.cues,
+                        restartEvents: snap.restarts,
+                        sheetLabel: cueBadge.label
                     )
+
                     stopMsg.notesParent = parentNotePayload
                     if syncSettings.role == .parent && syncSettings.isEnabled {
                         syncSettings.broadcastToChildren(stopMsg)
@@ -6986,14 +7011,19 @@ struct MainScreen: View {
                     return nil
                 }
             }
+            let snap = encodeCurrentEvents()
             var updateMsg = TimerMessage(
                 action: .update,
                 timestamp: Date().timeIntervalSince1970,
                 phase: "running",
                 remaining: elapsed,
                 stopEvents: remainingStopWires,
-                parentLockEnabled: syncSettings.parentLockEnabled
+                parentLockEnabled: syncSettings.parentLockEnabled,
+                cueEvents: snap.cues,
+                restartEvents: snap.restarts,
+                sheetLabel: cueBadge.label
             )
+
             updateMsg.notesParent = parentNotePayload
             if syncSettings.role == .parent && syncSettings.isEnabled {
                 syncSettings.broadcastToChildren(updateMsg)
@@ -7549,6 +7579,17 @@ struct MainScreen: View {
             events.sort { $0.fireTime < $1.fireTime }
         }
     }
+    
+    private func rebuildChildEventsFromCaches() {
+        var combined: [Event] =
+            rawStops.map(Event.stop) +
+            childWireCues +
+            childWireRestarts +
+            sheetDecorativeEvents
+
+        combined.sort { $0.fireTime < $1.fireTime }
+        events = combined
+    }
 
     func applyIncomingTimerMessage(_ msg: TimerMessage) {
         guard syncSettings.role == .child else { return }
@@ -7562,12 +7603,21 @@ struct MainScreen: View {
                 let delta = max(0, now - msg.timestamp) // never negative
         
         // Rebuild *all* events from wires
-                rawStops = msg.stopEvents.map { StopEvent(eventTime: $0.eventTime, duration: $0.duration) }
-                let cueList: [Event] = (msg.cueEvents ?? []).map { .cue(CueEvent(cueTime: $0.cueTime)) }
-                let rstList: [Event] = (msg.restartEvents ?? []).map { .restart(RestartEvent(restartTime: $0.restartTime)) }
-                var combined: [Event] = rawStops.map(Event.stop) + cueList + rstList
-                combined.sort { $0.fireTime < $1.fireTime }
-                events = combined
+        // Always refresh stops (TimerMessage always carries these)
+        rawStops = msg.stopEvents.map { StopEvent(eventTime: $0.eventTime, duration: $0.duration) }
+        syncSettings.stopWires = msg.stopEvents
+
+        // Only refresh cues/restarts when the parent actually included them
+        if let cueWires = msg.cueEvents {
+            childWireCues = cueWires.map { .cue(CueEvent(cueTime: $0.cueTime)) }
+        }
+        if let rstWires = msg.restartEvents {
+            childWireRestarts = rstWires.map { .restart(RestartEvent(restartTime: $0.restartTime)) }
+        }
+
+        // Rebuild full list (wire stops/cues/restarts + sheet message/image)
+        rebuildChildEventsFromCaches()
+
                 syncSettings.stopWires = msg.stopEvents
         
         // Mirror parent's note and sheet label when provided
@@ -7621,14 +7671,7 @@ struct MainScreen: View {
                                     let flashSec = Double(settings.flashDurationOption) / 1000.0
                                     DispatchQueue.main.asyncAfter(deadline: .now() + flashSec) { flashZero = false }
                                 }
-                    // ✅ Rebuild events if *either* cues or restarts are provided (not both required)
-                        if (msg.cueEvents != nil) || (msg.restartEvents != nil) {
-                            let stops = msg.stopEvents.map { Event.stop(StopEvent(eventTime: $0.eventTime, duration: $0.duration)) }
-                            let cueEv = (msg.cueEvents ?? []).map { Event.cue(CueEvent(cueTime: $0.cueTime)) }
-                            let rstEv = (msg.restartEvents ?? []).map { Event.restart(RestartEvent(restartTime: $0.restartTime)) }
-                            events = (stops + cueEv + rstEv).sorted { $0.fireTime < $1.fireTime }
-                            rawStops = stops.compactMap { if case let .stop(s) = $0 { s } else { nil } }
-                        }
+                    
             // If the parent entered a stop, mirror it locally.
                         if msg.isStopActive == true, let parentStopLeft = msg.stopRemainingActive {
                             // Freeze main clock at parent’s pausedElapsed (as of message time)
@@ -7639,15 +7682,10 @@ struct MainScreen: View {
                             // Ensure the run loop is active so our child ticks the stop timer down
                             startLoop()
                         }
-        case .addEvent:
-                    // Replace the event set with the snapshot the parent sent
-                                let stops = msg.stopEvents.map { Event.stop(StopEvent(eventTime: $0.eventTime, duration: $0.duration)) }
-                                let cues  = (msg.cueEvents ?? []).map { Event.cue(CueEvent(cueTime: $0.cueTime)) }
-                                let rsts  = (msg.restartEvents ?? []).map { Event.restart(RestartEvent(restartTime: $0.restartTime)) }
-                                events = (stops + cues + rsts).sorted { $0.fireTime < $1.fireTime }
-                    rawStops = stops.compactMap {
-                        if case let .stop(s) = $0 { return s } else { return nil }
-                    }
+                case .addEvent:
+                    // caches were already updated at the top of this function (when arrays are present)
+                    rebuildChildEventsFromCaches()
+
                 }
     }
     
