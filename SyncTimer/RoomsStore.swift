@@ -195,6 +195,24 @@ final class ChildRoomsStore: ObservableObject {
         save()
     }
 
+    func upsert(_ room: ChildSavedRoom) {
+        let now = Date()
+        if let idx = rooms.firstIndex(where: { matches($0, room) }) {
+            rooms[idx].label = room.label
+            rooms[idx].preferredTransport = room.preferredTransport
+            rooms[idx].hostUUID = room.hostUUID
+            rooms[idx].peerIP = room.peerIP
+            rooms[idx].peerPort = room.peerPort
+            rooms[idx].lastUsedAt = now
+            save()
+            return
+        }
+        var newRoom = room
+        newRoom.lastUsedAt = now
+        rooms.append(newRoom)
+        save()
+    }
+
     func delete(_ room: ChildSavedRoom) {
         rooms.removeAll { $0.id == room.id }
         save()
@@ -205,5 +223,23 @@ final class ChildRoomsStore: ObservableObject {
             rooms[idx].lastUsedAt = Date()
             save()
         }
+    }
+
+    private func matches(_ lhs: ChildSavedRoom, _ rhs: ChildSavedRoom) -> Bool {
+        if let lhsHost = lhs.hostUUID, let rhsHost = rhs.hostUUID {
+            return lhsHost == rhsHost && lhs.preferredTransport == rhs.preferredTransport
+        }
+        if lhs.hostUUID != nil || rhs.hostUUID != nil {
+            return false
+        }
+        guard let lhsIP = lhs.peerIP,
+              let lhsPort = lhs.peerPort,
+              let rhsIP = rhs.peerIP,
+              let rhsPort = rhs.peerPort else {
+            return false
+        }
+        return lhsIP == rhsIP
+            && lhsPort == rhsPort
+            && lhs.preferredTransport == rhs.preferredTransport
     }
 }

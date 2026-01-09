@@ -10091,6 +10091,15 @@ private struct JoinTabView: View {
         #if canImport(UIKit)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         #endif
+        let label = request.deviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallback = "Room \(request.hostUUID.uuidString.suffix(4))"
+        let name = (label?.isEmpty == false) ? label! : fallback
+        let room = ChildSavedRoom(
+            label: name,
+            preferredTransport: preferredTransport,
+            hostUUID: request.hostUUID
+        )
+        roomsStore.upsert(room)
         onJoinRequest(request, preferredTransport)
     }
 
@@ -10102,6 +10111,30 @@ private struct JoinTabView: View {
         #if canImport(UIKit)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         #endif
+        let selectedHost = request.selectedHostUUID
+            ?? (request.hostUUIDs.count == 1 ? request.hostUUIDs.first : nil)
+        if let hostUUID = selectedHost {
+            let label = request.roomLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let fallback = request.deviceNames.first ?? "Room \(hostUUID.uuidString.suffix(4))"
+            let name = (label?.isEmpty == false) ? label! : fallback
+            let transport: SyncSettings.SyncConnectionMethod
+            switch request.mode {
+            case "wifi":
+                transport = .network
+            case "nearby", "bluetooth":
+                transport = .bluetooth
+            default:
+                transport = .bluetooth
+            }
+            let room = ChildSavedRoom(
+                label: name,
+                preferredTransport: transport,
+                hostUUID: hostUUID,
+                peerIP: request.peerIP,
+                peerPort: request.peerPort.map(String.init)
+            )
+            roomsStore.upsert(room)
+        }
         joinRouter.ingestParsed(request)
     }
 
@@ -10234,7 +10267,7 @@ private struct JoinTabView: View {
                     preferredTransport: preferredTransport,
                     hostUUID: request.hostUUID
                 )
-                roomsStore.add(room)
+                roomsStore.upsert(room)
             }
             .font(.custom("Roboto-SemiBold", size: 14))
         }
