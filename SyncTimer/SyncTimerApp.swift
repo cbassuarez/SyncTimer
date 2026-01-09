@@ -4267,7 +4267,6 @@ struct MainScreen: View {
     @State private var lastLoadedWasBroadcast: Bool = false
     @State private var loadedCueSheetID: UUID? = nil
     @State private var loadedCueSheet: CueSheet? = nil
-    @AppStorage("activeCueSheetID") private var activeCueSheetIDString: String?
     @State private var activeCueSheet: CueSheet? = nil
     @State private var pendingPlaybackState: PlaybackState? = nil
     @State private var playbackStateSeq: UInt64 = 0
@@ -4295,12 +4294,10 @@ struct MainScreen: View {
     }
     private var activeCueSheetID: UUID? {
         get {
-            guard let activeCueSheetIDString,
-                  let id = UUID(uuidString: activeCueSheetIDString) else { return nil }
-            return id
+            UserDefaults.standard.string(forKey: "activeCueSheetID").flatMap(UUID.init)
         }
-        set {
-            activeCueSheetIDString = newValue?.uuidString
+        nonmutating set {
+            UserDefaults.standard.set(newValue?.uuidString, forKey: "activeCueSheetID")
         }
     }
     

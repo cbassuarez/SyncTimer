@@ -242,7 +242,7 @@ final class BLEDriftManager: NSObject {
 
     private func isControlAction(_ action: TimerMessage.Action) -> Bool {
         switch action {
-        case .start, .pause, .reset:
+        case .start, .pause, .reset, .endCueSheet:
             return true
         case .update, .addEvent:
             return false
