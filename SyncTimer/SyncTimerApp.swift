@@ -2096,22 +2096,41 @@ struct NumPadView: View {
             spacing: isPad109Landscape ? 32 : (isPadLandscape ? 52 : vGap)
         ) {
             ForEach(allKeys, id: \.self) { key in
-                Button {
-                    handle(key)
-                } label: {
-                    icon(for: key)
-                        .frame(
-                            maxWidth: .infinity,
-                            minHeight: isPad109Landscape ? 44 : (isPadLandscape ? 52 : calcKeyHeight())
-                        )
+                let keyMinH = isPad109Landscape ? 44 : (isPadLandscape ? 52 : calcKeyHeight())
+                if key == .settings {
+                    let isActive = parentMode == .settings
+                    let circleSize = min(max(44, keyMinH), 76)
+                    let iconPt = max(28, min(34, circleSize * 0.46))
+                    GlassCircleIconButton(
+                        systemName: isActive ? "gearshape.fill" : "gearshape",
+                        tint: isActive ? appSettings.flashColor : appSettings.flashColor.opacity(0.55),
+                        size: circleSize,
+                        iconPointSize: iconPt,
+                        imageRotationDegrees: (!appSettings.lowPowerMode && isActive ? 360 : 0),
+                        imageRotationAnimation: .easeInOut(duration: 0.5),
+                        accessibilityLabel: "Settings"
+                    ) {
+                        handle(.settings)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: keyMinH)
+                } else {
+                    Button {
+                        handle(key)
+                    } label: {
+                        icon(for: key)
+                            .frame(
+                                maxWidth: .infinity,
+                                minHeight: keyMinH
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    // disable all except settings when locked
+                    .disabled(
+                        lockActive
+                        && (key == .digit(0)    // but this won’t match all cases neatly...
+                            || key == .backspace)
+                    )
                 }
-                .buttonStyle(.plain)
-                // disable all except settings when locked
-                .disabled(
-                    lockActive
-                    && (key == .digit(0)    // but this won’t match all cases neatly...
-                        || key == .backspace)
-                )
             }
         }
         
@@ -13647,6 +13666,8 @@ private struct GlassCircleIconButton: View {
     var size: CGFloat = 44
     var iconPointSize: CGFloat = 18
     var iconWeight: Font.Weight = .semibold
+    var imageRotationDegrees: Double = 0
+    var imageRotationAnimation: Animation? = nil
     var accessibilityLabel: String
     var accessibilityHint: String? = nil
     let action: () -> Void
@@ -13668,6 +13689,8 @@ private struct GlassCircleIconButton: View {
                     .font(.system(size: iconPointSize, weight: iconWeight))
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(.white)
+                    .rotationEffect(.degrees(imageRotationDegrees))
+                    .animation(imageRotationAnimation, value: imageRotationDegrees)
             }
             .frame(width: size, height: size)
             .contentShape(Circle())
