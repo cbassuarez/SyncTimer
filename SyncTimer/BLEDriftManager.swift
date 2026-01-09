@@ -257,13 +257,19 @@ final class BLEDriftManager: NSObject {
         let eChild    = resp.elapsedSeconds
         let tMasterRx = Date().timeIntervalSince1970
         let rtt       = tMasterRx - tReq
-        let offset    = tChild - (tReq + rtt/2)
+        let tMid      = tReq + rtt/2
+        let offset    = tChild - tMid
 
-        // Now compute drift:
-        let eMasterAtReq   = owner?.getElapsedAt(timestamp: tReq) ?? 0
-        let eMasterAtChild = eMasterAtReq + (tChild - tReq)
-        let drift          = eChild - eMasterAtChild
+        let eMasterAtMid = owner?.getElapsedAt(timestamp: tMid) ?? 0
+        let drift        = eChild - eMasterAtMid
+        let isAdvancing  = owner?.isTimerAdvancingForDiscipline() ?? false
 
+        if owner?.driftDebugLoggingEnabled == true {
+            print(String(format: "[BLEDrift] rtt=%.4f offset=%.4f drift=%.4f advancing=%@",
+                         rtt, offset, drift, String(isAdvancing)))
+        }
+
+        guard isAdvancing else { return }
         if abs(drift) > 0.005 {
             // Send a one‐shot correction
             let correction = -drift

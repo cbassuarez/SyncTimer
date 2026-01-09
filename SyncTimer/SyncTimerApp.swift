@@ -1099,6 +1099,11 @@ final class SyncSettings: ObservableObject {
     var onReceiveTimer: ((TimerMessage)->Void)? = nil
     var onReceiveSyncMessage: ((SyncEnvelope) -> Void)? = nil
     
+    var elapsedProvider: (() -> TimeInterval)? = nil
+    var elapsedAtProvider: ((TimeInterval) -> TimeInterval)? = nil
+    var isTimerAdvancingProvider: (() -> Bool)? = nil
+    var driftDebugLoggingEnabled: Bool = false
+
     func integrateBonjourConnection(_ conn: NWConnection) {
         clientConnection?.cancel()
         clientConnection = conn
@@ -1109,8 +1114,11 @@ final class SyncSettings: ObservableObject {
         receiveLoop(on: conn)
     }
     
-    func getCurrentElapsed() -> TimeInterval { 0 }
-    func getElapsedAt(timestamp: TimeInterval) -> TimeInterval { 0 }
+    func getCurrentElapsed() -> TimeInterval { elapsedProvider?() ?? 0 }
+    func getElapsedAt(timestamp: TimeInterval) -> TimeInterval {
+        elapsedAtProvider?(timestamp) ?? getCurrentElapsed()
+    }
+    func isTimerAdvancingForDiscipline() -> Bool { isTimerAdvancingProvider?() ?? false }
     
     func setRawStops(_ rawStops: [StopEvent]) {
         let wires = rawStops.map {
@@ -1179,14 +1187,16 @@ final class SyncSettings: ObservableObject {
         
         switch connectionMethod {
                 case .network:   break
-                case .bluetooth: bleDriftManager.start()
+                case .bluetooth:
+                    bleDriftManager.start()
+                    clockSyncService?.reset()
                 case .bonjour:
                     bonjourManager.startAdvertising()
                 statusMessage = "Bonjour: advertising"
             }
         
                 // UltraSync beacons (parent → all), 20 Hz
-                if (ConnectivityManager.shared != nil) {
+                if connectionMethod != .bluetooth, (ConnectivityManager.shared != nil) {
                     beaconCancellable?.cancel()
                     beaconCancellable = Timer.publish(every: 0.05, on: .main, in: .common)
                         .autoconnect()
@@ -1343,11 +1353,13 @@ final class SyncSettings: ObservableObject {
                 // No manual endpoint? Use Bonjour (peer-to-peer Wi-Fi) as the transport.
                 bonjourManager.startBrowsing()
                 statusMessage = "Bonjour: searching…"
+                clockSyncService?.reset()
                 bleDriftManager.start() // keep BLE drift measurement
                 return
             }
             connectToParent(host: h, port: p)
             bonjourManager.startBrowsing()
+            clockSyncService?.reset()
             bleDriftManager.start()
             
         case .bonjour:
@@ -1596,7 +1608,9 @@ final class SyncSettings: ObservableObject {
                                                 }
                                                 continue
                                             }
-                                            if self.isEnabled, let env = try? decoder.decode(BeaconEnvelope.self, from: frame) {
+                                            if self.isEnabled,
+                                               self.connectionMethod != .bluetooth,
+                                               let env = try? decoder.decode(BeaconEnvelope.self, from: frame) {
                                                 // Route via ClockSyncService
                                                 let roleIsChild = (self.role == .child)
                                                                 if let reply = self.clockSyncService?.handleInbound(env,
@@ -4053,6 +4067,8 @@ struct MainScreen: View {
     @State var countdownRemaining: TimeInterval = 0
     @State var elapsed: TimeInterval = 0
     @State var startDate: Date? = nil
+    @State private var childTargetStartDate: Date? = nil
+    @State private var childDisplayElapsed: TimeInterval = 0
     @State private var ticker: AnyCancellable? = nil
     @State private var justEditedAfterPause: Bool = false
     @State private var pausedElapsed: TimeInterval = 0
@@ -5146,6 +5162,7 @@ struct MainScreen: View {
                 
             // 1) Watch commands → Parent-only control (phone enforces authority)
                 .onAppear {
+                    installDisciplineProviders()
                     // Seed two starter presets if none exist (device-local).
                                        if presets.isEmpty {
                                            savePresets([
@@ -6836,11 +6853,56 @@ struct MainScreen: View {
         }
     }
     
+    private func installDisciplineProviders() {
+        syncSettings.elapsedProvider = { [self] in
+            if stopActive { return pausedElapsed }
+            switch phase {
+            case .countdown:
+                return countdownRemaining
+            case .running, .paused, .idle:
+                return elapsed
+            }
+        }
+        syncSettings.elapsedAtProvider = { [self] timestamp in
+            if stopActive { return pausedElapsed }
+            if phase == .running, let startDate {
+                return max(0, timestamp - startDate.timeIntervalSince1970)
+            }
+            if phase == .countdown {
+                return countdownRemaining
+            }
+            return elapsed
+        }
+        syncSettings.isTimerAdvancingProvider = { [self] in
+            phase == .running && !stopActive
+        }
+    }
 
-    
+    private func updateChildRunningElapsed(dt: TimeInterval) -> TimeInterval {
+        let now = Date()
+        if let targetStartDate = childTargetStartDate {
+            if startDate == nil {
+                startDate = targetStartDate
+            } else if let currentStartDate = startDate {
+                let error = currentStartDate.timeIntervalSince(targetStartDate)
+                let maxAdjust = childMaxSlewRate * dt
+                if maxAdjust > 0 {
+                    let clamped = min(max(error, -maxAdjust), maxAdjust)
+                    startDate = currentStartDate.addingTimeInterval(-clamped)
+                }
+            }
+        }
+
+        let candidate = now.timeIntervalSince(startDate ?? now)
+        if candidate >= childDisplayElapsed {
+            childDisplayElapsed = candidate
+        }
+        return childDisplayElapsed
+    }
 
     //──────────────────── timer engine ────────────────────────────────────
     private let dt: TimeInterval = 1.0 / 120.0
+    private let childMaxSlewRate: TimeInterval = 0.05
     
     private func startLoop() {
         ticker?.cancel()
@@ -6908,16 +6970,22 @@ struct MainScreen: View {
                 stopActive = false
                 elapsed = pausedElapsed
                 startDate = Date().addingTimeInterval(-pausedElapsed)
+                if isChildDevice {
+                    childDisplayElapsed = pausedElapsed
+                    childTargetStartDate = startDate
+                }
             }
             return
         }
 
         // 2) Advance the main clock (do this BEFORE event checks)
-        elapsed = Date().timeIntervalSince(startDate ?? Date())
         if isChildDevice {
-            consumeDecorativesUpTo(elapsed)
+            let displayElapsed = updateChildRunningElapsed(dt: dt)
+            elapsed = displayElapsed
+            consumeDecorativesUpTo(displayElapsed)
             return
         }
+        elapsed = Date().timeIntervalSince(startDate ?? Date())
         cueDisplay.apply(elapsed: elapsed)
         
         // 4) Handle next due event
@@ -7564,16 +7632,24 @@ struct MainScreen: View {
                 adjusted.elapsedTime += delta
             }
 
-            elapsed = adjusted.elapsedTime
-            startDate = Date().addingTimeInterval(-adjusted.elapsedTime)
-            lastTickUptime = ProcessInfo.processInfo.systemUptime
-
             if adjusted.isRunning {
+                let targetStart = Date().addingTimeInterval(-adjusted.elapsedTime)
+                childTargetStartDate = targetStart
+                if startDate == nil {
+                    startDate = targetStart
+                    childDisplayElapsed = adjusted.elapsedTime
+                    elapsed = adjusted.elapsedTime
+                }
+                lastTickUptime = ProcessInfo.processInfo.systemUptime
                 phase = .running
                 startLoop()
             } else {
                 ticker?.cancel()
                 phase = adjusted.elapsedTime == 0 ? .idle : .paused
+                childTargetStartDate = nil
+                startDate = nil
+                childDisplayElapsed = adjusted.elapsedTime
+                elapsed = adjusted.elapsedTime
             }
 
             cueDisplay.syncPlaybackState(adjusted)
@@ -7653,13 +7729,18 @@ struct MainScreen: View {
             if msg.phase == "countdown" {
                 countdownRemaining = max(0, qcs(msg.remaining - delta))
                 phase = .countdown
+                childTargetStartDate = nil
+                startDate = nil
                 startLoop()
             } else {
                 // Parent was already running at msg.timestamp; advance by delta
                                 let adj = qcs(msg.remaining + delta)
-                                elapsed = adj
                 phase = .running
-                startDate = Date().addingTimeInterval(-adj)
+                let targetStart = Date().addingTimeInterval(-adj)
+                childTargetStartDate = targetStart
+                startDate = targetStart
+                elapsed = adj
+                childDisplayElapsed = adj
                 startLoop()
             }
             
@@ -7669,6 +7750,9 @@ struct MainScreen: View {
             // Pause uses the exact parent-displayed time (no delta)
                         countdownRemaining = qcs(msg.remaining)
                         elapsed = qcs(msg.remaining)
+            childTargetStartDate = nil
+            startDate = nil
+            childDisplayElapsed = elapsed
             
         case .reset:
                     ticker?.cancel()
@@ -7677,6 +7761,9 @@ struct MainScreen: View {
                                 countdownDuration = 0
                                 countdownRemaining = 0
                                 elapsed = 0
+                    childDisplayElapsed = 0
+                    childTargetStartDate = nil
+                    startDate = nil
                                 stopActive = false
                                 stopRemaining = 0
                     childDecorativeCursor = 0
@@ -7690,9 +7777,17 @@ struct MainScreen: View {
             if msg.phase == "countdown" {
                 countdownRemaining = max(0, qcs(msg.remaining - delta))
                 phase = .countdown
+                childTargetStartDate = nil
+                startDate = nil
             } else {
-                elapsed = qcs(msg.remaining + delta)
+                let adj = qcs(msg.remaining + delta)
                 phase = .running
+                childTargetStartDate = Date().addingTimeInterval(-adj)
+                if startDate == nil {
+                    startDate = childTargetStartDate
+                    elapsed = adj
+                    childDisplayElapsed = adj
+                }
             }
                     // If parent sent an immediate flash edge (cue), mirror it
                                 if msg.flashNow == true {
@@ -7706,8 +7801,11 @@ struct MainScreen: View {
                             // Freeze main clock at parent’s pausedElapsed (as of message time)
                             pausedElapsed = qcs(msg.remaining)   // the elapsed at the moment stop began
                             stopActive = true
+                            elapsed = pausedElapsed
                             // While the packet was in flight, the parent’s stop timer ticked by `delta`
                             stopRemaining = max(0, qcs(parentStopLeft - delta))
+                            childTargetStartDate = nil
+                            childDisplayElapsed = pausedElapsed
                             // Ensure the run loop is active so our child ticks the stop timer down
                             startLoop()
                         }
@@ -7717,7 +7815,8 @@ struct MainScreen: View {
 
                 }
         if phase == .running || phase == .paused {
-            consumeDecorativesUpTo(elapsed)
+            let displayElapsed = isChildDevice ? childDisplayElapsed : elapsed
+            consumeDecorativesUpTo(displayElapsed)
         }
     }
     
