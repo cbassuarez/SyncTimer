@@ -10,6 +10,7 @@ import AudioToolbox
 import CoreText
 import Network
 import SystemConfiguration
+import AVFoundation
 #if canImport(WatchConnectivity)
 import WatchConnectivity
 #endif
@@ -617,6 +618,84 @@ enum RoleSwitchConfirmationMode: String, CaseIterable, Identifiable {
   var id: String { rawValue }
 }
 
+struct HostJoinRequestV1: Equatable {
+    let hostUUID: UUID
+    let deviceName: String?
+    let sourceURL: String
+}
+
+enum HostJoinParseError: Error, Equatable {
+    case invalidURL
+    case invalidHost
+    case invalidPath
+    case invalidVersion
+    case missingHostUUID
+    case invalidHostUUID
+}
+
+extension HostJoinParseError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .invalidURL:
+            return "That doesn’t look like a SyncTimer link."
+        case .invalidHost, .invalidPath:
+            return "This QR isn’t a SyncTimer host link."
+        case .invalidVersion:
+            return "This join link is outdated."
+        case .missingHostUUID, .invalidHostUUID:
+            return "Host ID missing or invalid."
+        }
+    }
+}
+
+enum HostJoinLinkParser {
+    static func parse(urlString: String) -> Result<HostJoinRequestV1, HostJoinParseError> {
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let url = URL(string: trimmed) {
+            return parse(url: url)
+        }
+        if !trimmed.lowercased().hasPrefix("http"),
+           let url = URL(string: "https://\(trimmed)") {
+            return parse(url: url)
+        }
+        return .failure(.invalidURL)
+    }
+
+    static func parse(url: URL) -> Result<HostJoinRequestV1, HostJoinParseError> {
+        guard url.host == "synctimerapp.com" else {
+            return .failure(.invalidHost)
+        }
+        guard url.path == "/host" else {
+            return .failure(.invalidPath)
+        }
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return .failure(.invalidURL)
+        }
+        let queryPairs: [(String, String)] = (components.queryItems ?? []).compactMap { item in
+            guard let value = item.value else { return nil }
+            return (item.name, value)
+        }
+        let query = Dictionary(uniqueKeysWithValues: queryPairs)
+        guard query["v"] == "1" else {
+            return .failure(.invalidVersion)
+        }
+        guard let hostUUIDRaw = query["host_uuid"] else {
+            return .failure(.missingHostUUID)
+        }
+        guard let hostUUID = UUID(uuidString: hostUUIDRaw) else {
+            return .failure(.invalidHostUUID)
+        }
+        let deviceName = query["device_name"]?.removingPercentEncoding
+        return .success(
+            HostJoinRequestV1(
+                hostUUID: hostUUID,
+                deviceName: deviceName,
+                sourceURL: url.absoluteString
+            )
+        )
+    }
+}
+
 extension SyncSettings {
     /// Centralized place to flip connection state.
     /// Call on main when possible; this wraps main-queue just in case.
@@ -1060,6 +1139,7 @@ final class SyncSettings: ObservableObject {
     @Published var stopWires: [StopEventWire] = []
     @Published var joinAllowedHostUUIDs: Set<UUID>? = nil
     @Published var joinSelectedHostUUID: UUID? = nil
+    @Published var pendingHostJoinRequest: HostJoinRequestV1? = nil
     
     /// Existing API to add prior-discovered BLE/Bonjour peers
     func addDiscoveredService(name: String, role: Role, signal: Int) {
@@ -1083,6 +1163,10 @@ final class SyncSettings: ObservableObject {
     func applyJoinConstraints(allowed: Set<UUID>, selected: UUID?) {
         joinAllowedHostUUIDs = allowed
         joinSelectedHostUUID = selected
+    }
+
+    func setJoinTargetHostUUID(_ uuid: UUID) {
+        applyJoinConstraints(allowed: [uuid], selected: uuid)
     }
 
     func clearJoinConstraints() {
@@ -8899,7 +8983,7 @@ struct ConnectionPage: View {
     
     @State private var isWifiAvailable = false
     private let wifiMonitor = NWPathMonitor(requiredInterfaceType: .wifi)
-    @State private var showGenerateJoinQRSheet = false
+    @State private var showJoinSheet = false
     
     // Treat default/sentinel ports as "unset" for display-only
         private func isUnsetPort(_ s: String) -> Bool {
@@ -9240,6 +9324,51 @@ struct ConnectionPage: View {
         }
     }
 
+    private func stopSyncIfNeeded() {
+        guard syncSettings.isEnabled else { return }
+        if syncSettings.role == .parent { syncSettings.stopParent() }
+        else { syncSettings.stopChild() }
+        syncSettings.isEnabled = false
+    }
+
+    private func startSyncIfNeeded() {
+        guard !syncSettings.isEnabled else { return }
+        toggleSyncMode()
+    }
+
+    private func startChildJoin(_ request: HostJoinRequestV1,
+                                transport: SyncSettings.SyncConnectionMethod = .bluetooth) {
+        stopSyncIfNeeded()
+        syncSettings.role = .child
+        syncSettings.connectionMethod = transport
+        if transport == .bluetooth {
+            syncSettings.setJoinTargetHostUUID(request.hostUUID)
+        } else {
+            syncSettings.clearJoinConstraints()
+        }
+        if let deviceName = request.deviceName, !deviceName.isEmpty {
+            syncSettings.pairingDeviceName = deviceName
+        }
+        startSyncIfNeeded()
+    }
+
+    private func startChildRoom(_ room: ChildSavedRoom) {
+        stopSyncIfNeeded()
+        syncSettings.role = .child
+        let transport = (room.preferredTransport == .bonjour) ? .network : room.preferredTransport
+        syncSettings.connectionMethod = transport
+        if transport != .bluetooth {
+            if let ip = room.peerIP { syncSettings.peerIP = ip }
+            if let port = room.peerPort { syncSettings.peerPort = port }
+            syncSettings.clearJoinConstraints()
+        } else if let hostUUID = room.hostUUID {
+            syncSettings.setJoinTargetHostUUID(hostUUID)
+        } else {
+            syncSettings.clearJoinConstraints()
+        }
+        startSyncIfNeeded()
+    }
+
     /// Friendly description for each method
     private var connectionDescription: String {
         switch syncSettings.connectionMethod {
@@ -9255,7 +9384,7 @@ struct ConnectionPage: View {
     private var joinQRButton: some View {
         Button {
             Haptics.light()
-            showGenerateJoinQRSheet = true
+            showJoinSheet = true
         } label: {
             ZStack {
                 LiquidGlassCircle(diameter: 44, tint: settings.flashColor)
@@ -9266,9 +9395,10 @@ struct ConnectionPage: View {
             }
         }
         .buttonStyle(.plain)
-        .disabled(syncSettings.role != .parent)
-        .accessibilityLabel("Generate Join QR")
-        .accessibilityHint("Opens a share sheet for children to join.")
+        .accessibilityLabel(syncSettings.role == .parent ? "Generate Join QR" : "Join via QR")
+        .accessibilityHint(syncSettings.role == .parent
+                           ? "Opens a share sheet for children to join."
+                           : "Opens a join sheet to scan a QR or pick a room.")
     }
     var body: some View {
         VStack(spacing: 0) {
@@ -9305,8 +9435,14 @@ struct ConnectionPage: View {
                                     .fixedSize(horizontal: false, vertical: true)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 28)
-                if syncSettings.role != .parent {
-                    Text("Switch to Parent to share a Join QR.")
+                if syncSettings.role == .parent {
+                    Text("Share a Join QR for children to connect.")
+                        .font(.custom("Roboto-Light", size: 12))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 18)
+                } else {
+                    Text("Scan a parent Join QR to connect.")
                         .font(.custom("Roboto-Light", size: 12))
                         .foregroundColor(.secondary)
                         .padding(.horizontal, 8)
@@ -9447,20 +9583,31 @@ struct ConnectionPage: View {
         } message: {
           Text(syncErrorMessage)
         }
-        .sheet(isPresented: $showGenerateJoinQRSheet) {
-            GenerateJoinQRSheet(
-                deviceName: hostDeviceName,
-                hostUUIDString: hostUUIDString,
-                hostShareURL: hostShareURL,
-                onRequestEnableSync: {
-                    guard !syncSettings.isEnabled else { return }
-                    toggleSyncMode()
-                }
-            )
+        .sheet(isPresented: $showJoinSheet) {
+            if syncSettings.role == .parent {
+                GenerateJoinQRSheet(
+                    deviceName: hostDeviceName,
+                    hostUUIDString: hostUUIDString,
+                    hostShareURL: hostShareURL,
+                    onRequestEnableSync: {
+                        guard !syncSettings.isEnabled else { return }
+                        toggleSyncMode()
+                    }
+                )
+            } else {
+                ChildJoinSheet(
+                    onJoinRequest: { request, transport in
+                        startChildJoin(request, transport: transport)
+                    },
+                    onJoinRoom: { room in
+                        startChildRoom(room)
+                    }
+                )
+            }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
             .presentationBackground(.clear)
-                    .presentationCornerRadius(28)
+            .presentationCornerRadius(28)
         }
     }
     
@@ -9638,6 +9785,491 @@ struct ConnectionPage: View {
                 }
             }
             syncSettings.isEnabled = true
+        }
+    }
+}
+
+
+private enum ChildJoinTab: String, CaseIterable, Identifiable, SegmentedOption {
+    case join = "Join"
+    case rooms = "Rooms"
+
+    var id: String { rawValue }
+    var icon: String {
+        switch self {
+        case .join: return "qrcode"
+        case .rooms: return "tray.full"
+        }
+    }
+    var label: String { rawValue }
+}
+
+private struct ChildJoinSheet: View {
+    @EnvironmentObject private var syncSettings: SyncSettings
+    @EnvironmentObject private var settings: AppSettings
+    @StateObject private var roomsStore = ChildRoomsStore()
+    @State private var selectedTab: ChildJoinTab = .join
+    @State private var pendingRequest: HostJoinRequestV1? = nil
+
+    let onJoinRequest: (HostJoinRequestV1, SyncSettings.SyncConnectionMethod) -> Void
+    let onJoinRoom: (ChildSavedRoom) -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack(spacing: 12) {
+                LiquidGlassCircle(diameter: 44, tint: settings.flashColor)
+                    .overlay(
+                        Image(systemName: "qrcode")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(settings.flashColor)
+                            .symbolRenderingMode(.hierarchical)
+                    )
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Join")
+                        .font(.custom("Roboto-SemiBold", size: 20))
+                    Text("Connect to a parent timer.")
+                        .font(.custom("Roboto-Light", size: 12))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+            }
+
+            SegmentedControlPicker(selection: $selectedTab, shadowOpacity: 0.08)
+
+            Group {
+                switch selectedTab {
+                case .join:
+                    JoinTabView(
+                        roomsStore: roomsStore,
+                        pendingRequest: $pendingRequest,
+                        onJoinRequest: onJoinRequest
+                    )
+                case .rooms:
+                    ChildRoomsTabView(
+                        roomsStore: roomsStore,
+                        onJoinRoom: onJoinRoom
+                    )
+                }
+            }
+        }
+        .padding(20)
+        .onAppear {
+            if let pending = syncSettings.pendingHostJoinRequest {
+                syncSettings.pendingHostJoinRequest = nil
+                pendingRequest = pending
+                selectedTab = .join
+            }
+        }
+        .onChange(of: syncSettings.pendingHostJoinRequest?.hostUUID) { _ in
+            if let pending = syncSettings.pendingHostJoinRequest {
+                syncSettings.pendingHostJoinRequest = nil
+                pendingRequest = pending
+                selectedTab = .join
+            }
+        }
+    }
+}
+
+private struct JoinTabView: View {
+    @ObservedObject var roomsStore: ChildRoomsStore
+    @Binding var pendingRequest: HostJoinRequestV1?
+    let onJoinRequest: (HostJoinRequestV1, SyncSettings.SyncConnectionMethod) -> Void
+
+    private enum CameraPermissionState {
+        case unknown
+        case authorized
+        case denied
+    }
+
+    @State private var cameraPermission: CameraPermissionState = .unknown
+    @State private var isScanning = true
+    @State private var torchEnabled = false
+    @State private var scanError: String? = nil
+    @State private var scanResetToken = UUID()
+    @State private var lastRequest: HostJoinRequestV1? = nil
+    @State private var preferredTransport: SyncSettings.SyncConnectionMethod = .bluetooth
+
+    var body: some View {
+        VStack(spacing: 12) {
+            ZStack(alignment: .bottom) {
+                scannerContent
+                    .frame(height: 260)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    )
+                statusLine
+                    .padding(.bottom, 10)
+            }
+
+            if let scanError {
+                errorCard(message: scanError)
+            } else if let request = lastRequest {
+                joinActionsCard(for: request)
+            }
+        }
+        .onAppear {
+            refreshCameraPermission()
+        }
+        .onChange(of: pendingRequest?.hostUUID) { _ in
+            if let request = pendingRequest {
+                pendingRequest = nil
+                handleJoin(request)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var scannerContent: some View {
+        switch cameraPermission {
+        case .authorized:
+            QRCodeScannerView(
+                isActive: $isScanning,
+                torchEnabled: $torchEnabled,
+                resetToken: scanResetToken
+            ) { code in
+                handleScan(code)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+        case .denied:
+            VStack(spacing: 12) {
+                Image(systemName: "camera.fill")
+                    .font(.system(size: 28))
+                    .foregroundColor(.secondary)
+                Text("Camera access is off.")
+                    .font(.custom("Roboto-Regular", size: 14))
+                Button("Open Settings") {
+                    #if canImport(UIKit)
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                    #endif
+                }
+                .font(.custom("Roboto-SemiBold", size: 14))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .unknown:
+            VStack(spacing: 12) {
+                Image(systemName: "qrcode.viewfinder")
+                    .font(.system(size: 28))
+                    .foregroundColor(.secondary)
+                Text("Requesting camera access…")
+                    .font(.custom("Roboto-Regular", size: 14))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var statusLine: some View {
+        HStack(spacing: 12) {
+            Text(statusText)
+                .font(.custom("Roboto-Light", size: 12))
+                .foregroundColor(.secondary)
+            Spacer()
+            Button {
+                torchEnabled.toggle()
+            } label: {
+                Image(systemName: torchEnabled ? "flashlight.on.fill" : "flashlight.off.fill")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .disabled(!torchAvailable || cameraPermission != .authorized)
+
+            Button {
+                pasteLink()
+            } label: {
+                Text("Paste Link")
+                    .font(.custom("Roboto-SemiBold", size: 12))
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(.horizontal, 12)
+    }
+
+    private var statusText: String {
+        if let scanError {
+            return "Invalid QR. Try again."
+        }
+        if let request = lastRequest {
+            return "Connecting to \(request.deviceName ?? "parent")…"
+        }
+        return "Point the camera at the parent QR."
+    }
+
+    private var torchAvailable: Bool {
+        AVCaptureDevice.default(for: .video)?.hasTorch ?? false
+    }
+
+    private func refreshCameraPermission() {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            cameraPermission = .authorized
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    cameraPermission = granted ? .authorized : .denied
+                }
+            }
+        default:
+            cameraPermission = .denied
+        }
+    }
+
+    private func handleScan(_ code: String) {
+        switch HostJoinLinkParser.parse(urlString: code) {
+        case .success(let request):
+            handleJoin(request)
+        case .failure(let error):
+            scanError = error.errorDescription ?? "Invalid link."
+            isScanning = false
+            lastRequest = nil
+        }
+    }
+
+    private func handleJoin(_ request: HostJoinRequestV1) {
+        scanError = nil
+        lastRequest = request
+        isScanning = false
+        #if canImport(UIKit)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        #endif
+        onJoinRequest(request, preferredTransport)
+    }
+
+    private func pasteLink() {
+        #if canImport(UIKit)
+        let pasteboardText = UIPasteboard.general.string ?? ""
+        #else
+        let pasteboardText = ""
+        #endif
+        guard !pasteboardText.isEmpty else {
+            scanError = "Paste a SyncTimer host link."
+            isScanning = false
+            lastRequest = nil
+            return
+        }
+        handleScan(pasteboardText)
+    }
+
+    private func resetScanner() {
+        scanError = nil
+        isScanning = true
+        lastRequest = nil
+        scanResetToken = UUID()
+    }
+
+    @ViewBuilder
+    private func errorCard(message: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(message)
+                .font(.custom("Roboto-Regular", size: 14))
+            Button("Rescan") {
+                resetScanner()
+            }
+            .font(.custom("Roboto-SemiBold", size: 14))
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private func joinActionsCard(for request: HostJoinRequestV1) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Having trouble pairing?")
+                .font(.custom("Roboto-Medium", size: 14))
+            HStack(spacing: 10) {
+                Button("Retry") {
+                    onJoinRequest(request, preferredTransport)
+                }
+                .font(.custom("Roboto-SemiBold", size: 14))
+                Button(preferredTransport == .bluetooth ? "Switch to Wi-Fi" : "Switch to Nearby") {
+                    preferredTransport = (preferredTransport == .bluetooth) ? .network : .bluetooth
+                }
+                .font(.custom("Roboto-SemiBold", size: 14))
+            }
+            .buttonStyle(.borderless)
+            Button("Save Room") {
+                let label = request.deviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let fallback = "Room \(request.hostUUID.uuidString.suffix(4))"
+                let name = (label?.isEmpty == false) ? label! : fallback
+                let room = ChildSavedRoom(
+                    label: name,
+                    preferredTransport: preferredTransport,
+                    hostUUID: request.hostUUID
+                )
+                roomsStore.add(room)
+            }
+            .font(.custom("Roboto-SemiBold", size: 14))
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+private struct ChildRoomsTabView: View {
+    @ObservedObject var roomsStore: ChildRoomsStore
+    let onJoinRoom: (ChildSavedRoom) -> Void
+
+    var body: some View {
+        if roomsStore.rooms.isEmpty {
+            VStack(spacing: 10) {
+                Text("No saved rooms yet.")
+                    .font(.custom("Roboto-Regular", size: 14))
+                Text("Scan a Join QR to add one.")
+                    .font(.custom("Roboto-Light", size: 12))
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                VStack(spacing: 10) {
+                    ForEach(roomsStore.rooms) { room in
+                        Button {
+                            onJoinRoom(room)
+                            roomsStore.updateLastUsed(room)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(room.label)
+                                        .font(.custom("Roboto-SemiBold", size: 16))
+                                        .foregroundColor(.primary)
+                                    if let hostUUID = room.hostUUID {
+                                        Text("Host …\(hostUUID.uuidString.suffix(4))")
+                                            .font(.custom("Roboto-Light", size: 11))
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                Text(room.preferredTransport == .bluetooth ? "Nearby" : "Wi-Fi")
+                                    .font(.custom("Roboto-SemiBold", size: 11))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(.ultraThinMaterial, in: Capsule())
+                            }
+                            .padding(12)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                roomsStore.delete(room)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private final class QRCodePreviewView: UIView {
+    override class var layerClass: AnyClass {
+        AVCaptureVideoPreviewLayer.self
+    }
+
+    var previewLayer: AVCaptureVideoPreviewLayer {
+        layer as! AVCaptureVideoPreviewLayer
+    }
+}
+
+private struct QRCodeScannerView: UIViewRepresentable {
+    @Binding var isActive: Bool
+    @Binding var torchEnabled: Bool
+    let resetToken: UUID
+    let onFound: (String) -> Void
+
+    final class Coordinator: NSObject, AVCaptureMetadataOutputObjectsDelegate {
+        var parent: QRCodeScannerView
+        var session: AVCaptureSession?
+        var device: AVCaptureDevice?
+        private var didScan = false
+        private var lastResetToken: UUID?
+
+        init(parent: QRCodeScannerView) {
+            self.parent = parent
+        }
+
+        func metadataOutput(_ output: AVCaptureMetadataOutput,
+                            didOutput metadataObjects: [AVMetadataObject],
+                            from connection: AVCaptureConnection) {
+            guard !didScan else { return }
+            guard let object = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
+                  object.type == .qr,
+                  let value = object.stringValue else { return }
+            didScan = true
+            DispatchQueue.main.async {
+                self.parent.onFound(value)
+            }
+            session?.stopRunning()
+        }
+
+        func resetIfNeeded(_ token: UUID) {
+            if lastResetToken != token {
+                lastResetToken = token
+                didScan = false
+            }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIView(context: Context) -> QRCodePreviewView {
+        let view = QRCodePreviewView()
+        view.previewLayer.videoGravity = .resizeAspectFill
+
+        let session = AVCaptureSession()
+        context.coordinator.session = session
+
+        guard let device = AVCaptureDevice.default(for: .video),
+              let input = try? AVCaptureDeviceInput(device: device),
+              session.canAddInput(input) else {
+            return view
+        }
+
+        context.coordinator.device = device
+        session.addInput(input)
+
+        let output = AVCaptureMetadataOutput()
+        if session.canAddOutput(output) {
+            session.addOutput(output)
+            output.setMetadataObjectsDelegate(context.coordinator, queue: DispatchQueue.main)
+            output.metadataObjectTypes = [.qr]
+        }
+
+        view.previewLayer.session = session
+        return view
+    }
+
+    func updateUIView(_ uiView: QRCodePreviewView, context: Context) {
+        context.coordinator.resetIfNeeded(resetToken)
+
+        if isActive, let session = context.coordinator.session, !session.isRunning {
+            DispatchQueue.global(qos: .userInitiated).async {
+                session.startRunning()
+            }
+        } else if !isActive, let session = context.coordinator.session, session.isRunning {
+            session.stopRunning()
+        }
+
+        if let device = context.coordinator.device, device.hasTorch {
+            do {
+                try device.lockForConfiguration()
+                device.torchMode = torchEnabled ? .on : .off
+                device.unlockForConfiguration()
+            } catch {
+                // Ignore torch errors.
+            }
         }
     }
 }
@@ -13296,12 +13928,25 @@ if WCSession.isSupported() {
                                         joinRouter.ingestUniversalLink(url)
                                         return
                                     }
+                                    if url.host == "synctimerapp.com", url.path == "/host" {
+                                        if case .success(let request) = HostJoinLinkParser.parse(url: url) {
+                                            syncSettings.pendingHostJoinRequest = request
+                                        }
+                                        return
+                                    }
                                     handleOpenURL(url)
                                 }
                     .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
                         guard let url = activity.webpageURL else { return }
-                        guard url.host == "synctimerapp.com", url.path == "/join" else { return }
-                        joinRouter.ingestUniversalLink(url)
+                        if url.host == "synctimerapp.com", url.path == "/join" {
+                            joinRouter.ingestUniversalLink(url)
+                            return
+                        }
+                        if url.host == "synctimerapp.com", url.path == "/host" {
+                            if case .success(let request) = HostJoinLinkParser.parse(url: url) {
+                                syncSettings.pendingHostJoinRequest = request
+                            }
+                        }
                     }
 
                 }
