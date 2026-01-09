@@ -3483,7 +3483,7 @@ struct TimerCard: View {
                                                       : "doc.text")
                                                 Text(
                                                     cueBadgeMode == .remoteLocked
-                                                    ? "'\(label)' from parent"
+                                                    ? "streaming '\(label)'"
                                                     : "'\(label)' loaded"
                                                 )
                                                     .font(.footnote.weight(.semibold))
