@@ -4217,6 +4217,7 @@ struct MainScreen: View {
     @State private var playbackStopAnchorUptimeNs: UInt64? = nil
     @State private var lastAppliedPlaybackSeq: UInt64 = 0
     @State private var lastStopFinalSettleSeq: UInt64? = nil
+    @State private var lastStopBurstSeq: UInt64? = nil
     @State private var lastStopAnchorElapsedNs: UInt64? = nil
     @State private var lastStopAnchorUptimeNs: UInt64? = nil
     @State private var stopSettleCancellable: AnyCancellable? = nil
@@ -6971,6 +6972,8 @@ struct MainScreen: View {
 
     private let stopSettleThresholdNs: UInt64 = 10_000_000
     private let stopSettleDuration: TimeInterval = 0.12
+    private let stopSettleBurstCount: Int = 3
+    private let stopSettleBurstSpacingMs: Int = 40
 
     private func elapsedToNs(_ seconds: TimeInterval) -> UInt64 {
         UInt64(max(0, (seconds * 1_000_000_000).rounded()))
@@ -6980,6 +6983,10 @@ struct MainScreen: View {
         guard playbackStopAnchorElapsedNs == nil else { return }
         playbackStopAnchorUptimeNs = DispatchTime.now().uptimeNanoseconds
         playbackStopAnchorElapsedNs = elapsedToNs(elapsedSeconds)
+        if syncSettings.role == .parent, syncSettings.isEnabled {
+            syncSettings.clockSyncService?.requestBurstSyncSamples(count: stopSettleBurstCount,
+                                                                   spacingMs: stopSettleBurstSpacingMs)
+        }
     }
 
     private func clearPlaybackStopAnchor() {
@@ -7031,6 +7038,15 @@ struct MainScreen: View {
         }
         stopSettleFinalWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func requestStopSettleBurstIfNeeded(seq: UInt64?) {
+        guard phase != .running else { return }
+        let token = seq ?? 0
+        if let last = lastStopBurstSeq, last == token { return }
+        syncSettings.clockSyncService?.requestBurstSyncSamples(count: stopSettleBurstCount,
+                                                               spacingMs: stopSettleBurstSpacingMs)
+        lastStopBurstSeq = token
     }
 
     private func updateChildRunningElapsed(dt: TimeInterval) -> TimeInterval {
@@ -7721,6 +7737,7 @@ struct MainScreen: View {
         stopSettleFinalWorkItem?.cancel()
         lastStopAnchorElapsedNs = nil
         lastStopAnchorUptimeNs = nil
+        lastStopBurstSeq = nil
 
         // Rebuild cues/overlays from the currently loaded sheet so state mirrors a fresh load
         reloadCurrentCueSheet()
@@ -7816,6 +7833,7 @@ struct MainScreen: View {
                 stopSettleCancellable?.cancel()
                 stopSettleFinalWorkItem?.cancel()
                 lastStopFinalSettleSeq = nil
+                lastStopBurstSeq = nil
                 lastStopAnchorElapsedNs = nil
                 lastStopAnchorUptimeNs = nil
                 let targetStart = Date().addingTimeInterval(-adjusted.elapsedTime)
@@ -7840,13 +7858,15 @@ struct MainScreen: View {
                     let shouldSlew = isNewAnchor || wasRunning
                     // Stop anchor: snap/slew once into the authoritative elapsed, then freeze.
                     applyStopAnchor(targetElapsedNs: anchorNs, allowSlew: shouldSlew)
+                    pausedElapsed = adjusted.elapsedTime
                     lastStopAnchorElapsedNs = anchorNs
                     lastStopAnchorUptimeNs = state.masterUptimeNsAtStop
                     if shouldSlew {
+                        requestStopSettleBurstIfNeeded(seq: state.seq)
                         scheduleStopAnchorReassertion(seq: state.seq,
                                                       targetElapsedNs: anchorNs,
-                                                      count: 3,
-                                                      spacingMs: 40)
+                                                      count: stopSettleBurstCount,
+                                                      spacingMs: stopSettleBurstSpacingMs)
                     }
                 } else {
                     childDisplayElapsed = adjusted.elapsedTime
@@ -7938,6 +7958,9 @@ struct MainScreen: View {
                 // Parent was already running at msg.timestamp; advance by delta
                                 let adj = qcs(msg.remaining + delta)
                 phase = .running
+                lastStopAnchorElapsedNs = nil
+                lastStopAnchorUptimeNs = nil
+                lastStopBurstSeq = nil
                 let targetStart = Date().addingTimeInterval(-adj)
                 childTargetStartDate = targetStart
                 startDate = targetStart
@@ -7951,13 +7974,21 @@ struct MainScreen: View {
             phase = .paused
             // Pause uses the exact parent-displayed time (no delta)
                         countdownRemaining = qcs(msg.remaining)
-                        elapsed = qcs(msg.remaining)
+                        if lastStopAnchorElapsedNs == nil {
+                            elapsed = qcs(msg.remaining)
+                            pausedElapsed = elapsed
+                        }
             childTargetStartDate = nil
             startDate = nil
-            childDisplayElapsed = elapsed
+            if lastStopAnchorElapsedNs == nil {
+                childDisplayElapsed = elapsed
+            }
             
         case .reset:
                     ticker?.cancel()
+                    stopSettleCancellable?.cancel()
+                    stopSettleFinalWorkItem?.cancel()
+                    lastStopFinalSettleSeq = nil
                                 phase = "idle" == "idle" ? .idle : .idle  // keep explicit for readability
                                 countdownDigits.removeAll()
                                 countdownDuration = 0
@@ -7968,6 +7999,9 @@ struct MainScreen: View {
                     startDate = nil
                                 stopActive = false
                                 stopRemaining = 0
+                    lastStopAnchorElapsedNs = nil
+                    lastStopAnchorUptimeNs = nil
+                    lastStopBurstSeq = nil
                     childDecorativeCursor = 0
                     cueDisplay.reset()
                     if let sheet = loadedCueSheet {
