@@ -176,10 +176,18 @@ private struct GlassCircleIconButton: View {
             ZStack {
                 if #available(iOS 26.0, *) {
                     let shape = Circle()
+                    // Tint wash (this is what makes it feel “saturated” like the cycle plate)
+                    shape.fill(tint.opacity(0.22))
+
+                    // Glass on top
                     shape
                         .fill(Color.clear)
                         .glassEffect(.regular.tint(tint), in: shape)
-                        .overlay(shape.stroke(Color.primary.opacity(0.08), lineWidth: 1))
+
+                    // Rim — match EventsBarCycleGlassPlate language
+                    shape.stroke(Color.white.opacity(0.14), lineWidth: 1)
+
+
                 } else {
                     LiquidGlassCircle(diameter: size, tint: tint)
                 }
@@ -236,8 +244,8 @@ private struct LiquidGlassCircle: View {
                 .padding(diameter * 0.06)
             // Tint wash (very light)
             shape
-                .stroke(tint.opacity(0.35), lineWidth: 1)
-                .blur(radius: 0.2)
+                .stroke(tint.opacity(0.65), lineWidth: 1)
+
         }
         .frame(width: diameter, height: diameter)
         .shadow(color: .black.opacity(0.10), radius: 8, x: 0, y: 4)
@@ -345,8 +353,10 @@ struct EventsBar: View {
                     }
                 )
                 .padding(.trailing, 8)
-                .opacity((isPaused && !isCounting) ? 1.0 : 0.35)
-                .disabled(!isPaused || isCounting)
+                .opacity(1.0)
+                .disabled(false)
+                .zIndex(50)
+
             }
         }
         .frame(height: 60)  // fix overall bar height at 60
