@@ -167,6 +167,8 @@ private struct GlassCircleIconButton: View {
     var size: CGFloat = 44
     var iconPointSize: CGFloat = 18
     var iconWeight: Font.Weight = .semibold
+    var imageRotationDegrees: Double = 0
+    var imageRotationAnimation: Animation? = nil
     var accessibilityLabel: String
     var accessibilityHint: String? = nil
     let action: () -> Void
@@ -196,6 +198,8 @@ private struct GlassCircleIconButton: View {
                     .font(.system(size: iconPointSize, weight: iconWeight))
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(.white)
+                    .rotationEffect(.degrees(imageRotationDegrees))
+                    .animation(imageRotationAnimation, value: imageRotationDegrees)
             }
             .frame(width: size, height: size)
             .contentShape(Circle())
