@@ -43,6 +43,7 @@ public struct TimerMessage: Codable, Equatable {
 
     public var action   : Action
     public var actionSeq: UInt64?
+    public var stateSeq: UInt64?
     public var actionKind: Action?
     public var timestamp: TimeInterval
     public var phase    : String
@@ -77,6 +78,7 @@ public struct TimerMessage: Codable, Equatable {
         var notesParent: String?
     public init(action: Action,
                   actionSeq: UInt64? = nil,
+                  stateSeq: UInt64? = nil,
                   actionKind: Action? = nil,
                   timestamp: TimeInterval,
                   phase: String,
@@ -100,6 +102,7 @@ public struct TimerMessage: Codable, Equatable {
                       assetChunks: [CueAssetChunk]? = nil) {
           self.action            = action
           self.actionSeq         = actionSeq
+          self.stateSeq          = stateSeq
           self.actionKind        = actionKind
           self.timestamp         = timestamp
           self.phase             = phase
