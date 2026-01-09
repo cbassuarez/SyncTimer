@@ -10262,7 +10262,7 @@ private struct JoinTabView: View {
     }
 
     private func logParsedLegacy(_ request: HostJoinRequestV1) {
-        print("[JoinTabView] parsed /host: transport=\(preferredTransport.rawValue) hostUUID=\(request.hostUUID.uuidString) peer=\(request.peerIP ?? "nil"):\(request.peerPort ?? "nil")")
+        print("[JoinTabView] parsed /host: transport=\(preferredTransport.rawValue) hostUUID=\(request.hostUUID.uuidString)")
     }
     #endif
 
