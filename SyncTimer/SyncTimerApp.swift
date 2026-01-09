@@ -676,7 +676,7 @@ final class SyncSettings: ObservableObject {
 
     private func isControlAction(_ action: TimerMessage.Action) -> Bool {
         switch action {
-        case .start, .pause, .reset:
+        case .start, .pause, .reset, .endCueSheet:
             return true
         case .update, .addEvent:
             return false
@@ -2686,6 +2686,10 @@ struct TimerCard: View {
     private enum MessagePlacement {
         case gap, circles, modeBar, header
     }
+    private enum CueBadgeMode {
+        case localDismissible
+        case remoteLocked
+    }
 
     // ── Flags for hint flashes ───────────────────────────────────────
     private var shouldFlashLeft: Bool {
@@ -2693,6 +2697,10 @@ struct TimerCard: View {
     }
     private var shouldFlashRight: Bool {
         mode == .stop && stopStep == 1
+    }
+    private var cueBadgeMode: CueBadgeMode {
+        let isRemote = (syncSettings.role == .child || settings.simulateChildMode) && cueBadge.broadcast
+        return isRemote ? .remoteLocked : .localDismissible
     }
     private var isChildTabLockActive: Bool {
         (syncSettings.role == .child) && syncSettings.isEnabled && syncSettings.isEstablished
@@ -3466,25 +3474,37 @@ struct TimerCard: View {
                                                 let compactBump: CGFloat = isCompactWidth ? 8 : 12
                                                 return base + compactBump + 14   // +14 ≈ hint/spacing cushion
                                             }()
+                                            let lockSymbol = (UIImage(systemName: "lock.circle.fill") != nil)
+                                            ? "lock.circle.fill"
+                                            : "lock.fill"
                                             HStack(spacing: 8) {
                                                 Image(systemName: cueBadge.broadcast
                                                       ? "antenna.radiowaves.left.and.right"
                                                       : "doc.text")
-                                                Text("'\(label)' loaded")
+                                                Text(
+                                                    cueBadgeMode == .remoteLocked
+                                                    ? "'\(label)' from parent"
+                                                    : "'\(label)' loaded"
+                                                )
                                                     .font(.footnote.weight(.semibold))
                                                     .lineLimit(1)
                                                     .truncationMode(.tail)
-                                                Button {
-                                                                                                            withAnimation(.easeOut(duration: 0.2)) {
-                                                                                                                // clear events first, then clear badge
-                                                                                                                onClearEvents?()
-                                                                                                                cueBadge.clear()
-                                                                                                            }
-                                                                                                        } label: {
-                                                            Image(systemName: "xmark")
-                                                                .font(.caption2)
-                                                                .foregroundStyle(flashColor)   // ← match app flash color
+                                                if cueBadgeMode == .localDismissible {
+                                                    Button {
+                                                        withAnimation(.easeOut(duration: 0.2)) {
+                                                            // clear events first, then clear badge
+                                                            onClearEvents?()
                                                         }
+                                                    } label: {
+                                                        Image(systemName: "xmark")
+                                                            .font(.caption2)
+                                                            .foregroundStyle(flashColor)   // ← match app flash color
+                                                    }
+                                                } else {
+                                                    Image(systemName: lockSymbol)
+                                                        .font(.caption2)
+                                                        .foregroundStyle(flashColor)
+                                                }
                                             }
                                             .padding(.horizontal, 10)
                                             .padding(.vertical, 4) // ~85% height vs before
@@ -3492,7 +3512,13 @@ struct TimerCard: View {
                                                                 in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                                                     .overlay(
                                                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                                            .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                                                            .stroke(
+                                                                Color.primary.opacity(0.12),
+                                                                style: StrokeStyle(
+                                                                    lineWidth: 1,
+                                                                    dash: cueBadgeMode == .remoteLocked ? [3, 3] : []
+                                                                )
+                                                            )
                                                     )
                                                     // Pin to the same left inset as your timer/circles (12pt)
                                                                     .padding(.leading, 12)
@@ -3504,6 +3530,12 @@ struct TimerCard: View {
                                                                     .frame(maxWidth: .infinity, alignment: .leading)
 
                                                                     .transition(.opacity)                                            .allowsHitTesting(true)
+                                                                    .accessibilityElement(children: .combine)
+                                                                    .accessibilityLabel(
+                                                                        cueBadgeMode == .remoteLocked
+                                                                        ? "Cue sheet from parent (locked)"
+                                                                        : "Cue sheet loaded"
+                                                                    )
                                         }
                                     }
 
@@ -4235,6 +4267,8 @@ struct MainScreen: View {
     @State private var lastLoadedWasBroadcast: Bool = false
     @State private var loadedCueSheetID: UUID? = nil
     @State private var loadedCueSheet: CueSheet? = nil
+    @AppStorage("activeCueSheetID") private var activeCueSheetIDString: String?
+    @State private var activeCueSheet: CueSheet? = nil
     @State private var pendingPlaybackState: PlaybackState? = nil
     @State private var playbackStateSeq: UInt64 = 0
     @State private var playbackStopAnchorElapsedNs: UInt64? = nil
@@ -4254,21 +4288,63 @@ struct MainScreen: View {
     @State private var childDecorativeCursor: Int = 0
     @State private var childWireCues: [Event] = []           // last-known cue wires from parent
     @State private var childWireRestarts: [Event] = []       // last-known restart wires from parent
+    @State private var lastEndedCueSheetID: UUID? = nil
+    @State private var lastEndCueSheetReceivedAt: TimeInterval? = nil
     private var isChildDevice: Bool {
         syncSettings.role == .child || settings.simulateChildMode
     }
+    private var activeCueSheetID: UUID? {
+        get {
+            guard let activeCueSheetIDString,
+                  let id = UUID(uuidString: activeCueSheetIDString) else { return nil }
+            return id
+        }
+        set {
+            activeCueSheetIDString = newValue?.uuidString
+        }
+    }
     
-    func apply(_ sheet: CueSheet) {
+    func apply(_ sheet: CueSheet, broadcastBadge: Bool = false) {
+        activateCueSheet(sheet, broadcastBadge: broadcastBadge)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
 
+    private func activateCueSheet(_ sheet: CueSheet, broadcastBadge: Bool) {
+        activeCueSheetID = sheet.id
+        activeCueSheet = sheet
+        lastEndedCueSheetID = nil
+        lastEndCueSheetReceivedAt = nil
         loadedCueSheetID = sheet.id
         loadedCueSheet = sheet
         cueDisplay.reset()
         cueDisplay.buildTimeline(from: sheet)
         mapEvents(from: sheet)
+        if isChildDevice {
+            cueBadge.setFallbackLabel(sheetBadgeLabel(for: sheet), broadcast: true)
+        } else {
+            cueBadge.setLoaded(sheetID: sheet.id, broadcast: broadcastBadge)
+        }
         // Notify any listeners that a sheet was loaded
         NotificationCenter.default.post(name: .didLoadCueSheet, object: sheet)
         CueLibraryStore.shared.prefetchImages(in: sheet)
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    private func endActiveCueSheet(reason: String) {
+        activeCueSheetID = nil
+        activeCueSheet = nil
+        events.removeAll()
+        rawStops.removeAll()
+        cueDisplay.reset()
+        childDecorativeSchedule.removeAll()
+        childDecorativeCursor = 0
+        childWireCues.removeAll()
+        childWireRestarts.removeAll()
+        syncSettings.stopWires = []
+        pendingPlaybackState = nil
+        cueBadge.clear()
+        #if DEBUG
+        print("[CueSheet] endActiveCueSheet reason=\(reason)")
+        #endif
     }
 
     private func mapEvents(from sheet: CueSheet) {
@@ -4312,12 +4388,13 @@ struct MainScreen: View {
     }
 
     private func reloadCurrentCueSheet() {
-        guard let sheetID = loadedCueSheetID,
+        guard let sheetID = activeCueSheetID,
               let meta = CueLibraryStore.shared.index.sheets[sheetID],
               let sheet = try? CueLibraryStore.shared.load(meta: meta) else { return }
 
         loadedCueSheetID = sheet.id
         loadedCueSheet = sheet
+        activeCueSheet = sheet
         cueDisplay.reset()
         cueDisplay.buildTimeline(from: sheet)
         mapEvents(from: sheet)
@@ -4386,7 +4463,9 @@ struct MainScreen: View {
     // Broadcast to children when attachMode == .global — non-destructive (doesn't touch radios)
         func broadcast(_ sheet: CueSheet) {
             // Only the parent with sync enabled should broadcast
-            guard syncSettings.role == .parent, syncSettings.isEnabled else { return }
+            guard syncSettings.role == .parent,
+                  syncSettings.isEnabled,
+                  activeCueSheetID != nil else { return }
     
             // Convert sheet → wire format the child already understands (StopEventWire).
             // If your sheet includes cues/restarts, you can extend your wire later; for now
@@ -4488,11 +4567,39 @@ struct MainScreen: View {
         private func broadcastPlaybackStateIfNeeded() {
             guard syncSettings.role == .parent,
                   syncSettings.isEnabled,
-                  let sheet = loadedCueSheet else { return }
+                  let sheet = activeCueSheet else { return }
             let state = makePlaybackState(for: sheet)
             syncSettings.broadcastSyncMessage(.playbackState(state))
             if settings.simulateChildMode {
                 applyIncomingSyncMessage(.playbackState(state))
+            }
+        }
+
+        private func broadcastEndCueSheet(sheetID: UUID?) {
+            guard syncSettings.role == .parent, syncSettings.isEnabled else { return }
+            let phaseString: String = {
+                switch phase {
+                case .idle:      return "idle"
+                case .countdown: return "countdown"
+                case .running:   return "running"
+                case .paused:    return "paused"
+                }
+            }()
+            let msg = TimerMessage(
+                action: .endCueSheet,
+                timestamp: Date().timeIntervalSince1970,
+                phase: phaseString,
+                remaining: displayMainTime(),
+                stopEvents: [],
+                sheetID: sheetID?.uuidString
+            )
+            syncSettings.broadcastToChildren(msg)
+            if syncSettings.connectionMethod == .bluetooth {
+                for idx in 1...2 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + (0.1 * Double(idx))) {
+                        syncSettings.broadcastToChildren(msg)
+                    }
+                }
             }
         }
     // MARK: – toggleSyncMode (drop-in)
@@ -4615,6 +4722,16 @@ struct MainScreen: View {
 
     private func openCueSheets() {
         showCueSheets = true
+    }
+    
+    private func dismissActiveCueSheet() {
+        let endedID = activeCueSheetID
+        endActiveCueSheet(reason: "user-dismiss")
+        if let endedID,
+           syncSettings.role == .parent,
+           syncSettings.isEnabled {
+            broadcastEndCueSheet(sheetID: endedID)
+        }
     }
 
     @State private var eventMode: EventMode = .stop
@@ -4924,7 +5041,10 @@ struct MainScreen: View {
                                     makeFlashed: makeFlashedOverlay,
                                     isCountdownActive: willCountDown,
                                     events: events,
-                                    onClearEvents: { events.removeAll(); hasUnsaved = false }
+                                    onClearEvents: {
+                                        dismissActiveCueSheet()
+                                        hasUnsaved = false
+                                    }
                                 )
                                 .environmentObject(cueDisplay)
                                 .frame(width: w, height: h)
@@ -4966,7 +5086,7 @@ struct MainScreen: View {
                                             isCountdownActive: willCountDown,
                                             events: events,
                                             onClearEvents: {
-                                                events.removeAll()
+                                                dismissActiveCueSheet()
                                                 hasUnsaved = false
                                             }
                                         )
@@ -5365,7 +5485,7 @@ struct MainScreen: View {
 
                     if syncSettings.role == .parent,
                        syncSettings.isEnabled,
-                       let sheet = loadedCueSheet {
+                       let sheet = activeCueSheet {
                         let state = makePlaybackState(for: sheet)
                         syncSettings.broadcastSyncMessage(.playbackState(state))
                         if settings.simulateChildMode {
@@ -5449,13 +5569,11 @@ struct MainScreen: View {
                         isPresented: $showCueSheets,
                         canBroadcast: { syncSettings.role == .parent && syncSettings.isEnabled },
                         onLoad: { sheet in
-                            apply(sheet)
-                            cueBadge.setLoaded(sheetID: sheet.id, broadcast: false)
+                            apply(sheet, broadcastBadge: false)
                         },
                         onBroadcast: { sheet in
-                            apply(sheet)        // local first
-                            broadcast(sheet)    // then send
-                            cueBadge.setLoaded(sheetID: sheet.id, broadcast: true)
+                            apply(sheet, broadcastBadge: true) // local first
+                            broadcast(sheet)                   // then send
                         }
                     )
                     .environmentObject(settings)
@@ -5945,7 +6063,10 @@ struct MainScreen: View {
                     makeFlashed: makeFlashedOverlay,
                     isCountdownActive: willCountDown,
                     events: events,
-                    onClearEvents: { events.removeAll(); hasUnsaved = false }
+                    onClearEvents: {
+                        dismissActiveCueSheet()
+                        hasUnsaved = false
+                    }
                 )
                 .frame(width: w, height: h)
             }
@@ -6116,9 +6237,9 @@ struct MainScreen: View {
                     loadAndBroadcastSheet: { sheetID in
                         openCueSheets()
                         if let sheet = CueLibraryStore.shared.sheet(namedOrId: sheetID) {
-                            apply(sheet)
-                            if syncSettings.role == .parent && syncSettings.isEnabled { broadcast(sheet) }
-                            cueBadge.setLoaded(sheetID: sheet.id, broadcast: (syncSettings.role == .parent))
+                            let shouldBroadcast = (syncSettings.role == .parent && syncSettings.isEnabled)
+                            apply(sheet, broadcastBadge: shouldBroadcast)
+                            if shouldBroadcast { broadcast(sheet) }
                         }
                     },
                     presentEditor: { idx in pendingPresetEditIndex = idx; showPresetEditor = true },
@@ -6269,7 +6390,10 @@ struct MainScreen: View {
                                 makeFlashed: makeFlashedOverlay,
                                 isCountdownActive: willCountDown,
                     events: events,
-                    onClearEvents: { events.removeAll(); hasUnsaved = false }
+                    onClearEvents: {
+                        dismissActiveCueSheet()
+                        hasUnsaved = false
+                    }
                 )
                 .environmentObject(cueDisplay)
             }
@@ -6599,7 +6723,7 @@ struct MainScreen: View {
                                     isCountdownActive: willCountDown,
                                     events: events,
                                     onClearEvents: {
-                                        events.removeAll()
+                                        dismissActiveCueSheet()
                                         hasUnsaved = false
                                     }
                                 )
@@ -6619,12 +6743,11 @@ struct MainScreen: View {
                                                         isPresented: $showCueSheets,
                                                         canBroadcast: { syncSettings.role == .parent && syncSettings.isEnabled },
                                                         onLoad: { sheet in
-                                                            apply(sheet)
-                                                            cueBadge.setLoaded(sheetID: sheet.id, broadcast: false)
+                                                            apply(sheet, broadcastBadge: false)
                                                         },
                                                         onBroadcast: { sheet in
-                                                            apply(sheet); broadcast(sheet)
-                                                            cueBadge.setLoaded(sheetID: sheet.id, broadcast: true)
+                                                            apply(sheet, broadcastBadge: true)
+                                                            broadcast(sheet)
                                                         }
                                                     )
                                                     .environmentObject(settings)
@@ -7772,8 +7895,12 @@ struct MainScreen: View {
         lastStopAnchorUptimeNs = nil
         lastStopBurstSeq = nil
 
-        // Rebuild cues/overlays from the currently loaded sheet so state mirrors a fresh load
-        reloadCurrentCueSheet()
+        // Rebuild cues/overlays only if a sheet is active
+        if activeCueSheetID != nil {
+            reloadCurrentCueSheet()
+        } else {
+            endActiveCueSheet(reason: "reset-no-active")
+        }
         
         // Broadcast reset to children if we’re the parent
         if syncSettings.role == .parent && syncSettings.isEnabled {
@@ -7821,16 +7948,16 @@ struct MainScreen: View {
 
         switch message {
         case .sheetSnapshot(let sheet):
+            if activeCueSheetID == nil,
+               let endedAt = lastEndCueSheetReceivedAt,
+               let endedID = lastEndedCueSheetID,
+               endedID == sheet.id,
+               Date().timeIntervalSince1970 - endedAt < 2.0 {
+                return
+            }
             let pending = pendingPlaybackState
             pendingPlaybackState = nil
-            loadedCueSheetID = sheet.id
-            loadedCueSheet = sheet
-            cueDisplay.reset()
-            cueDisplay.buildTimeline(from: sheet)
-            mapEvents(from: sheet)
-            cueBadge.setFallbackLabel(sheetBadgeLabel(for: sheet), broadcast: true)
-            NotificationCenter.default.post(name: .didLoadCueSheet, object: sheet)
-            CueLibraryStore.shared.prefetchImages(in: sheet)
+            activateCueSheet(sheet, broadcastBadge: true)
 
             if let pending = pending,
                pending.sheetID == sheet.id,
@@ -7839,10 +7966,14 @@ struct MainScreen: View {
             }
 
         case .playbackState(let state):
-            guard let sheet = loadedCueSheet,
+            if activeCueSheetID == nil, loadedCueSheet == nil {
+                pendingPlaybackState = state
+                return
+            }
+            guard activeCueSheetID != nil,
+                  let sheet = activeCueSheet ?? loadedCueSheet,
                   sheet.id == state.sheetID,
                   state.revision == sheetRevision(for: sheet) else {
-                pendingPlaybackState = state
                 return
             }
 
@@ -7952,7 +8083,7 @@ struct MainScreen: View {
     func applyIncomingTimerMessage(_ msg: TimerMessage) {
         guard syncSettings.role == .child else { return }
 
-        let isControlAction = (msg.action == .pause || msg.action == .reset || msg.action == .start)
+        let isControlAction = (msg.action == .pause || msg.action == .reset || msg.action == .start || msg.action == .endCueSheet)
         // Centisecond quantizer to keep visuals identical across devices
         @inline(__always) func qcs(_ t: TimeInterval) -> TimeInterval {
             return Double(Int((t * 100).rounded())) / 100.0
@@ -8005,7 +8136,7 @@ struct MainScreen: View {
         
         // Mirror parent's note and sheet label when provided
                 notesParent = msg.notesParent ?? ""
-                if let lbl = msg.sheetLabel, !lbl.isEmpty {
+                if let lbl = msg.sheetLabel, !lbl.isEmpty, activeCueSheetID != nil {
                     cueBadge.setFallbackLabel(lbl, broadcast: true)
                 }
                 switch msg.action {
@@ -8066,10 +8197,14 @@ struct MainScreen: View {
                     lastStopBurstSeq = nil
                     childDecorativeCursor = 0
                     cueDisplay.reset()
-                    if let sheet = loadedCueSheet {
+                    if let sheet = activeCueSheet {
                         cueDisplay.buildTimeline(from: sheet)
                     }
                     rebuildChildDisplayEvents()
+        case .endCueSheet:
+                    lastEndedCueSheetID = msg.sheetID.flatMap(UUID.init(uuidString:))
+                    lastEndCueSheetReceivedAt = Date().timeIntervalSince1970
+                    endActiveCueSheet(reason: "remote-end")
             
         case .update:
             switch msg.phase {
