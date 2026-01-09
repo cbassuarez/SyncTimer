@@ -13332,8 +13332,8 @@ private struct GlassCircleIconButton: View {
 
                 Image(systemName: systemName)
                     .font(.system(size: iconPointSize, weight: iconWeight))
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(.primary, tint)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.white)
             }
             .frame(width: size, height: size)
             .contentShape(Circle())
