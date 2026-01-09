@@ -4292,6 +4292,7 @@ struct MainScreen: View {
     private var isChildDevice: Bool {
         syncSettings.role == .child || settings.simulateChildMode
     }
+    private let remoteActiveCueSheetSentinelID = UUID(uuidString: "7F5C7D06-28B4-4E98-9D07-7C06D1B2CB2F")!
     private var activeCueSheetID: UUID? {
         get {
             UserDefaults.standard.string(forKey: "activeCueSheetID").flatMap(UUID.init)
@@ -4342,6 +4343,18 @@ struct MainScreen: View {
         #if DEBUG
         print("[CueSheet] endActiveCueSheet reason=\(reason)")
         #endif
+    }
+
+    private func handleChildLinkLost(reason: String) {
+        guard isChildDevice else { return }
+        let hasRemoteState = activeCueSheetID != nil
+            || cueBadge.broadcast
+            || !childWireCues.isEmpty
+            || !childWireRestarts.isEmpty
+            || !childDecorativeSchedule.isEmpty
+        if hasRemoteState {
+            endActiveCueSheet(reason: "link-lost-\(reason)")
+        }
     }
 
     private func mapEvents(from sheet: CueSheet) {
@@ -5553,6 +5566,12 @@ struct MainScreen: View {
                         countdownRemaining = 0
                         elapsed = 0
                         startDate = nil
+                        handleChildLinkLost(reason: "sync-disabled")
+                    }
+                }
+                .onChange(of: syncSettings.isEstablished) { established in
+                    if !established {
+                        handleChildLinkLost(reason: "established-false")
                     }
                 }
             // Map a loaded CueSheet into the live events list (drives EventsBar + 5 circles)
@@ -8081,6 +8100,8 @@ struct MainScreen: View {
         guard syncSettings.role == .child else { return }
 
         let isControlAction = (msg.action == .pause || msg.action == .reset || msg.action == .start || msg.action == .endCueSheet)
+        let hasRemoteCuePayload = msg.action != .endCueSheet
+            && (msg.cueEvents != nil || msg.restartEvents != nil || (msg.sheetLabel?.isEmpty == false))
         // Centisecond quantizer to keep visuals identical across devices
         @inline(__always) func qcs(_ t: TimeInterval) -> TimeInterval {
             return Double(Int((t * 100).rounded())) / 100.0
@@ -8133,7 +8154,13 @@ struct MainScreen: View {
         
         // Mirror parent's note and sheet label when provided
                 notesParent = msg.notesParent ?? ""
-                if let lbl = msg.sheetLabel, !lbl.isEmpty, activeCueSheetID != nil {
+                if hasRemoteCuePayload, activeCueSheetID == nil {
+                    activeCueSheetID = remoteActiveCueSheetSentinelID
+                    #if DEBUG
+                    print("[CueSheet] child activated remote sheet (sentinel) label=\(msg.sheetLabel ?? "nil")")
+                    #endif
+                }
+                if let lbl = msg.sheetLabel, !lbl.isEmpty {
                     cueBadge.setFallbackLabel(lbl, broadcast: true)
                 }
                 switch msg.action {
