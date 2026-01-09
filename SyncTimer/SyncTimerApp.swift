@@ -9840,7 +9840,7 @@ private enum ChildJoinTab: String, CaseIterable, Identifiable, SegmentedOption {
 private struct ChildJoinSheet: View {
     @EnvironmentObject private var syncSettings: SyncSettings
     @EnvironmentObject private var settings: AppSettings
-    @StateObject private var roomsStore = ChildRoomsStore()
+    @EnvironmentObject private var roomsStore: ChildRoomsStore
     @State private var selectedTab: ChildJoinTab = .join
     @State private var pendingRequest: HostJoinRequestV1? = nil
 
@@ -10072,8 +10072,14 @@ private struct JoinTabView: View {
         }
         switch parseChildJoinLink(url: url) {
         case .success(.join(let request)):
+            #if DEBUG
+            logParsedJoin(request)
+            #endif
             handleJoin(request)
         case .success(.legacy(let request)):
+            #if DEBUG
+            logParsedLegacy(request)
+            #endif
             handleJoin(request)
         case .failure(let error):
             scanError = scanErrorMessage(for: error)
@@ -10091,6 +10097,7 @@ private struct JoinTabView: View {
         #if canImport(UIKit)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         #endif
+        persistLegacyRoomIfNeeded(request)
         onJoinRequest(request, preferredTransport)
     }
 
@@ -10102,6 +10109,7 @@ private struct JoinTabView: View {
         #if canImport(UIKit)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         #endif
+        persistJoinRoomIfPossible(request)
         joinRouter.ingestParsed(request)
     }
 
@@ -10172,6 +10180,92 @@ private struct JoinTabView: View {
         }
     }
 
+    private func persistLegacyRoomIfNeeded(_ request: HostJoinRequestV1) {
+        let label = legacyRoomLabel(for: request)
+        let room = ChildSavedRoom(
+            label: label,
+            preferredTransport: preferredTransport,
+            hostUUID: request.hostUUID
+        )
+        roomsStore.upsert(room)
+        #if DEBUG
+        print("[JoinTabView] persist legacy: hostUUID=\(request.hostUUID) transport=\(preferredTransport.rawValue) label='\(label)'")
+        #endif
+    }
+
+    private func persistJoinRoomIfPossible(_ request: JoinRequestV1) {
+        guard let hostUUID = resolvedHostUUID(for: request) else {
+            #if DEBUG
+            print("[JoinTabView] persist join: deferred (needs host selection) requestId=\(request.requestId)")
+            #endif
+            return
+        }
+        let transport = transportForJoin(request.mode)
+        let label = joinRoomLabel(for: request, hostUUID: hostUUID)
+        let room = ChildSavedRoom(
+            label: label,
+            preferredTransport: transport,
+            hostUUID: hostUUID,
+            peerIP: request.peerIP,
+            peerPort: request.peerPort.map { String($0) }
+        )
+        roomsStore.upsert(room)
+        #if DEBUG
+        print("[JoinTabView] persist join: hostUUID=\(hostUUID) transport=\(transport.rawValue) peer=\(request.peerIP ?? "nil"):\(request.peerPort.map { String($0) } ?? "nil") label='\(label)'")
+        #endif
+    }
+
+    private func resolvedHostUUID(for request: JoinRequestV1) -> UUID? {
+        if let selected = request.selectedHostUUID {
+            return selected
+        }
+        if request.hostUUIDs.count == 1 {
+            return request.hostUUIDs.first
+        }
+        return nil
+    }
+
+    private func legacyRoomLabel(for request: HostJoinRequestV1) -> String {
+        let label = request.deviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallback = "Room \(request.hostUUID.uuidString.suffix(4))"
+        return (label?.isEmpty == false) ? label! : fallback
+    }
+
+    private func joinRoomLabel(for request: JoinRequestV1, hostUUID: UUID) -> String {
+        let label = request.roomLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if label?.isEmpty == false {
+            return label!
+        }
+        if let deviceName = request.deviceNames.first, !deviceName.isEmpty {
+            return deviceName
+        }
+        return "Room \(hostUUID.uuidString.suffix(4))"
+    }
+
+    private func transportForJoin(_ mode: String) -> SyncSettings.SyncConnectionMethod {
+        switch mode {
+        case "wifi":
+            return .network
+        case "nearby", "bluetooth":
+            return .bluetooth
+        default:
+            return .bluetooth
+        }
+    }
+
+    #if DEBUG
+    private func logParsedJoin(_ request: JoinRequestV1) {
+        let transport = transportForJoin(request.mode)
+        let hostUUID = request.selectedHostUUID ?? request.hostUUIDs.first
+        let peerPort = request.peerPort.map { String($0) } ?? "nil"
+        print("[JoinTabView] parsed /join: mode=\(request.mode) transport=\(transport.rawValue) hostUUID=\(hostUUID?.uuidString ?? "nil") peer=\(request.peerIP ?? "nil"):\(peerPort)")
+    }
+
+    private func logParsedLegacy(_ request: HostJoinRequestV1) {
+        print("[JoinTabView] parsed /host: transport=\(preferredTransport.rawValue) hostUUID=\(request.hostUUID.uuidString) peer=\(request.peerIP ?? "nil"):\(request.peerPort ?? "nil")")
+    }
+    #endif
+
     @ViewBuilder
     private func errorCard(message: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -10234,7 +10328,7 @@ private struct JoinTabView: View {
                     preferredTransport: preferredTransport,
                     hostUUID: request.hostUUID
                 )
-                roomsStore.add(room)
+                roomsStore.upsert(room)
             }
             .font(.custom("Roboto-SemiBold", size: 14))
         }
@@ -13738,6 +13832,7 @@ struct ContentView: View {
     @State private var isEnteringField: Bool = false
     @State private var didCheckJoinHandoff = false
     @State private var handledJoinRequestId: String? = nil
+    @StateObject private var childRoomsStore = ChildRoomsStore()
     
     var body: some View {
 #if os(iOS)
@@ -13914,6 +14009,7 @@ innerBody
         .onChange(of: joinRouter.pending?.requestId) { _ in
             applyJoinIfReady()
         }
+        .environmentObject(childRoomsStore)
     }
 
     private static let appStoreURLString = "https://apps.apple.com/app/id0000000000"
@@ -13923,6 +14019,7 @@ innerBody
         guard !request.needsHostSelection else { return }
         guard handledJoinRequestId != request.requestId else { return }
 
+        persistChildRoomIfPossible(request)
         handledJoinRequestId = request.requestId
         let resolvedMethod: SyncSettings.SyncConnectionMethod
         switch request.mode {
@@ -13965,6 +14062,50 @@ innerBody
                 showSettings = false
                 mainMode = .sync
         joinRouter.markConsumed()
+    }
+
+    private func persistChildRoomIfPossible(_ request: JoinRequestV1) {
+        guard let hostUUID = request.selectedHostUUID ?? (request.hostUUIDs.count == 1 ? request.hostUUIDs.first : nil) else {
+            #if DEBUG
+            print("[ContentView] persist join: deferred (needs host selection) requestId=\(request.requestId)")
+            #endif
+            return
+        }
+        let transport = transportForJoin(request.mode)
+        let label = joinRoomLabel(for: request, hostUUID: hostUUID)
+        let room = ChildSavedRoom(
+            label: label,
+            preferredTransport: transport,
+            hostUUID: hostUUID,
+            peerIP: request.peerIP,
+            peerPort: request.peerPort.map { String($0) }
+        )
+        childRoomsStore.upsert(room)
+        #if DEBUG
+        print("[ContentView] persist join: hostUUID=\(hostUUID) transport=\(transport.rawValue) peer=\(request.peerIP ?? "nil"):\(request.peerPort.map { String($0) } ?? "nil") label='\(label)'")
+        #endif
+    }
+
+    private func joinRoomLabel(for request: JoinRequestV1, hostUUID: UUID) -> String {
+        let label = request.roomLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if label?.isEmpty == false {
+            return label!
+        }
+        if let deviceName = request.deviceNames.first, !deviceName.isEmpty {
+            return deviceName
+        }
+        return "Room \(hostUUID.uuidString.suffix(4))"
+    }
+
+    private func transportForJoin(_ mode: String) -> SyncSettings.SyncConnectionMethod {
+        switch mode {
+        case "wifi":
+            return .network
+        case "nearby", "bluetooth":
+            return .bluetooth
+        default:
+            return .bluetooth
+        }
     }
 }
 
