@@ -7005,18 +7005,17 @@ struct MainScreen: View {
         let startUptime = ProcessInfo.processInfo.systemUptime
         stopSettleCancellable = Timer.publish(every: dt, on: .main, in: .common)
             .autoconnect()
-            .sink { [weak self] _ in
-                guard let self = self else { return }
+            .sink { _ in
                 let now = ProcessInfo.processInfo.systemUptime
                 let progress = min(1, (now - startUptime) / duration)
                 let value = from + (to - from) * progress
-                self.childDisplayElapsed = value
-                self.elapsed = value
+                childDisplayElapsed = value
+                elapsed = value
                 if progress >= 1 {
-                    self.stopSettleCancellable?.cancel()
-                    self.stopSettleCancellable = nil
-                    self.childDisplayElapsed = to
-                    self.elapsed = to
+                    stopSettleCancellable?.cancel()
+                    stopSettleCancellable = nil
+                    childDisplayElapsed = to
+                    elapsed = to
                 }
             }
     }
@@ -7024,12 +7023,11 @@ struct MainScreen: View {
     private func scheduleStopAnchorReassertion(seq: UInt64?, targetElapsedNs: UInt64, count: Int, spacingMs: Int) {
         stopSettleFinalWorkItem?.cancel()
         let delay = max(0.05, Double(count * spacingMs) / 1000.0)
-        let work = DispatchWorkItem { [weak self] in
-            guard let self = self else { return }
-            guard self.phase != .running else { return }
-            if let seq, self.lastStopFinalSettleSeq == seq { return }
-            self.applyStopAnchor(targetElapsedNs: targetElapsedNs, allowSlew: true)
-            self.lastStopFinalSettleSeq = seq
+        let work = DispatchWorkItem {
+            guard phase != .running else { return }
+            if let seq, lastStopFinalSettleSeq == seq { return }
+            applyStopAnchor(targetElapsedNs: targetElapsedNs, allowSlew: true)
+            lastStopFinalSettleSeq = seq
         }
         stopSettleFinalWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
@@ -7653,7 +7651,7 @@ struct MainScreen: View {
             }
             broadcastPlaybackStateIfNeeded()
             if syncSettings.role == .parent && syncSettings.isEnabled {
-                clockSync.requestBurstSyncSamples(count: 3, spacingMs: 40)
+                syncSettings.clockSyncService?.requestBurstSyncSamples(count: 3, spacingMs: 40)
             }
             
         case .paused:
