@@ -403,11 +403,6 @@ final class SyncTimerMenuDelegate: UIResponder, UIApplicationDelegate {
         builder.insertSibling(timerMenu,   afterMenu: UIMenu.Identifier("devices.menu"))
     }
 
-    // keep standard delegate hook
-    func application(_ application: UIApplication,
-                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-        true
-    }
 }
  // MARK: - Timer notifications
  extension Notification.Name {

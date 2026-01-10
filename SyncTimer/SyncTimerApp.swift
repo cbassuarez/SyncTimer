@@ -5010,6 +5010,49 @@ struct MainScreen: View {
         case .mini:  return 0.76
         }
     }
+
+    private struct LayoutMetrics {
+        let winSize: CGSize
+        let isPhoneLandscape: Bool
+        let isPad: Bool
+        let isPadLandscapeByAspect: Bool
+        let isPadPortraitLike: Bool
+        let isMax: Bool
+        let isMiniPhone: Bool
+        let isVerySmallPhone: Bool
+        let isStandardPhone: Bool
+        let isSmallPhone: Bool
+        let modeBarOffset: CGFloat
+    }
+
+    private func layoutMetrics(for size: CGSize) -> LayoutMetrics {
+        let screenWidth = size.width
+        let screenHeight = size.height
+        let isPhoneLandscape = (verticalSizeClass == .compact)
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        let isPadLandscapeByAspect = size.width > size.height
+        let isPadPortraitLike = (size.height >= size.width)
+            || (UIScreen.main.bounds.height >= UIScreen.main.bounds.width)
+        let isMax = screenWidth >= 414
+        let isMiniPhone = (abs(screenWidth - 375) < 0.5 && abs(screenHeight - 812) < 0.5)
+        let isVerySmallPhone = (screenWidth <= 376) && !isMiniPhone
+        let isStandardPhone = (abs(screenWidth - 390) < 0.5 && abs(screenHeight - 844) < 0.5)
+        let isSmallPhone = (screenWidth > 376 && screenWidth < 414) && !isStandardPhone
+        let modeBarOffset: CGFloat = isMax ? -42 : -56
+        return LayoutMetrics(
+            winSize: size,
+            isPhoneLandscape: isPhoneLandscape,
+            isPad: isPad,
+            isPadLandscapeByAspect: isPadLandscapeByAspect,
+            isPadPortraitLike: isPadPortraitLike,
+            isMax: isMax,
+            isMiniPhone: isMiniPhone,
+            isVerySmallPhone: isVerySmallPhone,
+            isStandardPhone: isStandardPhone,
+            isSmallPhone: isSmallPhone,
+            modeBarOffset: modeBarOffset
+        )
+    }
      // ─────────────────────────────────────────────────────────────
      // PresetEditorSheet (modal like CueSheetsSheet)
      // ─────────────────────────────────────────────────────────────
@@ -5209,55 +5252,24 @@ struct MainScreen: View {
     
     var body: some View {
         GeometryReader { geo in
-        // Use the *actual window* size
-            let winSize: CGSize = geo.size
-                        let screenWidth: CGFloat  = winSize.width
-                        let screenHeight: CGFloat = winSize.height
-
-            // Phones keep their size-class logic
-            let isPhoneLandscape: Bool = (verticalSizeClass == .compact)
-                        let isPad: Bool = UIDevice.current.userInterfaceIdiom == .pad
-            // iPad: decide by aspect, not size class
-            let isPadLandscapeByAspect: Bool = winSize.width > winSize.height
-        
-        // 1) Use the **actual window size** if provided (iPad/Split/Stage Manager),
-              
-        let isMax       = screenWidth >= 414 //max
-        let isMiniPhone       = (abs(screenWidth - 375) < 0.5 && abs(screenHeight - 812) < 0.5) // mini
-              let isVerySmallPhone  = (screenWidth <= 376) && !isMiniPhone                            // SE
-                let isStandardPhone   = (abs(screenWidth - 390) < 0.5 && abs(screenHeight - 844) < 0.5) // 12/13/14
-        
-        let isSmallPhone = (screenWidth > 376 && screenWidth < 414) && !isStandardPhone //pro
-        
-        // — new detection for iPhone 13/14 mini & iPhone 12/13/14 —
-        
-        // 2) Decide your offsets
-        let timerOffset   = isMax ? 36 : 10    // ↓ TimerCard/SettingsPagerCard
-        let modeBarOffset = isMax ? -42 : -56    // ↓ mode bar
+            let metrics = layoutMetrics(for: geo.size)
         
             ZStack {
-                if settings.flashStyle == .tint && flashZero && (isPadDevice ? isPadLandscapeByAspect : isLandscape) {
+                if settings.flashStyle == .tint && flashZero && (isPadDevice ? metrics.isPadLandscapeByAspect : isLandscape) {
                     settings.flashColor
                         .ignoresSafeArea()
                         .transition(.opacity)
                         .animation(.easeInOut(duration: Double(settings.flashDurationOption) / 1000), value: flashZero)
                 }
                 // ── LAYOUT CHOOSER ──────────────────────────────────────────────
-                // Strong, compile-safe portrait detection for iPad.
-                // 1) Primary: this window's aspect (Stage Manager / split aware)
-                // 2) Fallback: physical screen aspect (in case a nested GeometryReader lies)
-                let isPadPortraitLike =
-                    (winSize.height >= winSize.width) ||
-                    (UIScreen.main.bounds.height >= UIScreen.main.bounds.width)
-
                 Group {
-                    if isPad && isPadPortraitLike {
+                    if metrics.isPad && metrics.isPadPortraitLike {
                         // ✅ Any iPad that reads as portrait uses the unified portrait layout
                         iPadUnifiedLayout()
-                    } else if isPad {
+                    } else if metrics.isPad {
                         // ✅ All other iPads use the 2-pane landscape layout
                         iPadLandscapeLayout()
-                    } else if isPhoneLandscape {
+                    } else if metrics.isPhoneLandscape {
                         // (existing iPhone-landscape block unchanged)
                         GeometryReader { fullGeo in
                             let hm: CGFloat = 8
@@ -5291,7 +5303,7 @@ struct MainScreen: View {
                                 .environmentObject(cueDisplay)
                                 .frame(width: w, height: h)
                             }
-                            .position(x: fullGeo.size.width/2, y: fullGeo.size.height/2)
+                                .position(x: fullGeo.size.width/2, y: fullGeo.size.height/2)
                             .offset(y: 12)
                         }
                         .environment(\.containerSize, .zero)
@@ -5299,7 +5311,7 @@ struct MainScreen: View {
                     } else {
                         // your existing iPhone-portrait VStack stays as-is
                         // (no changes needed here)
-                        VStack(spacing: isVerySmallPhone ? 2 : (isSmallPhone ? 4 : 8)) {
+                        VStack(spacing: metrics.isVerySmallPhone ? 2 : (metrics.isSmallPhone ? 4 : 8)) {
                             // Top card (Timer or Settings)
                             // Top card (Timer or Settings) — matched-geometry morph
                             CardMorphSwitcher(
@@ -5360,16 +5372,16 @@ struct MainScreen: View {
                                 value: parentMode
                             )
                             
-                            .frame(height: isVerySmallPhone ? 220
-                                   : isSmallPhone     ? 260
+                            .frame(height: metrics.isVerySmallPhone ? 220
+                                   : metrics.isSmallPhone     ? 260
                                    : 296)
                             .padding(.top,
                                      parentMode == .settings
-                                     ? ( isVerySmallPhone ? 120
-                                         : (isSmallPhone ? 32
+                                     ? ( metrics.isVerySmallPhone ? 120
+                                         : (metrics.isSmallPhone ? 32
                                             : 16) + 26)   // 38+18 on small, 52+20 on max
-                                     : (isVerySmallPhone ? 102
-                                        : isSmallPhone ? 54
+                                     : (metrics.isVerySmallPhone ? 102
+                                        : metrics.isSmallPhone ? 54
                                         : 56)   // 44+10 on small, 60+20 on max
                             )
                             .frame(maxWidth: .infinity)
@@ -5440,11 +5452,11 @@ struct MainScreen: View {
 
                                 }
                                 .padding(.horizontal, 16)
-                                .padding(.top, isVerySmallPhone ? 44
-                                         : isSmallPhone ? 0
-                                         : isStandardPhone ? -36
+                                .padding(.top, metrics.isVerySmallPhone ? 44
+                                         : metrics.isSmallPhone ? 0
+                                         : metrics.isStandardPhone ? -36
                                          : -46)
-                                .padding(.top, CGFloat(modeBarOffset))
+                                .padding(.top, metrics.modeBarOffset)
                                 // Present the cue sheet from the container, not inside the initializer
                                 
                                 
@@ -5528,9 +5540,9 @@ struct MainScreen: View {
                                 },
                                 lockActive: padLocked
                             )
-                            .offset(y: isVerySmallPhone ? -110
-                                    : isSmallPhone     ? -60
-                                    : isStandardPhone ? -38
+                            .offset(y: metrics.isVerySmallPhone ? -110
+                                    : metrics.isSmallPhone     ? -60
+                                    : metrics.isStandardPhone ? -38
                                     : -52)
                             
                             // Bottom buttons
@@ -5592,13 +5604,13 @@ struct MainScreen: View {
                                 .opacity(parentMode == .stop ? (uiLockedByParent ? 0.35 : 1.0) : 0)
                             }
                             .frame(height: 44)
-                            .offset(y: isVerySmallPhone ? -100
-                                    : isSmallPhone ? -60
-                                    : isStandardPhone ? -38
+                            .offset(y: metrics.isVerySmallPhone ? -100
+                                    : metrics.isSmallPhone ? -60
+                                    : metrics.isStandardPhone ? -38
                                     : -48)
-                            .padding(.bottom, isVerySmallPhone ? 4
-                                     : isSmallPhone ? 4
-                                     : isStandardPhone ? 4
+                            .padding(.bottom, metrics.isVerySmallPhone ? 4
+                                     : metrics.isSmallPhone ? 4
+                                     : metrics.isStandardPhone ? 4
                                      : 8)
                             
                             // Walkthrough “?”
@@ -5626,7 +5638,7 @@ struct MainScreen: View {
             }
             // ✅ Publish this window size to the whole subtree so your
               //    iPad sublayouts and computed properties can read it.
-              .environment(\.containerSize, winSize)
+              .environment(\.containerSize, metrics.winSize)
         }
 
                .dynamicTypeSize(.medium ... .medium)
