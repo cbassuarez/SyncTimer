@@ -4244,6 +4244,8 @@ struct MainScreen: View {
     
     @State private var showCueSheets = false
     @State private var pendingCueSheetCreateFromWhatsNew = false
+    @State private var pendingQuickOpenSheetID: UUID? = nil
+    @State private var pendingQuickOpenPreferEditor: Bool = false
     @Environment(\.containerSize) private var containerSize
     @Environment(\.horizontalSizeClass) private var hSize
         private var isPadDevice: Bool {
@@ -4906,6 +4908,51 @@ struct MainScreen: View {
         showCueSheets = true
     }
 
+    private var quickActionAuthorityBlocked: Bool {
+        syncSettings.role == .child && syncSettings.isEnabled
+    }
+
+    private func handleQuickStartResume() {
+        guard !quickActionAuthorityBlocked else { return }
+        guard phase != .running && phase != .countdown else { return }
+        toggleStart()
+    }
+
+    private func handleQuickCountdown(seconds: TimeInterval) {
+        guard !quickActionAuthorityBlocked else { return }
+        countdownDuration = seconds
+        countdownRemaining = seconds
+        countdownDigits.removeAll()
+        justEditedAfterPause = false
+        if phase == .running || phase == .countdown {
+            return
+        }
+        parentMode = .sync
+        toggleStart()
+    }
+
+    private func handleQuickOpenCueSheets() {
+        pendingCueSheetCreateFromWhatsNew = false
+        pendingQuickOpenSheetID = nil
+        pendingQuickOpenPreferEditor = false
+        showCueSheets = true
+    }
+
+    private func handleQuickOpenCurrentCueSheet() {
+        pendingCueSheetCreateFromWhatsNew = false
+        guard let activeID = activeCueSheetID,
+              activeID != remoteActiveCueSheetSentinelID,
+              CueLibraryStore.shared.index.sheets[activeID] != nil else {
+            pendingQuickOpenSheetID = nil
+            pendingQuickOpenPreferEditor = false
+            showCueSheets = true
+            return
+        }
+        pendingQuickOpenSheetID = activeID
+        pendingQuickOpenPreferEditor = (syncSettings.role == .parent && !(syncSettings.parentLockEnabled ?? false))
+        showCueSheets = true
+    }
+
     private func updateTimerActiveState() {
         isTimerActive = (phase == .running || phase == .countdown)
     }
@@ -4961,6 +5008,444 @@ struct MainScreen: View {
         case .big:   return 1.0
         case .small: return 0.88
         case .mini:  return 0.76
+        }
+    }
+
+    private struct LayoutMetrics {
+        let winSize: CGSize
+        let isPhoneLandscape: Bool
+        let isPad: Bool
+        let isPadLandscapeByAspect: Bool
+        let isPadPortraitLike: Bool
+        let isMax: Bool
+        let isMiniPhone: Bool
+        let isVerySmallPhone: Bool
+        let isStandardPhone: Bool
+        let isSmallPhone: Bool
+        let modeBarOffset: CGFloat
+    }
+
+    private func layoutMetrics(for size: CGSize) -> LayoutMetrics {
+        let screenWidth = size.width
+        let screenHeight = size.height
+        let isPhoneLandscape = (verticalSizeClass == .compact)
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        let isPadLandscapeByAspect = size.width > size.height
+        let isPadPortraitLike = (size.height >= size.width)
+            || (UIScreen.main.bounds.height >= UIScreen.main.bounds.width)
+        let isMax = screenWidth >= 414
+        let isMiniPhone = (abs(screenWidth - 375) < 0.5 && abs(screenHeight - 812) < 0.5)
+        let isVerySmallPhone = (screenWidth <= 376) && !isMiniPhone
+        let isStandardPhone = (abs(screenWidth - 390) < 0.5 && abs(screenHeight - 844) < 0.5)
+        let isSmallPhone = (screenWidth > 376 && screenWidth < 414) && !isStandardPhone
+        let modeBarOffset: CGFloat = isMax ? -42 : -56
+        return LayoutMetrics(
+            winSize: size,
+            isPhoneLandscape: isPhoneLandscape,
+            isPad: isPad,
+            isPadLandscapeByAspect: isPadLandscapeByAspect,
+            isPadPortraitLike: isPadPortraitLike,
+            isMax: isMax,
+            isMiniPhone: isMiniPhone,
+            isVerySmallPhone: isVerySmallPhone,
+            isStandardPhone: isStandardPhone,
+            isSmallPhone: isSmallPhone,
+            modeBarOffset: modeBarOffset
+        )
+    }
+
+    @ViewBuilder
+    private func mainLayout(metrics: LayoutMetrics) -> some View {
+        ZStack {
+            if settings.flashStyle == .tint && flashZero && (isPadDevice ? metrics.isPadLandscapeByAspect : isLandscape) {
+                settings.flashColor
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: Double(settings.flashDurationOption) / 1000), value: flashZero)
+            }
+            Group {
+                if metrics.isPad && metrics.isPadPortraitLike {
+                    iPadUnifiedLayout()
+                } else if metrics.isPad {
+                    iPadLandscapeLayout()
+                } else if metrics.isPhoneLandscape {
+                    phoneLandscapeLayout()
+                        .environment(\.containerSize, .zero)
+                        .transition(.opacity.animation(.easeInOut(duration: 0.25)))
+                } else {
+                    phonePortraitLayout(metrics: metrics)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func phoneLandscapeLayout() -> some View {
+        GeometryReader { fullGeo in
+            let hm: CGFloat = 8
+            let w = fullGeo.size.width  - (hm * 2)
+            let h = fullGeo.size.height * 0.22
+            VStack(spacing: 8) {
+                TimerCard(
+                    mode: $parentMode,
+                    flashZero: $flashZero,
+                    isRunning: phase == .running,
+                    flashStyle: settings.flashStyle,
+                    flashColor: settings.flashColor,
+                    syncDigits: countdownDigits,
+                    stopDigits: stopDigitsForMode(),
+                    phase: phase,
+                    mainTime: displayMainTime(),
+                    stopActive: stopActive,
+                    stopRemaining: stopRemaining,
+                    leftHint: "START POINT",
+                    rightHint: "DURATION",
+                    stopStep: stopStep,
+                    makeFlashed: makeFlashedOverlay,
+                    isCountdownActive: willCountDown,
+                    events: events,
+                    onClearEvents: {
+                        dismissActiveCueSheet()
+                        hasUnsaved = false
+                    }
+                )
+                .environmentObject(cueDisplay)
+                .frame(width: w, height: h)
+            }
+            .position(x: fullGeo.size.width / 2, y: fullGeo.size.height / 2)
+            .offset(y: 12)
+        }
+    }
+
+    private func stopDigitsForMode() -> [Int] {
+        switch eventMode {
+        case .stop:
+            return stopDigits
+        case .cue:
+            return cueDigits
+        case .restart:
+            return restartDigits
+        }
+    }
+
+    private func phonePortraitSpacing(metrics: LayoutMetrics) -> CGFloat {
+        metrics.isVerySmallPhone ? 2 : (metrics.isSmallPhone ? 4 : 8)
+    }
+
+    private func phonePortraitTimerHeight(metrics: LayoutMetrics) -> CGFloat {
+        metrics.isVerySmallPhone ? 220 : (metrics.isSmallPhone ? 260 : 296)
+    }
+
+    private func phonePortraitTopPadding(metrics: LayoutMetrics) -> CGFloat {
+        if parentMode == .settings {
+            return (metrics.isVerySmallPhone ? 120 : (metrics.isSmallPhone ? 32 : 16) + 26)
+        }
+        return (metrics.isVerySmallPhone ? 102 : (metrics.isSmallPhone ? 54 : 56))
+    }
+
+    private func phonePortraitModeBarPadding(metrics: LayoutMetrics) -> CGFloat {
+        if metrics.isVerySmallPhone { return 44 }
+        if metrics.isSmallPhone { return 0 }
+        if metrics.isStandardPhone { return -36 }
+        return -46
+    }
+
+    private func phonePortraitNumpadOffset(metrics: LayoutMetrics) -> CGFloat {
+        if metrics.isVerySmallPhone { return -110 }
+        if metrics.isSmallPhone { return -60 }
+        if metrics.isStandardPhone { return -38 }
+        return -52
+    }
+
+    private func phonePortraitBottomButtonsOffset(metrics: LayoutMetrics) -> CGFloat {
+        if metrics.isVerySmallPhone { return -100 }
+        if metrics.isSmallPhone { return -60 }
+        if metrics.isStandardPhone { return -38 }
+        return -48
+    }
+
+    private func phonePortraitBottomPadding(metrics: LayoutMetrics) -> CGFloat {
+        if metrics.isVerySmallPhone { return 4 }
+        if metrics.isSmallPhone { return 4 }
+        if metrics.isStandardPhone { return 4 }
+        return 8
+    }
+
+    @ViewBuilder
+    private func phonePortraitLayout(metrics: LayoutMetrics) -> some View {
+        VStack(spacing: phonePortraitSpacing(metrics: metrics)) {
+            CardMorphSwitcher(
+                mode: $parentMode,
+                timer:
+                    VStack(spacing: 8) {
+                        TimerCard(
+                            mode: $parentMode,
+                            flashZero: $flashZero,
+                            isRunning: phase == .running,
+                            flashStyle: settings.flashStyle,
+                            flashColor: settings.flashColor,
+                            syncDigits: countdownDigits,
+                            stopDigits: stopDigitsForMode(),
+                            phase: phase,
+                            mainTime: displayMainTime(),
+                            stopActive: stopActive,
+                            stopRemaining: stopRemaining,
+                            leftHint: "START POINT",
+                            rightHint: "DURATION",
+                            stopStep: stopStep,
+                            makeFlashed: makeFlashedOverlay,
+                            isCountdownActive: willCountDown,
+                            events: events,
+                            onClearEvents: {
+                                dismissActiveCueSheet()
+                                hasUnsaved = false
+                            }
+                        )
+                        .environmentObject(cueDisplay)
+                    }
+                    .allowsHitTesting(!(lockActive || (isChildTabLockActive && parentMode == .sync))),
+                settings:
+                    SettingsPagerCard(
+                        page: $settingsPage,
+                        editingTarget: $editingTarget,
+                        inputText: $inputText,
+                        isEnteringField: $isEnteringField,
+                        showBadPortError: $showBadPortError
+                    )
+                    .environmentObject(settings)
+                    .environmentObject(syncSettings)
+            )
+            .animation(
+                {
+                    if #available(iOS 17, *) {
+                        return parentMode == .settings
+                        ? .snappy(duration: 0.26, extraBounce: 0.25)
+                        : .snappy(duration: 0.24, extraBounce: 0.25)
+                    } else {
+                        return .easeInOut(duration: 0.26)
+                    }
+                }(),
+                value: parentMode
+            )
+            .frame(height: phonePortraitTimerHeight(metrics: metrics))
+            .padding(.top, phonePortraitTopPadding(metrics: metrics))
+            .frame(maxWidth: .infinity)
+            .animation(.easeInOut(duration: 0.4), value: parentMode)
+
+            if parentMode == .sync || parentMode == .stop {
+                ZStack {
+                    if !settings.lowPowerMode {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                            .frame(height: 80)
+                            .shadow(color: .black.opacity(0.125), radius: 10, x: 0, y: 6)
+                    }
+                    ModeBarMorphSwitcher(isSync: parentMode == .sync) {
+                        Group {
+                            SyncBar(
+                                isCounting: isCounting,
+                                isSyncEnabled: syncSettings.isEnabled,
+                                onOpenSyncSettings: {
+                                    previousMode = parentMode
+                                    parentMode   = .settings
+                                    settingsPage = 2
+                                },
+                                onToggleSyncMode: {
+                                    toggleSyncMode()
+                                },
+                                onRoleConfirmed: { newRole in
+                                    let wasEnabled = syncSettings.isEnabled
+                                    if wasEnabled {
+                                        if syncSettings.role == .parent { syncSettings.stopParent() }
+                                        else                           { syncSettings.stopChild() }
+                                        syncSettings.isEnabled = false
+                                    }
+                                    syncSettings.role = newRole
+                                    if wasEnabled {
+                                        switch syncSettings.connectionMethod {
+                                        case .network, .bluetooth, .bonjour:
+                                            if newRole == .parent { syncSettings.startParent() }
+                                            else                  { syncSettings.startChild() }
+                                        }
+                                        syncSettings.isEnabled = true
+                                    }
+                                }
+                            )
+                            .environmentObject(syncSettings)
+                        }
+                    } events: {
+                        EventsBar(
+                            events: $events,
+                            eventMode: $eventMode,
+                            isPaused: phase == .paused,
+                            unsavedChanges: hasUnsaved,
+                            onOpenCueSheets: { openCueSheets() },
+                            isCounting: isCounting,
+                            onAddStop: commitStopEntry,
+                            onAddCue:  commitCueEntry,
+                            onAddRestart: commitRestartEntry,
+                            cueSheetAccent: settings.flashColor
+                        )
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, phonePortraitModeBarPadding(metrics: metrics))
+                .padding(.top, metrics.modeBarOffset)
+            }
+
+            Spacer(minLength: 0)
+
+            NumPadView(
+                parentMode:   $parentMode,
+                settingsPage: $settingsPage,
+                isEntering:   $isEnteringField,
+                onKey: { key in
+                    if parentMode == .settings && isEnteringField {
+                        switch key {
+                        case .digit(let n):
+                            inputText.append(String(n))
+                        case .dot:
+                            inputText.append(".")
+                        case .backspace:
+                            _ = inputText.popLast()
+                        case .enter:
+                            confirm(inputText)
+                        default:
+                            break
+                        }
+                        return
+                    }
+                    if parentMode != .settings {
+                        switch key {
+                        case .digit, .backspace:
+                            if parentMode == .sync {
+                                handleCountdownKey(key)
+                            } else {
+                                switch eventMode {
+                                case .stop:    handleStopKey(key)
+                                case .cue:     handleCueKey(key)
+                                case .restart: handleRestartKey(key)
+                                }
+                            }
+                        case .settings:
+                            previousMode = parentMode
+                            parentMode   = .settings
+                        default:
+                            break
+                        }
+                    } else {
+                        switch key {
+                        case .chevronLeft:
+                            settingsPage = (settingsPage + numberOfPages - 1) % numberOfPages
+                        case .chevronRight:
+                            settingsPage = (settingsPage + 1) % numberOfPages
+                        default:
+                            break
+                        }
+                    }
+                },
+                onSettings: {
+                    let anim: Animation = {
+                        if #available(iOS 17, *) {
+                            return parentMode == .settings
+                            ? .snappy(duration: 0.26, extraBounce: 0.25)
+                            : .snappy(duration: 0.24, extraBounce: 0.25)
+                        } else {
+                            return .easeInOut(duration: 0.26)
+                        }
+                    }()
+
+                    if parentMode == .settings {
+                        withAnimation(anim) { parentMode = previousMode }
+                    } else {
+                        withAnimation(anim) {
+                            previousMode = parentMode
+                            parentMode   = .settings
+                        }
+                    }
+                },
+                lockActive: padLocked
+            )
+            .offset(y: phonePortraitNumpadOffset(metrics: metrics))
+
+            ZStack {
+                SyncBottomButtons(
+                    showResetButton:   parentMode == .sync,
+                    showPageIndicator: parentMode == .settings,
+                    currentPage:       settingsPage + 1,
+                    totalPages:        numberOfPages,
+                    isCounting:        isCounting,
+                    startStop:         toggleStart,
+                    reset:             resetAll
+                )
+                .disabled(lockActive || uiLockedByParent || parentMode != .sync)
+                .opacity(
+                    parentMode == .sync
+                    ? (uiLockedByParent ? 0.35 : 1.0)
+                    : (parentMode == .settings ? 0.3 : 0.0)
+                )
+                if parentMode == .settings {
+                    let pageTitle: String = {
+                        switch settingsPage {
+                        case 0: return "THEME"
+                        case 1: return "SET"
+                        case 2: return "CONNECT"
+                        case 3: return "ABOUT"
+                        default: return ""
+                        }
+                    }()
+                    HStack {
+                        Text(pageTitle)
+                            .font(.custom("Roboto-SemiBold", size: 28))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 36)
+                    .offset(y: 8)
+                }
+                EventBottomButtons(
+                    canAdd: {
+                        switch eventMode {
+                        case .stop:    return !stopDigits.isEmpty
+                        case .cue:     return !cueDigits.isEmpty
+                        case .restart: return !restartDigits.isEmpty
+                        }
+                    }(),
+                    eventMode: eventMode,
+                    add: {
+                        switch eventMode {
+                        case .stop:    commitStopEntry()
+                        case .cue:     commitCueEntry()
+                        case .restart: commitRestartEntry()
+                        }
+                    },
+                    reset: clearAllEvents
+                )
+                .disabled(lockActive || uiLockedByParent)
+                .opacity(parentMode == .stop ? (uiLockedByParent ? 0.35 : 1.0) : 0)
+            }
+            .frame(height: 44)
+            .offset(y: phonePortraitBottomButtonsOffset(metrics: metrics))
+            .padding(.bottom, phonePortraitBottomPadding(metrics: metrics))
+            .overlay(alignment: .center) {
+                if parentMode == .settings {
+                    Button {
+                        hasSeenWalkthrough = false
+                        walkthroughPage    = 0
+                    } label: {
+                        Image(systemName: "questionmark.circle")
+                            .font(.system(size: 24))
+                            .opacity(0.75)
+                            .foregroundColor(.gray)
+                            .accessibilityLabel("Help")
+                            .accessibilityHint("Restarts the in-app walkthrough")
+                    }
+                    .offset(y: -44)
+                }
+            }
+            .zIndex(1)
+            .animation(.easeInOut(duration: 0.4), value: parentMode)
         }
     }
      // ─────────────────────────────────────────────────────────────
@@ -5162,424 +5647,12 @@ struct MainScreen: View {
     
     var body: some View {
         GeometryReader { geo in
-        // Use the *actual window* size
-            let winSize: CGSize = geo.size
-                        let screenWidth: CGFloat  = winSize.width
-                        let screenHeight: CGFloat = winSize.height
-
-            // Phones keep their size-class logic
-            let isPhoneLandscape: Bool = (verticalSizeClass == .compact)
-                        let isPad: Bool = UIDevice.current.userInterfaceIdiom == .pad
-            // iPad: decide by aspect, not size class
-            let isPadLandscapeByAspect: Bool = winSize.width > winSize.height
+            let metrics = layoutMetrics(for: geo.size)
         
-        // 1) Use the **actual window size** if provided (iPad/Split/Stage Manager),
-              
-        let isMax       = screenWidth >= 414 //max
-        let isMiniPhone       = (abs(screenWidth - 375) < 0.5 && abs(screenHeight - 812) < 0.5) // mini
-              let isVerySmallPhone  = (screenWidth <= 376) && !isMiniPhone                            // SE
-                let isStandardPhone   = (abs(screenWidth - 390) < 0.5 && abs(screenHeight - 844) < 0.5) // 12/13/14
-        
-        let isSmallPhone = (screenWidth > 376 && screenWidth < 414) && !isStandardPhone //pro
-        
-        // — new detection for iPhone 13/14 mini & iPhone 12/13/14 —
-        
-        // 2) Decide your offsets
-        let timerOffset   = isMax ? 36 : 10    // ↓ TimerCard/SettingsPagerCard
-        let modeBarOffset = isMax ? -42 : -56    // ↓ mode bar
-        
-            ZStack {
-                if settings.flashStyle == .tint && flashZero && (isPadDevice ? isPadLandscapeByAspect : isLandscape) {
-                    settings.flashColor
-                        .ignoresSafeArea()
-                        .transition(.opacity)
-                        .animation(.easeInOut(duration: Double(settings.flashDurationOption) / 1000), value: flashZero)
-                }
-                // ── LAYOUT CHOOSER ──────────────────────────────────────────────
-                // Strong, compile-safe portrait detection for iPad.
-                // 1) Primary: this window's aspect (Stage Manager / split aware)
-                // 2) Fallback: physical screen aspect (in case a nested GeometryReader lies)
-                let isPadPortraitLike =
-                    (winSize.height >= winSize.width) ||
-                    (UIScreen.main.bounds.height >= UIScreen.main.bounds.width)
-
-                Group {
-                    if isPad && isPadPortraitLike {
-                        // ✅ Any iPad that reads as portrait uses the unified portrait layout
-                        iPadUnifiedLayout()
-                    } else if isPad {
-                        // ✅ All other iPads use the 2-pane landscape layout
-                        iPadLandscapeLayout()
-                    } else if isPhoneLandscape {
-                        // (existing iPhone-landscape block unchanged)
-                        GeometryReader { fullGeo in
-                            let hm: CGFloat = 8
-                            let w = fullGeo.size.width  - (hm * 2)
-                            let h = fullGeo.size.height * 0.22
-                            // phone landscape timercard
-                            VStack(spacing: 8) {
-                                TimerCard(
-                                    mode: $parentMode,
-                                    flashZero: $flashZero,
-                                    isRunning: phase == .running,
-                                    flashStyle: settings.flashStyle,
-                                    flashColor: settings.flashColor,
-                                    syncDigits: countdownDigits,
-                                    stopDigits: { switch eventMode { case .stop: return stopDigits; case .cue: return cueDigits; case .restart: return restartDigits } }(),
-                                    phase: phase,
-                                    mainTime: displayMainTime(),
-                                    stopActive: stopActive,
-                                    stopRemaining: stopRemaining,
-                                    leftHint: "START POINT",
-                                    rightHint: "DURATION",
-                                    stopStep: stopStep,
-                                    makeFlashed: makeFlashedOverlay,
-                                    isCountdownActive: willCountDown,
-                                    events: events,
-                                    onClearEvents: {
-                                        dismissActiveCueSheet()
-                                        hasUnsaved = false
-                                    }
-                                )
-                                .environmentObject(cueDisplay)
-                                .frame(width: w, height: h)
-                            }
-                            .position(x: fullGeo.size.width/2, y: fullGeo.size.height/2)
-                            .offset(y: 12)
-                        }
-                        .environment(\.containerSize, .zero)
-                        .transition(.opacity.animation(.easeInOut(duration: 0.25)))
-                    } else {
-                        // your existing iPhone-portrait VStack stays as-is
-                        // (no changes needed here)
-                        VStack(spacing: isVerySmallPhone ? 2 : (isSmallPhone ? 4 : 8)) {
-                            // Top card (Timer or Settings)
-                            // Top card (Timer or Settings) — matched-geometry morph
-                            CardMorphSwitcher(
-                                mode: $parentMode,
-                                timer:
-                                    //OG phone portrait timercard
-                                    VStack(spacing: 8) {
-                                        TimerCard(
-                                            mode: $parentMode,
-                                            flashZero: $flashZero,
-                                            isRunning: phase == .running,
-                                            flashStyle: settings.flashStyle,
-                                            flashColor: settings.flashColor,
-                                            syncDigits: countdownDigits,
-                                            stopDigits: eventMode == .stop ? stopDigits
-                                            : eventMode == .cue  ? cueDigits
-                                            : restartDigits,
-                                            phase: phase,
-                                            mainTime: displayMainTime(),
-                                            stopActive: stopActive,
-                                            stopRemaining: stopRemaining,
-                                            leftHint: "START POINT",
-                                            rightHint: "DURATION",
-                                            stopStep: stopStep,
-                                            makeFlashed: makeFlashedOverlay,
-                                            isCountdownActive: willCountDown,
-                                            events: events,
-                                            onClearEvents: {
-                                                dismissActiveCueSheet()
-                                                hasUnsaved = false
-                                            }
-                                        )
-                                        .environmentObject(cueDisplay)
-                                    }
-                                
-                                // Lock timer interactions while child is connected
-                                    .allowsHitTesting(!(lockActive || (isChildTabLockActive && parentMode == .sync))),                                            settings:
-                                    SettingsPagerCard(
-                                        page: $settingsPage,
-                                        editingTarget: $editingTarget,
-                                        inputText: $inputText,
-                                        isEnteringField: $isEnteringField,
-                                        showBadPortError: $showBadPortError
-                                    )
-                                    .environmentObject(settings)
-                                    .environmentObject(syncSettings)
-                            )
-                            .animation(
-                                {
-                                    if #available(iOS 17, *) {
-                                        return parentMode == .settings
-                                        ? .snappy(duration: 0.26, extraBounce: 0.25)
-                                        : .snappy(duration: 0.24, extraBounce: 0.25)
-                                    } else {
-                                        return .easeInOut(duration: 0.26)
-                                    }
-                                }(),
-                                value: parentMode
-                            )
-                            
-                            .frame(height: isVerySmallPhone ? 220
-                                   : isSmallPhone     ? 260
-                                   : 296)
-                            .padding(.top,
-                                     parentMode == .settings
-                                     ? ( isVerySmallPhone ? 120
-                                         : (isSmallPhone ? 32
-                                            : 16) + 26)   // 38+18 on small, 52+20 on max
-                                     : (isVerySmallPhone ? 102
-                                        : isSmallPhone ? 54
-                                        : 56)   // 44+10 on small, 60+20 on max
-                            )
-                            .frame(maxWidth: .infinity)
-                            .animation(.easeInOut(duration: 0.4), value: parentMode)
-                            
-                            // Mode bar (Sync / Events)
-                            // Mode bar (Sync / Events) — matched-geometry morph, layout-safe
-                            if parentMode == .sync || parentMode == .stop {
-                                ZStack {
-                                    if !settings.lowPowerMode {
-                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                            .fill(.ultraThinMaterial)
-                                            .frame(height: 80)
-                                            .shadow(color: .black.opacity(0.125), radius: 10, x: 0, y: 6)
-                                    }
-                                    //main sync bar
-                                    ModeBarMorphSwitcher(isSync: parentMode == .sync) {
-                                        // --- SYNC content ---
-                                        Group {
-                                            SyncBar(
-                                                isCounting: isCounting,
-                                                isSyncEnabled: syncSettings.isEnabled,
-                                                onOpenSyncSettings: {
-                                                    previousMode = parentMode
-                                                    parentMode   = .settings
-                                                    settingsPage = 2
-                                                },
-                                                onToggleSyncMode: {
-                                                    toggleSyncMode()
-                                                },
-                                                onRoleConfirmed: { newRole in
-                                                    // keep your existing role-swap logic
-                                                    let wasEnabled = syncSettings.isEnabled
-                                                    if wasEnabled {
-                                                        if syncSettings.role == .parent { syncSettings.stopParent() }
-                                                        else                           { syncSettings.stopChild() }
-                                                        syncSettings.isEnabled = false
-                                                    }
-                                                    syncSettings.role = newRole
-                                                    if wasEnabled {
-                                                        switch syncSettings.connectionMethod {
-                                                        case .network, .bluetooth, .bonjour:
-                                                            if newRole == .parent { syncSettings.startParent() }
-                                                            else                  { syncSettings.startChild() }
-                                                        }
-                                                        syncSettings.isEnabled = true
-                                                    }
-                                                }
-                                            )
-                                            .environmentObject(syncSettings)
-                                        }
-                                    } events: {
-                                        // (unchanged EventsBar)
-                                        EventsBar(
-                                            events: $events,
-                                            eventMode: $eventMode,
-                                            isPaused: phase == .paused,
-                                            unsavedChanges: hasUnsaved,
-                                            onOpenCueSheets: { openCueSheets() },
-                                            isCounting: isCounting,
-                                            onAddStop: commitStopEntry,
-                                            onAddCue:  commitCueEntry,
-                                            onAddRestart: commitRestartEntry,
-                                            cueSheetAccent: settings.flashColor
-
-                                        )
-                                    }
-
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.top, isVerySmallPhone ? 44
-                                         : isSmallPhone ? 0
-                                         : isStandardPhone ? -36
-                                         : -46)
-                                .padding(.top, CGFloat(modeBarOffset))
-                                // Present the cue sheet from the container, not inside the initializer
-                                
-                                
-                                
-                            }
-                            
-                            Spacer(minLength: 0)
-                            
-                            // NumPad
-                            NumPadView(
-                                parentMode:   $parentMode,
-                                settingsPage: $settingsPage,
-                                isEntering:   $isEnteringField,
-                                onKey: { key in
-                                    // ① If editing an IP/port field in Settings:
-                                    if parentMode == .settings && isEnteringField {
-                                        switch key {
-                                        case .digit(let n):
-                                            inputText.append(String(n))
-                                        case .dot:
-                                            inputText.append(".")
-                                        case .backspace:
-                                            _ = inputText.popLast()
-                                        case .enter:
-                                            confirm(inputText)
-                                        default:
-                                            break
-                                        }
-                                        return
-                                    }
-                                    // ② Normal timer/chevron behavior:
-                                    if parentMode != .settings {
-                                        switch key {
-                                        case .digit, .backspace:
-                                            if parentMode == .sync {
-                                                handleCountdownKey(key)
-                                            } else {
-                                                switch eventMode {
-                                                case .stop:    handleStopKey(key)
-                                                case .cue:     handleCueKey(key)
-                                                case .restart: handleRestartKey(key)
-                                                }
-                                            }
-                                        case .settings:
-                                            previousMode = parentMode
-                                            parentMode   = .settings
-                                        default:
-                                            break
-                                        }
-                                    } else {
-                                        // In Settings but not editing: page flips
-                                        switch key {
-                                        case .chevronLeft:
-                                            settingsPage = (settingsPage + numberOfPages - 1) % numberOfPages
-                                        case .chevronRight:
-                                            settingsPage = (settingsPage + 1) % numberOfPages
-                                        default:
-                                            break
-                                        }
-                                    }
-                                },
-                                onSettings: {
-                                    let anim: Animation = {
-                                        if #available(iOS 17, *) {
-                                            return parentMode == .settings
-                                            ? .snappy(duration: 0.26, extraBounce: 0.25)
-                                            : .snappy(duration: 0.24, extraBounce: 0.25)
-                                        } else {
-                                            return .easeInOut(duration: 0.26)
-                                        }
-                                    }()
-                                    
-                                    if parentMode == .settings {
-                                        withAnimation(anim) { parentMode = previousMode }
-                                    } else {
-                                        withAnimation(anim) {
-                                            previousMode = parentMode
-                                            parentMode   = .settings
-                                        }
-                                    }
-                                },
-                                lockActive: padLocked
-                            )
-                            .offset(y: isVerySmallPhone ? -110
-                                    : isSmallPhone     ? -60
-                                    : isStandardPhone ? -38
-                                    : -52)
-                            
-                            // Bottom buttons
-                            ZStack {
-                                SyncBottomButtons(
-                                    showResetButton:   parentMode == .sync,
-                                    showPageIndicator: parentMode == .settings,
-                                    currentPage:       settingsPage + 1,
-                                    totalPages:        numberOfPages,
-                                    isCounting:        isCounting,
-                                    startStop:         toggleStart,
-                                    reset:             resetAll
-                                )
-                                .disabled(lockActive || uiLockedByParent || parentMode != .sync)
-                                .opacity(
-                                    parentMode == .sync
-                                    ? (uiLockedByParent ? 0.35 : 1.0)
-                                    : (parentMode == .settings ? 0.3 : 0.0)
-                                )
-                                if parentMode == .settings {
-                                    let pageTitle: String = {
-                                        switch settingsPage {
-                                        case 0: return "THEME"
-                                        case 1: return "SET"
-                                        case 2: return "CONNECT"
-                                        case 3: return "ABOUT"
-                                        default: return ""
-                                        }
-                                    }()
-                                    HStack {
-                                        Text(pageTitle)
-                                            .font(.custom("Roboto-SemiBold", size: 28))
-                                            .foregroundColor(.secondary)
-                                        Spacer()
-                                    }
-                                    .padding(.vertical, 4)
-                                    .padding(.horizontal, 36)
-                                    .offset(y: 8)
-                                }
-                                EventBottomButtons(
-                                    canAdd: {
-                                        switch eventMode {
-                                        case .stop:    return !stopDigits.isEmpty
-                                        case .cue:     return !cueDigits.isEmpty
-                                        case .restart: return !restartDigits.isEmpty
-                                        }
-                                    }(),
-                                    eventMode: eventMode,
-                                    add: {
-                                        switch eventMode {
-                                        case .stop:    commitStopEntry()
-                                        case .cue:     commitCueEntry()
-                                        case .restart: commitRestartEntry()
-                                        }
-                                    },
-                                    reset: clearAllEvents
-                                )
-                                .disabled(lockActive || uiLockedByParent)
-                                .opacity(parentMode == .stop ? (uiLockedByParent ? 0.35 : 1.0) : 0)
-                            }
-                            .frame(height: 44)
-                            .offset(y: isVerySmallPhone ? -100
-                                    : isSmallPhone ? -60
-                                    : isStandardPhone ? -38
-                                    : -48)
-                            .padding(.bottom, isVerySmallPhone ? 4
-                                     : isSmallPhone ? 4
-                                     : isStandardPhone ? 4
-                                     : 8)
-                            
-                            // Walkthrough “?”
-                            .overlay(alignment: .center) {
-                                if parentMode == .settings {
-                                    Button {
-                                        hasSeenWalkthrough = false
-                                        walkthroughPage    = 0
-                                    } label: {
-                                        Image(systemName: "questionmark.circle")
-                                            .font(.system(size: 24))
-                                            .opacity(0.75)
-                                            .foregroundColor(.gray)
-                                            .accessibilityLabel("Help")
-                                            .accessibilityHint("Restarts the in-app walkthrough")
-                                    }
-                                    .offset(y: -44)
-                                }
-                            }
-                            .zIndex(1)
-                            .animation(.easeInOut(duration: 0.4), value: parentMode)
-                        }
-                    }
-                }
-            }
+            mainLayout(metrics: metrics)
             // ✅ Publish this window size to the whole subtree so your
               //    iPad sublayouts and computed properties can read it.
-              .environment(\.containerSize, winSize)
+              .environment(\.containerSize, metrics.winSize)
         }
 
                .dynamicTypeSize(.medium ... .medium)
@@ -5770,11 +5843,28 @@ struct MainScreen: View {
                     }
                     showCueSheets = true
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .quickActionStartResume)) { _ in
+                    handleQuickStartResume()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .quickActionStartCountdown)) { note in
+                    let seconds = note.userInfo?[QuickActionStorage.countdownSecondsUserInfoKey] as? TimeInterval
+                    if let seconds {
+                        handleQuickCountdown(seconds: seconds)
+                    }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .quickActionOpenCueSheets)) { _ in
+                    handleQuickOpenCueSheets()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .quickActionOpenCurrentCueSheet)) { _ in
+                    handleQuickOpenCurrentCueSheet()
+                }
             // Stable SwiftUI sheet presenter (medium/large detents are defined inside CueSheetsSheet)
                 .sheet(isPresented: $showCueSheets) {
                     CueSheetsSheet(
                         isPresented: $showCueSheets,
                         openNewBlankEditor: $pendingCueSheetCreateFromWhatsNew,
+                        openSheetID: $pendingQuickOpenSheetID,
+                        preferEditor: $pendingQuickOpenPreferEditor,
                         canBroadcast: { syncSettings.role == .parent && syncSettings.isEnabled },
                         onLoad: { sheet in
                             apply(sheet, broadcastBadge: false)
@@ -6962,6 +7052,8 @@ struct MainScreen: View {
                                                     CueSheetsSheet(
                                                         isPresented: $showCueSheets,
                                                         openNewBlankEditor: $pendingCueSheetCreateFromWhatsNew,
+                                                        openSheetID: $pendingQuickOpenSheetID,
+                                                        preferEditor: $pendingQuickOpenPreferEditor,
                                                         canBroadcast: { syncSettings.role == .parent && syncSettings.isEnabled },
                                                         onLoad: { sheet in
                                                             apply(sheet, broadcastBadge: false)
@@ -9248,6 +9340,9 @@ struct ConnectionPage: View {
     private let wifiMonitor = NWPathMonitor(requiredInterfaceType: .wifi)
     @State private var showJoinSheet = false
     @AppStorage("whatsnew.pendingJoin") private var pendingJoinFromWhatsNew: Bool = false
+    @AppStorage(QuickActionStorage.pendingOpenJoinSheetKey) private var pendingOpenJoinSheet: Bool = false
+    @AppStorage(QuickActionStorage.pendingOpenJoinLargeKey) private var pendingOpenJoinLarge: Bool = false
+    @State private var joinDetentSelection: PresentationDetent = .medium
     
     // Treat default/sentinel ports as "unset" for display-only
         private func isUnsetPort(_ s: String) -> Bool {
@@ -9671,6 +9766,16 @@ struct ConnectionPage: View {
                 pendingJoinFromWhatsNew = false
                 showJoinSheet = true
             }
+            if pendingOpenJoinSheet {
+                pendingOpenJoinSheet = false
+                if pendingOpenJoinLarge {
+                    joinDetentSelection = .large
+                    pendingOpenJoinLarge = false
+                } else {
+                    joinDetentSelection = .medium
+                }
+                showJoinSheet = true
+            }
               ensureValidListenPortIfNeeded()
               wifiMonitor.pathUpdateHandler = { path in
                 DispatchQueue.main.async {
@@ -9685,6 +9790,17 @@ struct ConnectionPage: View {
         .onChange(of: pendingJoinFromWhatsNew) { newValue in
             guard newValue else { return }
             pendingJoinFromWhatsNew = false
+            showJoinSheet = true
+        }
+        .onChange(of: pendingOpenJoinSheet) { newValue in
+            guard newValue else { return }
+            pendingOpenJoinSheet = false
+            if pendingOpenJoinLarge {
+                joinDetentSelection = .large
+                pendingOpenJoinLarge = false
+            } else {
+                joinDetentSelection = .medium
+            }
             showJoinSheet = true
         }
         
@@ -9765,7 +9881,7 @@ struct ConnectionPage: View {
                     )
                 }
             }
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.medium, .large], selection: $joinDetentSelection)
             .presentationDragIndicator(.visible)
             .presentationBackground(.clear)
             .presentationCornerRadius(28)
@@ -14090,6 +14206,11 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var mainMode: ViewMode = .sync
     @AppStorage("whatsnew.pendingJoin") private var pendingJoinFromWhatsNew: Bool = false
+    @AppStorage(QuickActionStorage.typeKey) private var pendingQuickActionType: String = ""
+    @AppStorage(QuickActionStorage.payloadSecondsKey) private var pendingQuickActionSeconds: Double = 0
+    @AppStorage(QuickActionStorage.openJoinLargeKey) private var pendingQuickActionOpenJoinLarge: Bool = false
+    @AppStorage(QuickActionStorage.pendingOpenJoinSheetKey) private var pendingOpenJoinSheet: Bool = false
+    @AppStorage(QuickActionStorage.pendingOpenJoinLargeKey) private var pendingOpenJoinLarge: Bool = false
     
     @AppStorage("hasSeenWalkthrough") private var hasSeenWalkthrough: Bool = false
     @State private var showSyncErrorAlert = false
@@ -14325,6 +14446,7 @@ innerBody
             }
         }
         .onAppear {
+            consumePendingQuickAction()
             evaluateWhatsNew(reason: "appear")
             guard !didCheckJoinHandoff else { return }
             didCheckJoinHandoff = true
@@ -14339,6 +14461,9 @@ innerBody
         }
         .onChange(of: joinRouter.pending?.requestId) { _ in
             applyJoinIfReady()
+        }
+        .onChange(of: pendingQuickActionType) { _ in
+            consumePendingQuickAction()
         }
         .onChange(of: joinRouter.pending?.requestId) { _ in
             evaluateWhatsNew(reason: "join-request-changed")
@@ -14471,6 +14596,57 @@ innerBody
         guard let entry = currentWhatsNewEntry else { return }
         whatsNewEntry = entry
         whatsNewController.isPresented = true
+    }
+
+    private func consumePendingQuickAction() {
+        guard !pendingQuickActionType.isEmpty else { return }
+        let actionType = QuickActionType(rawValue: pendingQuickActionType)
+        let payloadSeconds = pendingQuickActionSeconds
+        let openJoinLarge = pendingQuickActionOpenJoinLarge
+        pendingQuickActionType = ""
+        pendingQuickActionSeconds = 0
+        pendingQuickActionOpenJoinLarge = false
+        pendingOpenJoinLarge = false
+        guard let actionType else { return }
+        switch actionType {
+        case .startResume:
+            showSettings = false
+            mainMode = .sync
+            NotificationCenter.default.post(name: .quickActionStartResume, object: nil)
+        case .countdown30, .countdown60, .countdown300:
+            let seconds: Double
+            if payloadSeconds > 0 {
+                seconds = payloadSeconds
+            } else {
+                switch actionType {
+                case .countdown30: seconds = 30
+                case .countdown60: seconds = 60
+                case .countdown300: seconds = 300
+                default: seconds = 0
+                }
+            }
+            showSettings = false
+            mainMode = .sync
+            NotificationCenter.default.post(
+                name: .quickActionStartCountdown,
+                object: nil,
+                userInfo: [QuickActionStorage.countdownSecondsUserInfoKey: seconds]
+            )
+        case .openCueSheets:
+            showSettings = false
+            mainMode = .sync
+            NotificationCenter.default.post(name: .quickActionOpenCueSheets, object: nil)
+        case .openCurrentCueSheet:
+            showSettings = false
+            mainMode = .sync
+            NotificationCenter.default.post(name: .quickActionOpenCurrentCueSheet, object: nil)
+        case .openJoinRoom:
+            showSettings = false
+            mainMode = .settings
+            settingsPage = 2
+            pendingOpenJoinSheet = true
+            pendingOpenJoinLarge = openJoinLarge
+        }
     }
 
     private func evaluateWhatsNew(reason: String) {
