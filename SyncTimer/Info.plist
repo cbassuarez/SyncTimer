@@ -28,25 +28,9 @@
 		</dict>
 		<dict>
 			<key>UIApplicationShortcutItemType</key>
-			<string>com.stagedevices.synctimer.countdown.30</string>
+			<string>com.stagedevices.synctimer.countdown</string>
 			<key>UIApplicationShortcutItemTitle</key>
-			<string>Countdown 0 : 30</string>
-			<key>UIApplicationShortcutItemIconSymbolName</key>
-			<string>timer</string>
-		</dict>
-		<dict>
-			<key>UIApplicationShortcutItemType</key>
-			<string>com.stagedevices.synctimer.countdown.60</string>
-			<key>UIApplicationShortcutItemTitle</key>
-			<string>Countdown 1 : 00</string>
-			<key>UIApplicationShortcutItemIconSymbolName</key>
-			<string>timer</string>
-		</dict>
-		<dict>
-			<key>UIApplicationShortcutItemType</key>
-			<string>com.stagedevices.synctimer.countdown.300</string>
-			<key>UIApplicationShortcutItemTitle</key>
-			<string>Countdown 5 : 00</string>
+			<string>Start Countdown</string>
 			<key>UIApplicationShortcutItemIconSymbolName</key>
 			<string>timer</string>
 		</dict>
