@@ -16,6 +16,57 @@
 			</array>
 		</dict>
 	</array>
+	<key>UIApplicationShortcutItems</key>
+	<array>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.stagedevices.synctimer.startResume</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Start / Resume Timer</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>play.circle</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.stagedevices.synctimer.countdown.30</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Countdown 0 : 30</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>timer</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.stagedevices.synctimer.countdown.60</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Countdown 1 : 00</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>timer</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.stagedevices.synctimer.countdown.300</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Countdown 5 : 00</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>timer</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.stagedevices.synctimer.cuesheets</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Open Cue Sheets</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>music.note.list</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.stagedevices.synctimer.join</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Join Room</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>qrcode.viewfinder</string>
+		</dict>
+	</array>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_synctimer._tcp.</string>
@@ -30,6 +81,8 @@
 				<dict>
 					<key>UISceneConfigurationName</key>
 					<string>Default Configuration</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
 				</dict>
 			</array>
 		</dict>

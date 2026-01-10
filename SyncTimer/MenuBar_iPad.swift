@@ -160,6 +160,16 @@ enum Hardware {
 
 // MARK: - Menu Delegate (iPad menu bar)
 final class SyncTimerMenuDelegate: UIResponder, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     configurationForConnecting connectingSceneSession: UISceneSession,
+                     options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        if let item = options.shortcutItem {
+            QuickActionRouter.shared.handle(item)
+        }
+
+        return UISceneConfiguration(name: "Default Configuration",
+                                    sessionRole: connectingSceneSession.role)
+    }
 
     override func buildMenu(with builder: UIMenuBuilder) {
         guard Hardware.isPad, builder.system == .main else { return }
