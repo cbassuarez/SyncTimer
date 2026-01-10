@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>currentVersion</key>
+    <string>0.9</string>
+    <key>versions</key>
+    <array>
+        <dict>
+            <key>version</key>
+            <string>0.9</string>
+            <key>title</key>
+            <string>What’s New</string>
+            <key>subtitle</key>
+            <string>Version 0.9</string>
+            <key>lede</key>
+            <string>Faster joins, richer cue sheets, and smoother timing.</string>
+            <key>cards</key>
+            <array>
+                <dict>
+                    <key>id</key>
+                    <string>join</string>
+                    <key>symbol</key>
+                    <string>qrcode.viewfinder</string>
+                    <key>headline</key>
+                    <string>Join a room in a scan</string>
+                    <key>body</key>
+                    <string>Open a Join QR to connect instantly without extra steps.</string>
+                    <key>ctaTitle</key>
+                    <string>Open Join QR</string>
+                    <key>ctaAction</key>
+                    <string>openJoinQR</string>
+                </dict>
+                <dict>
+                    <key>id</key>
+                    <string>cues</string>
+                    <key>symbol</key>
+                    <string>text.bubble</string>
+                    <key>headline</key>
+                    <string>Cue sheets with messages + images</string>
+                    <key>body</key>
+                    <string>Create a blank cue sheet and build a richer show timeline.</string>
+                    <key>ctaTitle</key>
+                    <string>Create Cue Sheet</string>
+                    <key>ctaAction</key>
+                    <string>openCueSheetsCreateBlank</string>
+                </dict>
+                <dict>
+                    <key>id</key>
+                    <string>release-notes</string>
+                    <key>symbol</key>
+                    <string>sparkles</string>
+                    <key>headline</key>
+                    <string>See everything in this release</string>
+                    <key>body</key>
+                    <string>Browse the full list of improvements, right inside the app.</string>
+                    <key>ctaTitle</key>
+                    <string>Release Notes</string>
+                    <key>ctaAction</key>
+                    <string>openReleaseNotes</string>
+                </dict>
+            </array>
+            <key>bullets</key>
+            <array>
+                <string>Cleaner join handoff flow and clearer status cues.</string>
+                <string>More polished cue sheet library layout.</string>
+                <string>Smoother playback coordination across devices.</string>
+                <string>Refined glass controls and spacing updates.</string>
+                <string>Improved labels and accessibility polish.</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

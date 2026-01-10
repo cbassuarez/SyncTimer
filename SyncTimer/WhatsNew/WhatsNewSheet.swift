@@ -1,32 +1,34 @@
 import SwiftUI
 
-enum ReleaseNotes {
-    static let url = URL(string: "https://www.synctimerapp.com/release-notes")!
-}
-
 struct WhatsNewSheet: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    let onJoinNow: () -> Void
-    let onOpenCueSheets: () -> Void
-    let onTestSync: () -> Void
-    let onViewReleaseNotes: () -> Void
+    let entry: WhatsNewVersionEntry
+    let onAction: (WhatsNewAction) -> Void
     let onDismiss: () -> Void
 
+    @State private var showReleaseNotes = false
+    @State private var drawSymbols = false
+
     var body: some View {
-        Group {
-            if #available(iOS 16.0, *) {
-                ScrollView { sheetContent }
-                    .scrollIndicators(.hidden)
-            } else {
-                ScrollView { sheetContent }
+        NavigationStack {
+            ScrollView {
+                sheetContent
+            }
+            .scrollIndicators(.hidden)
+            .background(Color.clear)
+            .navigationDestination(isPresented: $showReleaseNotes) {
+                ReleaseNotesView(entry: entry)
             }
         }
-        .background(Color.clear)
+        .onAppear {
+            guard !reduceMotion else { return }
+            drawSymbols = true
+        }
     }
 
     private var sheetContent: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 18) {
             header
             featureCards
             moreImprovements
@@ -39,56 +41,40 @@ struct WhatsNewSheet: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("What’s New in SyncTimer")
+        VStack(alignment: .leading, spacing: 8) {
+            Text(entry.title)
                 .font(.title2.weight(.semibold))
-            Text("Version 0.9")
+                .fixedSize(horizontal: false, vertical: true)
+            Text(entry.subtitle)
                 .font(.headline)
                 .foregroundColor(.secondary)
-            Text("Faster joining, richer cue sheets, tighter sync.")
+                .fixedSize(horizontal: false, vertical: true)
+            Text(entry.lede)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private var featureCards: some View {
         VStack(spacing: 12) {
-            FeatureCard(
-                icon: "qrcode.viewfinder",
-                title: "Join a room in seconds",
-                detail: "Scan a QR or open a join link to connect instantly.",
-                cta: "Join now",
-                onTap: onJoinNow,
-                reduceMotion: reduceMotion
-            )
-            FeatureCard(
-                icon: "text.bubble",
-                title: "Cue sheets can show messages + images",
-                detail: "Push on-screen text or images as part of the cue timeline.",
-                cta: "Open Cue Sheets",
-                onTap: onOpenCueSheets,
-                reduceMotion: reduceMotion
-            )
-            FeatureCard(
-                icon: "antenna.radiowaves.left.and.right",
-                title: "More reliable Nearby sync",
-                detail: "Better sequencing and stop accuracy under BLE congestion.",
-                cta: "Test Sync",
-                onTap: onTestSync,
-                reduceMotion: reduceMotion
-            )
+            ForEach(entry.cards) { card in
+                FeatureCard(
+                    card: card,
+                    reduceMotion: reduceMotion,
+                    drawSymbols: drawSymbols,
+                    onAction: handleAction
+                )
+            }
         }
     }
 
     private var moreImprovements: some View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 8) {
-                bullet("Asset-aware cue transport (children can request missing images)")
-                bullet("Room labels / saved rooms support")
-                bullet("Cue sheet XML v2 support (richer events)")
-                bullet("Cue badge label derives from library (less stale UI)")
-                bullet("UI refinements (glass buttons, editor polish)")
-                bullet("Join flows + handoff improvements")
+                ForEach(entry.bullets ?? [], id: \.self) { bullet in
+                    bulletRow(bullet)
+                }
             }
             .font(.subheadline)
             .foregroundColor(.secondary)
@@ -100,20 +86,26 @@ struct WhatsNewSheet: View {
         .padding(.top, 4)
     }
 
-    private func bullet(_ text: String) -> some View {
-        Label(text, systemImage: "checkmark.circle.fill")
-            .symbolRenderingMode(.hierarchical)
-            .labelStyle(.titleAndIcon)
+    private func bulletRow(_ text: String) -> some View {
+        Label {
+            Text(text)
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "checkmark.circle.fill")
+                .symbolRenderingMode(.hierarchical)
+                .accessibilityHidden(true)
+        }
+        .labelStyle(.titleAndIcon)
     }
 
     private var footer: some View {
         VStack(spacing: 12) {
-            Button("View full release notes") {
-                onViewReleaseNotes()
+            Button("Release Notes") {
+                showReleaseNotes = true
             }
             .buttonStyle(.bordered)
 
-            Button("Not now") {
+            Button("Done") {
                 onDismiss()
             }
             .buttonStyle(.plain)
@@ -124,22 +116,34 @@ struct WhatsNewSheet: View {
     }
 
     private var glassContainer: some View {
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .fill(.ultraThinMaterial)
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(Color.white.opacity(0.16), lineWidth: 1)
-            )
+        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
+        return Group {
+            if #available(iOS 26.0, *) {
+                Color.clear
+                    .glassEffect(.regular, in: shape)
+                    .overlay(shape.stroke(Color.white.opacity(0.16), lineWidth: 1))
+            } else {
+                shape
+                    .fill(.ultraThinMaterial)
+                    .overlay(shape.stroke(Color.white.opacity(0.16), lineWidth: 1))
+            }
+        }
+    }
+
+    private func handleAction(_ action: WhatsNewAction) {
+        if action == .openReleaseNotes {
+            showReleaseNotes = true
+            return
+        }
+        onAction(action)
     }
 }
 
 private struct FeatureCard: View {
-    let icon: String
-    let title: String
-    let detail: String
-    let cta: String
-    let onTap: () -> Void
+    let card: WhatsNewCard
     let reduceMotion: Bool
+    let drawSymbols: Bool
+    let onAction: (WhatsNewAction) -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -147,13 +151,16 @@ private struct FeatureCard: View {
                 .padding(.top, 2)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(title)
+                Text(card.headline)
                     .font(.headline)
-                Text(detail)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(card.body)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
-                Button(cta) {
-                    onTap()
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(card.ctaTitle) {
+                    WhatsNewHaptics.triggerIfPhone()
+                    onAction(card.ctaAction)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
@@ -164,25 +171,125 @@ private struct FeatureCard: View {
         .background(cardBackground)
     }
 
+    @ViewBuilder
     private var featureIcon: some View {
-        let image = Image(systemName: icon)
+        let image = Image(systemName: card.symbol)
             .font(.system(size: 22, weight: .semibold))
             .foregroundColor(.accentColor)
             .symbolRenderingMode(.hierarchical)
+            .accessibilityHidden(true)
 
         if #available(iOS 26.0, *), reduceMotion == false {
-            image.symbolEffect(.drawOn)
+            image.symbolEffect(.drawOn, options: .speed(1.2), isActive: drawSymbols)
         } else {
             image
         }
     }
 
+    @ViewBuilder
     private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(.thinMaterial)
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
-            )
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        if #available(iOS 26.0, *) {
+            Color.clear
+                .glassEffect(.regular, in: shape)
+                .overlay(shape.stroke(Color.white.opacity(0.12), lineWidth: 1))
+        } else {
+            shape
+                .fill(.thinMaterial)
+                .overlay(shape.stroke(Color.white.opacity(0.12), lineWidth: 1))
+        }
+    }
+}
+
+private struct ReleaseNotesView: View {
+    let entry: WhatsNewVersionEntry
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                header
+                cards
+                improvements
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
+        }
+        .navigationTitle("Release Notes")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(entry.subtitle)
+                .font(.headline)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(entry.lede)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var cards: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(entry.cards) { card in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(card.headline)
+                        .font(.headline)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(card.body)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .background(cardBackground)
+            }
+        }
+    }
+
+    private var improvements: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("More improvements")
+                .font(.headline)
+            ForEach(entry.bullets ?? [], id: \.self) { bullet in
+                Label {
+                    Text(bullet)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "checkmark.circle.fill")
+                        .symbolRenderingMode(.hierarchical)
+                        .accessibilityHidden(true)
+                }
+                .labelStyle(.titleAndIcon)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    private var cardBackground: some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        return Group {
+            if #available(iOS 26.0, *) {
+                Color.clear
+                    .glassEffect(.regular, in: shape)
+                    .overlay(shape.stroke(Color.white.opacity(0.12), lineWidth: 1))
+            } else {
+                shape
+                    .fill(.thinMaterial)
+                    .overlay(shape.stroke(Color.white.opacity(0.12), lineWidth: 1))
+            }
+        }
+    }
+}
+
+private enum WhatsNewHaptics {
+    static func triggerIfPhone() {
+        #if canImport(UIKit)
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+        #endif
     }
 }
