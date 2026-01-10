@@ -8,12 +8,16 @@ struct WhatsNewSheet: View {
     let onDismiss: () -> Void
 
     @State private var showReleaseNotes = false
-    @State private var drawSymbols = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 sheetContent
+            }
+            .scrollIndicators(.hidden)
+            .background(Color.clear)
+            .navigationDestination(isPresented: $showReleaseNotes) {
+                ReleaseNotesView(entry: entry)
             }
             .scrollIndicators(.hidden)
             .background(Color.clear)
@@ -62,7 +66,6 @@ struct WhatsNewSheet: View {
                 FeatureCard(
                     card: card,
                     reduceMotion: reduceMotion,
-                    drawSymbols: drawSymbols,
                     onAction: handleAction
                 )
             }
@@ -142,7 +145,6 @@ struct WhatsNewSheet: View {
 private struct FeatureCard: View {
     let card: WhatsNewCard
     let reduceMotion: Bool
-    let drawSymbols: Bool
     let onAction: (WhatsNewAction) -> Void
 
     var body: some View {
@@ -171,6 +173,7 @@ private struct FeatureCard: View {
         .background(cardBackground)
     }
 
+    @ViewBuilder
     private var featureIcon: some View {
         let image = Image(systemName: card.symbol)
             .font(.system(size: 22, weight: .semibold))
@@ -179,24 +182,23 @@ private struct FeatureCard: View {
             .accessibilityHidden(true)
 
         if #available(iOS 26.0, *), reduceMotion == false {
-            image.symbolEffect(.drawOn, options: .speed(1.2), value: drawSymbols)
+            image.symbolEffect(.drawOn, options: .speed(1.2))
         } else {
             image
         }
     }
 
+    @ViewBuilder
     private var cardBackground: some View {
         let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
-        return Group {
-            if #available(iOS 26.0, *) {
-                Color.clear
-                    .glassEffect(.regular, in: shape)
-                    .overlay(shape.stroke(Color.white.opacity(0.12), lineWidth: 1))
-            } else {
-                shape
-                    .fill(.thinMaterial)
-                    .overlay(shape.stroke(Color.white.opacity(0.12), lineWidth: 1))
-            }
+        if #available(iOS 26.0, *) {
+            Color.clear
+                .glassEffect(.regular, in: shape)
+                .overlay(shape.stroke(Color.white.opacity(0.12), lineWidth: 1))
+        } else {
+            shape
+                .fill(.thinMaterial)
+                .overlay(shape.stroke(Color.white.opacity(0.12), lineWidth: 1))
         }
     }
 }
