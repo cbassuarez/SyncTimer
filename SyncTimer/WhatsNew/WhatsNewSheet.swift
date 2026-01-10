@@ -19,6 +19,15 @@ struct WhatsNewSheet: View {
             .navigationDestination(isPresented: $showReleaseNotes) {
                 ReleaseNotesView(entry: entry)
             }
+            .scrollIndicators(.hidden)
+            .background(Color.clear)
+            .navigationDestination(isPresented: $showReleaseNotes) {
+                ReleaseNotesView(entry: entry)
+            }
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            drawSymbols = true
         }
     }
 
