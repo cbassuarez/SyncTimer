@@ -4244,6 +4244,8 @@ struct MainScreen: View {
     
     @State private var showCueSheets = false
     @State private var pendingCueSheetCreateFromWhatsNew = false
+    @State private var pendingQuickOpenSheetID: UUID? = nil
+    @State private var pendingQuickOpenPreferEditor: Bool = false
     @Environment(\.containerSize) private var containerSize
     @Environment(\.horizontalSizeClass) private var hSize
         private var isPadDevice: Bool {
@@ -4903,6 +4905,51 @@ struct MainScreen: View {
     @State private var hasUnsaved: Bool = false   // or compute if you already track dirty state
 
     private func openCueSheets() {
+        showCueSheets = true
+    }
+
+    private var quickActionAuthorityBlocked: Bool {
+        syncSettings.role == .child && syncSettings.isEnabled
+    }
+
+    private func handleQuickStartResume() {
+        guard !quickActionAuthorityBlocked else { return }
+        guard phase != .running && phase != .countdown else { return }
+        toggleStart()
+    }
+
+    private func handleQuickCountdown(seconds: TimeInterval) {
+        guard !quickActionAuthorityBlocked else { return }
+        countdownDuration = seconds
+        countdownRemaining = seconds
+        countdownDigits.removeAll()
+        justEditedAfterPause = false
+        if phase == .running || phase == .countdown {
+            return
+        }
+        parentMode = .sync
+        toggleStart()
+    }
+
+    private func handleQuickOpenCueSheets() {
+        pendingCueSheetCreateFromWhatsNew = false
+        pendingQuickOpenSheetID = nil
+        pendingQuickOpenPreferEditor = false
+        showCueSheets = true
+    }
+
+    private func handleQuickOpenCurrentCueSheet() {
+        pendingCueSheetCreateFromWhatsNew = false
+        guard let activeID = activeCueSheetID,
+              activeID != remoteActiveCueSheetSentinelID,
+              CueLibraryStore.shared.index.sheets[activeID] != nil else {
+            pendingQuickOpenSheetID = nil
+            pendingQuickOpenPreferEditor = false
+            showCueSheets = true
+            return
+        }
+        pendingQuickOpenSheetID = activeID
+        pendingQuickOpenPreferEditor = (syncSettings.role == .parent && !(syncSettings.parentLockEnabled ?? false))
         showCueSheets = true
     }
 
@@ -5770,11 +5817,28 @@ struct MainScreen: View {
                     }
                     showCueSheets = true
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .quickActionStartResume)) { _ in
+                    handleQuickStartResume()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .quickActionStartCountdown)) { note in
+                    let seconds = note.userInfo?[QuickActionStorage.countdownSecondsUserInfoKey] as? TimeInterval
+                    if let seconds {
+                        handleQuickCountdown(seconds: seconds)
+                    }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .quickActionOpenCueSheets)) { _ in
+                    handleQuickOpenCueSheets()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .quickActionOpenCurrentCueSheet)) { _ in
+                    handleQuickOpenCurrentCueSheet()
+                }
             // Stable SwiftUI sheet presenter (medium/large detents are defined inside CueSheetsSheet)
                 .sheet(isPresented: $showCueSheets) {
                     CueSheetsSheet(
                         isPresented: $showCueSheets,
                         openNewBlankEditor: $pendingCueSheetCreateFromWhatsNew,
+                        openSheetID: $pendingQuickOpenSheetID,
+                        preferEditor: $pendingQuickOpenPreferEditor,
                         canBroadcast: { syncSettings.role == .parent && syncSettings.isEnabled },
                         onLoad: { sheet in
                             apply(sheet, broadcastBadge: false)
@@ -6962,6 +7026,8 @@ struct MainScreen: View {
                                                     CueSheetsSheet(
                                                         isPresented: $showCueSheets,
                                                         openNewBlankEditor: $pendingCueSheetCreateFromWhatsNew,
+                                                        openSheetID: $pendingQuickOpenSheetID,
+                                                        preferEditor: $pendingQuickOpenPreferEditor,
                                                         canBroadcast: { syncSettings.role == .parent && syncSettings.isEnabled },
                                                         onLoad: { sheet in
                                                             apply(sheet, broadcastBadge: false)
@@ -9248,6 +9314,9 @@ struct ConnectionPage: View {
     private let wifiMonitor = NWPathMonitor(requiredInterfaceType: .wifi)
     @State private var showJoinSheet = false
     @AppStorage("whatsnew.pendingJoin") private var pendingJoinFromWhatsNew: Bool = false
+    @AppStorage(QuickActionStorage.pendingOpenJoinSheetKey) private var pendingOpenJoinSheet: Bool = false
+    @AppStorage(QuickActionStorage.pendingOpenJoinLargeKey) private var pendingOpenJoinLarge: Bool = false
+    @State private var joinDetentSelection: PresentationDetent = .medium
     
     // Treat default/sentinel ports as "unset" for display-only
         private func isUnsetPort(_ s: String) -> Bool {
@@ -9671,6 +9740,16 @@ struct ConnectionPage: View {
                 pendingJoinFromWhatsNew = false
                 showJoinSheet = true
             }
+            if pendingOpenJoinSheet {
+                pendingOpenJoinSheet = false
+                if pendingOpenJoinLarge {
+                    joinDetentSelection = .large
+                    pendingOpenJoinLarge = false
+                } else {
+                    joinDetentSelection = .medium
+                }
+                showJoinSheet = true
+            }
               ensureValidListenPortIfNeeded()
               wifiMonitor.pathUpdateHandler = { path in
                 DispatchQueue.main.async {
@@ -9685,6 +9764,17 @@ struct ConnectionPage: View {
         .onChange(of: pendingJoinFromWhatsNew) { newValue in
             guard newValue else { return }
             pendingJoinFromWhatsNew = false
+            showJoinSheet = true
+        }
+        .onChange(of: pendingOpenJoinSheet) { newValue in
+            guard newValue else { return }
+            pendingOpenJoinSheet = false
+            if pendingOpenJoinLarge {
+                joinDetentSelection = .large
+                pendingOpenJoinLarge = false
+            } else {
+                joinDetentSelection = .medium
+            }
             showJoinSheet = true
         }
         
@@ -9765,7 +9855,7 @@ struct ConnectionPage: View {
                     )
                 }
             }
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.medium, .large], selection: $joinDetentSelection)
             .presentationDragIndicator(.visible)
             .presentationBackground(.clear)
             .presentationCornerRadius(28)
@@ -14090,6 +14180,11 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var mainMode: ViewMode = .sync
     @AppStorage("whatsnew.pendingJoin") private var pendingJoinFromWhatsNew: Bool = false
+    @AppStorage(QuickActionStorage.typeKey) private var pendingQuickActionType: String = ""
+    @AppStorage(QuickActionStorage.payloadSecondsKey) private var pendingQuickActionSeconds: Double = 0
+    @AppStorage(QuickActionStorage.openJoinLargeKey) private var pendingQuickActionOpenJoinLarge: Bool = false
+    @AppStorage(QuickActionStorage.pendingOpenJoinSheetKey) private var pendingOpenJoinSheet: Bool = false
+    @AppStorage(QuickActionStorage.pendingOpenJoinLargeKey) private var pendingOpenJoinLarge: Bool = false
     
     @AppStorage("hasSeenWalkthrough") private var hasSeenWalkthrough: Bool = false
     @State private var showSyncErrorAlert = false
@@ -14325,6 +14420,7 @@ innerBody
             }
         }
         .onAppear {
+            consumePendingQuickAction()
             evaluateWhatsNew(reason: "appear")
             guard !didCheckJoinHandoff else { return }
             didCheckJoinHandoff = true
@@ -14339,6 +14435,9 @@ innerBody
         }
         .onChange(of: joinRouter.pending?.requestId) { _ in
             applyJoinIfReady()
+        }
+        .onChange(of: pendingQuickActionType) { _ in
+            consumePendingQuickAction()
         }
         .onChange(of: joinRouter.pending?.requestId) { _ in
             evaluateWhatsNew(reason: "join-request-changed")
@@ -14471,6 +14570,57 @@ innerBody
         guard let entry = currentWhatsNewEntry else { return }
         whatsNewEntry = entry
         whatsNewController.isPresented = true
+    }
+
+    private func consumePendingQuickAction() {
+        guard !pendingQuickActionType.isEmpty else { return }
+        let actionType = QuickActionType(rawValue: pendingQuickActionType)
+        let payloadSeconds = pendingQuickActionSeconds
+        let openJoinLarge = pendingQuickActionOpenJoinLarge
+        pendingQuickActionType = ""
+        pendingQuickActionSeconds = 0
+        pendingQuickActionOpenJoinLarge = false
+        pendingOpenJoinLarge = false
+        guard let actionType else { return }
+        switch actionType {
+        case .startResume:
+            showSettings = false
+            mainMode = .sync
+            NotificationCenter.default.post(name: .quickActionStartResume, object: nil)
+        case .countdown30, .countdown60, .countdown300:
+            let seconds: Double
+            if payloadSeconds > 0 {
+                seconds = payloadSeconds
+            } else {
+                switch actionType {
+                case .countdown30: seconds = 30
+                case .countdown60: seconds = 60
+                case .countdown300: seconds = 300
+                default: seconds = 0
+                }
+            }
+            showSettings = false
+            mainMode = .sync
+            NotificationCenter.default.post(
+                name: .quickActionStartCountdown,
+                object: nil,
+                userInfo: [QuickActionStorage.countdownSecondsUserInfoKey: seconds]
+            )
+        case .openCueSheets:
+            showSettings = false
+            mainMode = .sync
+            NotificationCenter.default.post(name: .quickActionOpenCueSheets, object: nil)
+        case .openCurrentCueSheet:
+            showSettings = false
+            mainMode = .sync
+            NotificationCenter.default.post(name: .quickActionOpenCurrentCueSheet, object: nil)
+        case .openJoinRoom:
+            showSettings = false
+            mainMode = .settings
+            settingsPage = 2
+            pendingOpenJoinSheet = true
+            pendingOpenJoinLarge = openJoinLarge
+        }
     }
 
     private func evaluateWhatsNew(reason: String) {
