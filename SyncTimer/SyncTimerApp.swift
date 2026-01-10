@@ -55,6 +55,8 @@ extension Notification.Name {
     static let didImportCueSheet = Notification.Name("didImportCueSheet")
     /// A cue sheet has been loaded (either local load or broadcast-accept)
     static let whatsNewOpenCueSheets = Notification.Name("whatsNewOpenCueSheets")
+    /// Countdown quick actions for iOS home-screen shortcuts.
+    static let quickActionCountdown = Notification.Name("quickActionCountdown")
 }
 
 extension SyncSettings.SyncConnectionMethod: SegmentedOption {
@@ -5621,12 +5623,19 @@ struct MainScreen: View {
                 .onReceive(NotificationCenter.default.publisher(for: .TimerStart)) { _ in
                      if phase != .running { toggleStart() }
                  }
-                 .onReceive(NotificationCenter.default.publisher(for: .TimerPause)) { _ in
+                .onReceive(NotificationCenter.default.publisher(for: .TimerPause)) { _ in
                      if phase == .running { toggleStart() }
                  }
                  .onReceive(NotificationCenter.default.publisher(for: .TimerReset)) { _ in
                      if phase != .running { resetAll() }
                  }
+                .onReceive(NotificationCenter.default.publisher(for: .quickActionCountdown)) { note in
+                    guard let seconds = note.userInfo?["seconds"] as? Int, seconds > 0 else { return }
+                    guard !isCounting && !stopActive else { return }
+                    parentMode = .sync
+                    countdownDigits = timeToDigits(TimeInterval(seconds))
+                    toggleStart()
+                }
                 .onDisappear {
                     wcCancellables.removeAll()
                 }
@@ -14085,6 +14094,7 @@ struct ContentView: View {
     @EnvironmentObject private var whatsNewController: WhatsNewController
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var quickActionRouter = QuickActionRouter.shared
     
     @AppStorage("settingsPage") private var settingsPage = 0
     @State private var showSettings = false
@@ -14394,6 +14404,10 @@ innerBody
         }
         .onChange(of: scenePhase) { newPhase in
             guard newPhase == .active else { return }
+            if let action = quickActionRouter.pending {
+                handleQuickAction(action)
+                quickActionRouter.pending = nil
+            }
             evaluateWhatsNew(reason: "scene-active")
         }
         .environmentObject(childRoomsStore)
@@ -14438,6 +14452,34 @@ innerBody
 
     private func dismissWhatsNew() {
         whatsNewController.isPresented = false
+    }
+
+    private func handleQuickAction(_ action: QuickAction) {
+        switch action {
+        case .startResume:
+            AppActions.shared.startTimerAction()
+        case .countdown(let seconds):
+            startCountdown(seconds)
+        case .openCueSheets:
+            NotificationCenter.default.post(
+                name: .whatsNewOpenCueSheets,
+                object: nil,
+                userInfo: ["createBlank": false]
+            )
+        case .joinRoom:
+            settingsPage = 2
+            pendingJoinFromWhatsNew = true
+            showSettings = true
+        }
+    }
+
+    private func startCountdown(_ seconds: Int) {
+        guard seconds > 0 else { return }
+        NotificationCenter.default.post(
+            name: .quickActionCountdown,
+            object: nil,
+            userInfo: ["seconds": seconds]
+        )
     }
 
     private func handleWhatsNewAction(_ action: WhatsNewAction) {
