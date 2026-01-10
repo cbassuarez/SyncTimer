@@ -80,6 +80,8 @@ struct CueSheetsSheet: View {
     @EnvironmentObject private var appSettings: AppSettings
     @Binding var isPresented: Bool
     @Binding var openNewBlankEditor: Bool
+    @Binding var openSheetID: UUID?
+    @Binding var preferEditor: Bool
     @Environment(\.dismiss) private var dismiss
     var canBroadcast: () -> Bool = { false }
     let onLoad: (CueSheet) -> Void
@@ -97,6 +99,22 @@ struct CueSheetsSheet: View {
     @State private var editingSheet: CueSheet? = nil
     private let cardRadius: CGFloat = 12  // match Recent/All cards
     @State private var showBroadcastChoice = false
+
+    init(isPresented: Binding<Bool>,
+         openNewBlankEditor: Binding<Bool>,
+         openSheetID: Binding<UUID?> = .constant(nil),
+         preferEditor: Binding<Bool> = .constant(false),
+         canBroadcast: @escaping () -> Bool = { false },
+         onLoad: @escaping (CueSheet) -> Void,
+         onBroadcast: @escaping (CueSheet) -> Void) {
+        _isPresented = isPresented
+        _openNewBlankEditor = openNewBlankEditor
+        _openSheetID = openSheetID
+        _preferEditor = preferEditor
+        self.canBroadcast = canBroadcast
+        self.onLoad = onLoad
+        self.onBroadcast = onBroadcast
+    }
 
     private var needsExplicitDismiss: Bool {
 #if targetEnvironment(macCatalyst)
@@ -257,9 +275,13 @@ struct CueSheetsSheet: View {
        .font(.custom("Roboto-Regular", size: 17))
         .onAppear {
             handlePendingBlankEditor()
+            handleQuickOpenSheet()
         }
         .onChange(of: openNewBlankEditor) { _ in
             handlePendingBlankEditor()
+        }
+        .onChange(of: openSheetID) { _ in
+            handleQuickOpenSheet()
         }
 
         
@@ -389,6 +411,21 @@ struct CueSheetsSheet: View {
         guard openNewBlankEditor else { return }
         openNewBlankEditor = false
         newBlank()
+    }
+
+    private func handleQuickOpenSheet() {
+        guard let sheetID = openSheetID else { return }
+        openSheetID = nil
+        let shouldPreferEditor = preferEditor
+        preferEditor = false
+        guard let meta = store.index.sheets[sheetID],
+              let sheet = try? store.load(meta: meta) else { return }
+        if shouldPreferEditor {
+            editingSheet = sheet
+        } else {
+            onLoad(sheet)
+            isPresented = false
+        }
     }
 
         private func delete(_ meta: CueLibraryIndex.SheetMeta) {

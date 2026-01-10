@@ -160,6 +160,105 @@ enum Hardware {
 
 // MARK: - Menu Delegate (iPad menu bar)
 final class SyncTimerMenuDelegate: UIResponder, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        registerQuickActions()
+        return true
+    }
+
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        registerQuickActions()
+    }
+
+    func application(_ application: UIApplication,
+                     performActionFor shortcutItem: UIApplicationShortcutItem,
+                     completionHandler: @escaping (Bool) -> Void) {
+        completionHandler(handleQuickAction(shortcutItem))
+    }
+
+    func windowScene(_ windowScene: UIWindowScene,
+                     performActionFor shortcutItem: UIApplicationShortcutItem,
+                     completionHandler: @escaping (Bool) -> Void) {
+        completionHandler(handleQuickAction(shortcutItem))
+    }
+
+    private func registerQuickActions() {
+#if targetEnvironment(macCatalyst)
+        return
+#else
+        let items: [UIApplicationShortcutItem] = [
+            UIApplicationShortcutItem(
+                type: QuickActionType.startResume.shortcutType,
+                localizedTitle: "Start / Resume",
+                localizedSubtitle: nil,
+                icon: UIApplicationShortcutIcon(systemImageName: "play.fill")
+            ),
+            UIApplicationShortcutItem(
+                type: QuickActionType.countdown30.shortcutType,
+                localizedTitle: "Start Countdown",
+                localizedSubtitle: "0:30",
+                icon: UIApplicationShortcutIcon(systemImageName: "timer")
+            ),
+            UIApplicationShortcutItem(
+                type: QuickActionType.countdown60.shortcutType,
+                localizedTitle: "Start Countdown",
+                localizedSubtitle: "1:00",
+                icon: UIApplicationShortcutIcon(systemImageName: "timer")
+            ),
+            UIApplicationShortcutItem(
+                type: QuickActionType.countdown300.shortcutType,
+                localizedTitle: "Start Countdown",
+                localizedSubtitle: "5:00",
+                icon: UIApplicationShortcutIcon(systemImageName: "timer")
+            ),
+            UIApplicationShortcutItem(
+                type: QuickActionType.openCueSheets.shortcutType,
+                localizedTitle: "Open Cue Sheets",
+                localizedSubtitle: nil,
+                icon: UIApplicationShortcutIcon(systemImageName: "music.note.list")
+            ),
+            UIApplicationShortcutItem(
+                type: QuickActionType.openCurrentCueSheet.shortcutType,
+                localizedTitle: "Open Current Cue Sheet",
+                localizedSubtitle: nil,
+                icon: UIApplicationShortcutIcon(systemImageName: "doc.text.magnifyingglass")
+            ),
+            UIApplicationShortcutItem(
+                type: QuickActionType.openJoinRoom.shortcutType,
+                localizedTitle: "Connect / Join Room",
+                localizedSubtitle: nil,
+                icon: UIApplicationShortcutIcon(systemImageName: "qrcode")
+            )
+        ]
+        UIApplication.shared.shortcutItems = items
+#endif
+    }
+
+    private func handleQuickAction(_ shortcutItem: UIApplicationShortcutItem) -> Bool {
+#if targetEnvironment(macCatalyst)
+        return false
+#else
+        guard let action = QuickActionType.fromShortcutType(shortcutItem.type) else { return false }
+        let defaults = UserDefaults.standard
+        defaults.set(action.rawValue, forKey: QuickActionStorage.typeKey)
+        defaults.set(0, forKey: QuickActionStorage.payloadSecondsKey)
+        defaults.set(false, forKey: QuickActionStorage.openJoinLargeKey)
+
+        switch action {
+        case .countdown30:
+            defaults.set(30, forKey: QuickActionStorage.payloadSecondsKey)
+        case .countdown60:
+            defaults.set(60, forKey: QuickActionStorage.payloadSecondsKey)
+        case .countdown300:
+            defaults.set(300, forKey: QuickActionStorage.payloadSecondsKey)
+        case .openJoinRoom:
+            defaults.set(true, forKey: QuickActionStorage.openJoinLargeKey)
+        case .startResume, .openCueSheets, .openCurrentCueSheet:
+            break
+        }
+        return true
+#endif
+    }
 
     override func buildMenu(with builder: UIMenuBuilder) {
         guard Hardware.isPad, builder.system == .main else { return }
@@ -304,11 +403,6 @@ final class SyncTimerMenuDelegate: UIResponder, UIApplicationDelegate {
         builder.insertSibling(timerMenu,   afterMenu: UIMenu.Identifier("devices.menu"))
     }
 
-    // keep standard delegate hook
-    func application(_ application: UIApplication,
-                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-        true
-    }
 }
  // MARK: - Timer notifications
  extension Notification.Name {
