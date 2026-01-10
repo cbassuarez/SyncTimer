@@ -4904,6 +4904,16 @@ struct MainScreen: View {
     private func openCueSheets() {
         showCueSheets = true
     }
+
+    private func updateTimerActiveState() {
+        isTimerActive = (phase == .running || phase == .countdown)
+    }
+
+    private func syncPresentationState() {
+        isPresentingCueSheets = showCueSheets
+        isPresentingPresetEditor = showPresetEditor
+        updateTimerActiveState()
+    }
     
     private func dismissActiveCueSheet() {
         let endedID = activeCueSheetID
@@ -4917,6 +4927,9 @@ struct MainScreen: View {
 
     @State private var eventMode: EventMode = .stop
     @Binding var showSettings: Bool
+    @Binding var isTimerActive: Bool
+    @Binding var isPresentingCueSheets: Bool
+    @Binding var isPresentingPresetEditor: Bool
     
     @AppStorage("hasSeenWalkthrough") private var hasSeenWalkthrough: Bool = true
     @AppStorage("walkthroughPage") private var walkthroughPage: Int = 0
@@ -5786,6 +5799,18 @@ struct MainScreen: View {
                                        savePresets(arr)
                                     }
                                 }
+                .onAppear {
+                    syncPresentationState()
+                }
+                .onChange(of: showCueSheets) { _ in
+                    syncPresentationState()
+                }
+                .onChange(of: showPresetEditor) { _ in
+                    syncPresentationState()
+                }
+                .onChange(of: phase) { _ in
+                    updateTimerActiveState()
+                }
         // at the very end of MainScreen's body chain (on the outermost view)
         .toolbar(isPadDevice ? .hidden : .automatic, for: .navigationBar)
         .navigationBarHidden(isPadDevice)
@@ -12637,7 +12662,7 @@ struct AboutPage: View {
     let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
     let build   = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
     @EnvironmentObject private var appSettings: AppSettings
-    @EnvironmentObject private var whatsNewCoordinator: WhatsNewCoordinator
+    @EnvironmentObject private var whatsNewController: WhatsNewController
     
     
     
@@ -12790,7 +12815,7 @@ struct AboutPage: View {
                 
                 Divider().opacity(0.5)
                 Button {
-                    whatsNewCoordinator.forcePresent(currentVersion: WhatsNewCoordinator.currentVersionString)
+                    whatsNewController.requestManualPresentation()
                 } label: {
                     Label("What’s New", systemImage: "sparkles")
                         .font(.custom("Roboto-Regular", size: 16))
@@ -14028,8 +14053,9 @@ struct ContentView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var syncSettings: SyncSettings
     @EnvironmentObject private var joinRouter: JoinRouter
-    @EnvironmentObject private var whatsNewCoordinator: WhatsNewCoordinator
+    @EnvironmentObject private var whatsNewController: WhatsNewController
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     
     @AppStorage("settingsPage") private var settingsPage = 0
     @State private var showSettings = false
@@ -14046,6 +14072,12 @@ struct ContentView: View {
     @State private var didCheckJoinHandoff = false
     @State private var handledJoinRequestId: String? = nil
     @StateObject private var childRoomsStore = ChildRoomsStore()
+    @State private var isTimerActive = false
+    @State private var isPresentingCueSheets = false
+    @State private var isPresentingPresetEditor = false
+    @State private var whatsNewEntry: WhatsNewVersionEntry? = nil
+
+    private let whatsNewIndex = WhatsNewContentLoader.load()
     
     var body: some View {
 #if os(iOS)
@@ -14111,7 +14143,7 @@ innerBody
                             // Pass the **window size** to children so they lay out for THIS window,
                             // not the physical device screen.
                        ScrollView(.vertical, showsIndicators: false) {
-                                MainScreen(parentMode: $mainMode, showSettings: $showSettings)
+                                MainScreen(parentMode: $mainMode, showSettings: $showSettings, isTimerActive: $isTimerActive, isPresentingCueSheets: $isPresentingCueSheets, isPresentingPresetEditor: $isPresentingPresetEditor)
                                     .environment(\.containerSize, geo.size)
                                     .fixedSize(horizontal: false, vertical: true)
                                     .frame(maxWidth: .infinity, alignment: .top)
@@ -14131,7 +14163,7 @@ innerBody
             } else {
                     VStack(spacing: 0) {
                            Spacer(minLength: 0)
-                           MainScreen(parentMode: $mainMode, showSettings: $showSettings)
+                           MainScreen(parentMode: $mainMode, showSettings: $showSettings, isTimerActive: $isTimerActive, isPresentingCueSheets: $isPresentingCueSheets, isPresentingPresetEditor: $isPresentingPresetEditor)
                            Spacer(minLength: 12)
                        }
                        .preferredColorScheme(
@@ -14143,7 +14175,7 @@ innerBody
                    #else
                    VStack(spacing: 0) {
                        Spacer(minLength: 0)
-                       MainScreen(parentMode: $mainMode, showSettings: $showSettings)
+                       MainScreen(parentMode: $mainMode, showSettings: $showSettings, isTimerActive: $isTimerActive, isPresentingCueSheets: $isPresentingCueSheets, isPresentingPresetEditor: $isPresentingPresetEditor)
                        Spacer(minLength: 12)
                    }
                    .preferredColorScheme(
@@ -14172,18 +14204,19 @@ innerBody
             .environmentObject(syncSettings)
             .preferredColorScheme(settings.appTheme == .dark ? .dark : .light)
         }
-        .sheet(isPresented: $whatsNewCoordinator.isPresented, onDismiss: {
-            whatsNewCoordinator.markSeen(currentVersion: WhatsNewCoordinator.currentVersionString)
+        .sheet(isPresented: $whatsNewController.isPresented, onDismiss: {
+            whatsNewController.markSeen(currentVersion: WhatsNewController.currentVersionString)
+            whatsNewEntry = nil
         }) {
-            WhatsNewSheet(
-                onJoinNow: { openJoinFromWhatsNew() },
-                onOpenCueSheets: { openCueSheetsFromWhatsNew() },
-                onTestSync: { openTestSyncFromWhatsNew() },
-                onViewReleaseNotes: { openURL(ReleaseNotes.url) },
-                onDismiss: { dismissWhatsNew() }
-            )
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
+            if let entry = whatsNewEntry {
+                WhatsNewSheet(
+                    entry: entry,
+                    onAction: handleWhatsNewAction,
+                    onDismiss: { dismissWhatsNew() }
+                )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
         }
         .alert(isPresented: $showSyncErrorAlert) {
             Alert(title: Text("Cannot Start Sync"),
@@ -14221,7 +14254,7 @@ innerBody
             }
         }
         .onAppear {
-            whatsNewCoordinator.checkAndPresentIfNeeded(currentVersion: WhatsNewCoordinator.currentVersionString)
+            evaluateWhatsNew(reason: "appear")
             guard !didCheckJoinHandoff else { return }
             didCheckJoinHandoff = true
             joinRouter.ingestAppGroupPendingIfAny()
@@ -14236,23 +14269,85 @@ innerBody
         .onChange(of: joinRouter.pending?.requestId) { _ in
             applyJoinIfReady()
         }
+        .onChange(of: joinRouter.pending?.requestId) { _ in
+            evaluateWhatsNew(reason: "join-request-changed")
+        }
+        .onChange(of: joinRouter.needsHostPicker) { _ in
+            evaluateWhatsNew(reason: "join-host-picker")
+        }
         .onChange(of: syncSettings.isEstablished) { established in
             guard established, syncSettings.role == .child else { return }
             persistChildRoomOnEstablished()
         }
-        .onChange(of: whatsNewCoordinator.isPresented) { isPresented in
+        .onChange(of: showSettings) { _ in
+            evaluateWhatsNew(reason: "settings-toggle")
+        }
+        .onChange(of: showSyncErrorAlert) { _ in
+            evaluateWhatsNew(reason: "sync-alert")
+        }
+        .onChange(of: hasSeenWalkthrough) { _ in
+            evaluateWhatsNew(reason: "onboarding-change")
+        }
+        .onChange(of: isTimerActive) { _ in
+            evaluateWhatsNew(reason: "timer-activity")
+        }
+        .onChange(of: isPresentingCueSheets) { _ in
+            evaluateWhatsNew(reason: "cue-sheets-sheet")
+        }
+        .onChange(of: isPresentingPresetEditor) { _ in
+            evaluateWhatsNew(reason: "preset-editor")
+        }
+        .onChange(of: whatsNewController.isPresented) { isPresented in
             if isPresented {
                 showSettings = false
+                if whatsNewEntry == nil {
+                    whatsNewEntry = currentWhatsNewEntry
+                }
+            } else {
+                whatsNewEntry = nil
             }
+        }
+        .onChange(of: whatsNewController.manualPresentationRequested) { requested in
+            guard requested else { return }
+            whatsNewController.manualPresentationRequested = false
+            presentWhatsNewManually()
+        }
+        .onChange(of: scenePhase) { newPhase in
+            guard newPhase == .active else { return }
+            evaluateWhatsNew(reason: "scene-active")
         }
         .environmentObject(childRoomsStore)
     }
 
     private static let appStoreURLString = "https://apps.apple.com/app/id0000000000"
 
+    private var currentWhatsNewEntry: WhatsNewVersionEntry? {
+        whatsNewIndex?.entry(for: WhatsNewController.currentVersionString)
+    }
+
+    // Whats New eligibility inputs: onboarding flag, timer phase, join flow, cue sheet/preset sheets, and settings.
+    private var isOnboardingVisible: Bool { !hasSeenWalkthrough }
+    private var isJoinFlowActive: Bool { joinRouter.pending != nil || joinRouter.needsHostPicker }
+    private var isPresentingModal: Bool {
+        showSettings || showSyncErrorAlert || joinRouter.needsHostPicker || isPresentingCueSheets || isPresentingPresetEditor
+    }
+    private var isIdleForWhatsNew: Bool {
+        !isTimerActive && !isOnboardingVisible && !isPresentingModal && !isJoinFlowActive
+    }
+
     private func dismissWhatsNew() {
-        whatsNewCoordinator.markSeen(currentVersion: WhatsNewCoordinator.currentVersionString)
-        whatsNewCoordinator.isPresented = false
+        whatsNewController.isPresented = false
+    }
+
+    private func handleWhatsNewAction(_ action: WhatsNewAction) {
+        switch action {
+        case .openJoinQR:
+            openJoinFromWhatsNew()
+        case .openCueSheetsCreateBlank:
+            openCueSheetsCreateBlankFromWhatsNew()
+        case .openReleaseNotes:
+            break
+        }
     }
 
     private func openJoinFromWhatsNew() {
@@ -14262,17 +14357,50 @@ innerBody
         showSettings = true
     }
 
-    private func openCueSheetsFromWhatsNew() {
+    private func openCueSheetsCreateBlankFromWhatsNew() {
         dismissWhatsNew()
         mainMode = .sync
         showSettings = false
+        createBlankCueSheetForWhatsNew()
         NotificationCenter.default.post(name: .whatsNewOpenCueSheets, object: nil)
     }
 
-    private func openTestSyncFromWhatsNew() {
-        dismissWhatsNew()
-        mainMode = .sync
-        showSettings = false
+    private func createBlankCueSheetForWhatsNew() {
+        var sheet = CueSheet(title: "Untitled")
+        sheet.timeSigNum = 4
+        sheet.timeSigDen = 4
+        sheet.created = Date()
+        sheet.modified = sheet.created
+        do {
+            try CueLibraryStore.shared.save(sheet, intoFolderID: nil, tags: [])
+        } catch {
+            #if DEBUG
+            print("[WhatsNew] Failed to create blank cue sheet: \(error)")
+            #endif
+        }
+    }
+
+    private func presentWhatsNewManually() {
+        guard let entry = currentWhatsNewEntry else { return }
+        whatsNewEntry = entry
+        whatsNewController.isPresented = true
+    }
+
+    private func evaluateWhatsNew(reason: String) {
+        let currentVersion = WhatsNewController.currentVersionString
+        let entry = currentWhatsNewEntry
+        whatsNewController.evaluatePresentationEligibility(
+            currentVersion: currentVersion,
+            isIdle: isIdleForWhatsNew,
+            isOnboardingVisible: isOnboardingVisible,
+            isPresentingModal: isPresentingModal,
+            isJoinFlowActive: isJoinFlowActive,
+            hasContent: entry != nil,
+            reason: reason
+        )
+        if whatsNewController.isPresented, whatsNewEntry == nil {
+            whatsNewEntry = entry
+        }
     }
 
     private func applyJoinIfReady() {
@@ -14520,7 +14648,7 @@ struct SyncTimerApp: App {
     @StateObject private var clockSync = ClockSyncService()
     @StateObject private var syncSettings = SyncSettings()
     @StateObject private var joinRouter = JoinRouter()
-    @StateObject private var whatsNewCoordinator = WhatsNewCoordinator()
+    @StateObject private var whatsNewController = WhatsNewController()
     @AppStorage("settingsPage") private var settingsPage = 0
     @State private var editingTarget: EditableField? = nil
     @State private var inputText       = ""
@@ -14614,7 +14742,7 @@ if WCSession.isSupported() {
                     .environmentObject(clockSync)
                     .environmentObject(cueBadge)
                     .environmentObject(joinRouter)
-                    .environmentObject(whatsNewCoordinator)
+                    .environmentObject(whatsNewController)
                     .preferredColorScheme(appSettings.appTheme == .dark ? .dark : .light)
                     .dynamicTypeSize(.small ... .large)
             // “Open in SyncTimer” from Files/Share Sheet (XML only)
