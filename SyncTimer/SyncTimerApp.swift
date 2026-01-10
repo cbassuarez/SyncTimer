@@ -9742,7 +9742,7 @@ struct ConnectionPage: View {
                     )
                 }
             }
-            .presentationDetents([.large])
+            .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
             .presentationBackground(.clear)
             .presentationCornerRadius(28)
