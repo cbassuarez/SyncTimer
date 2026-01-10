@@ -5318,7 +5318,8 @@ struct MainScreen: View {
                                     }
                                 
                                 // Lock timer interactions while child is connected
-                                    .allowsHitTesting(!(lockActive || (isChildTabLockActive && parentMode == .sync))),                                            settings:
+                                    .allowsHitTesting(!(lockActive || (isChildTabLockActive && parentMode == .sync))),
+                                settings:
                                     SettingsPagerCard(
                                         page: $settingsPage,
                                         editingTarget: $editingTarget,
