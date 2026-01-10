@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct WhatsNewSheet: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -23,7 +26,9 @@ struct WhatsNewSheet: View {
         }
         .onAppear {
             guard !reduceMotion else { return }
-            drawSymbols = true
+            if #available(iOS 26.0, *) {
+                drawSymbols = true
+            }
         }
     }
 
@@ -173,10 +178,10 @@ private struct FeatureCard: View {
 
     @ViewBuilder
     private var featureIcon: some View {
-        let image = Image(systemName: card.symbol)
+        let image = Image(systemName: resolvedSymbolName)
             .font(.system(size: 22, weight: .semibold))
-            .foregroundColor(.accentColor)
             .symbolRenderingMode(.hierarchical)
+            .foregroundStyle(.primary)
             .accessibilityHidden(true)
 
         if #available(iOS 26.0, *), reduceMotion == false {
@@ -184,6 +189,29 @@ private struct FeatureCard: View {
         } else {
             image
         }
+    }
+
+    private var resolvedSymbolName: String {
+        let fallback = "sparkles"
+        let trimmed = card.symbol.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            logInvalidSymbol(trimmed)
+            return fallback
+        }
+#if canImport(UIKit)
+        if UIImage(systemName: trimmed) == nil {
+            logInvalidSymbol(trimmed)
+            return fallback
+        }
+#endif
+        return trimmed
+    }
+
+    private func logInvalidSymbol(_ symbol: String) {
+#if DEBUG
+        let display = symbol.isEmpty ? "<empty>" : symbol
+        print("[WhatsNew] Invalid SF Symbol '\(display)' for card \(card.id)")
+#endif
     }
 
     @ViewBuilder

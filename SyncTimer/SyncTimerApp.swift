@@ -4243,6 +4243,7 @@ struct MainScreen: View {
     // Add next to your other computed vars
     
     @State private var showCueSheets = false
+    @State private var pendingCueSheetCreateFromWhatsNew = false
     @Environment(\.containerSize) private var containerSize
     @Environment(\.horizontalSizeClass) private var hSize
         private var isPadDevice: Bool {
@@ -5763,13 +5764,17 @@ struct MainScreen: View {
                     guard let sheet = note.object as? CueSheet else { return }
                     mapEvents(from: sheet)
                 }
-                .onReceive(NotificationCenter.default.publisher(for: .whatsNewOpenCueSheets)) { _ in
+                .onReceive(NotificationCenter.default.publisher(for: .whatsNewOpenCueSheets)) { note in
+                    if let shouldCreate = note.userInfo?["createBlank"] as? Bool, shouldCreate {
+                        pendingCueSheetCreateFromWhatsNew = true
+                    }
                     showCueSheets = true
                 }
             // Stable SwiftUI sheet presenter (medium/large detents are defined inside CueSheetsSheet)
                 .sheet(isPresented: $showCueSheets) {
                     CueSheetsSheet(
                         isPresented: $showCueSheets,
+                        openNewBlankEditor: $pendingCueSheetCreateFromWhatsNew,
                         canBroadcast: { syncSettings.role == .parent && syncSettings.isEnabled },
                         onLoad: { sheet in
                             apply(sheet, broadcastBadge: false)
@@ -6956,6 +6961,7 @@ struct MainScreen: View {
                                                 ScrollView {
                                                     CueSheetsSheet(
                                                         isPresented: $showCueSheets,
+                                                        openNewBlankEditor: $pendingCueSheetCreateFromWhatsNew,
                                                         canBroadcast: { syncSettings.role == .parent && syncSettings.isEnabled },
                                                         onLoad: { sheet in
                                                             apply(sheet, broadcastBadge: false)
@@ -14076,6 +14082,7 @@ struct ContentView: View {
     @State private var isPresentingCueSheets = false
     @State private var isPresentingPresetEditor = false
     @State private var whatsNewEntry: WhatsNewVersionEntry? = nil
+    @State private var pendingWhatsNewCueSheetCreate = false
 
     private let whatsNewIndex = WhatsNewContentLoader.load()
     
@@ -14305,6 +14312,15 @@ innerBody
                 }
             } else {
                 whatsNewEntry = nil
+                if pendingWhatsNewCueSheetCreate {
+                    pendingWhatsNewCueSheetCreate = false
+                    guard !isPresentingModal else { return }
+                    NotificationCenter.default.post(
+                        name: .whatsNewOpenCueSheets,
+                        object: nil,
+                        userInfo: ["createBlank": true]
+                    )
+                }
             }
         }
         .onChange(of: whatsNewController.manualPresentationRequested) { requested in
@@ -14352,32 +14368,15 @@ innerBody
 
     private func openJoinFromWhatsNew() {
         dismissWhatsNew()
-        settingsPage = 2
         pendingJoinFromWhatsNew = true
-        showSettings = true
     }
 
     private func openCueSheetsCreateBlankFromWhatsNew() {
+        guard !isPresentingModal else { return }
+        pendingWhatsNewCueSheetCreate = true
         dismissWhatsNew()
         mainMode = .sync
         showSettings = false
-        createBlankCueSheetForWhatsNew()
-        NotificationCenter.default.post(name: .whatsNewOpenCueSheets, object: nil)
-    }
-
-    private func createBlankCueSheetForWhatsNew() {
-        var sheet = CueSheet(title: "Untitled")
-        sheet.timeSigNum = 4
-        sheet.timeSigDen = 4
-        sheet.created = Date()
-        sheet.modified = sheet.created
-        do {
-            try CueLibraryStore.shared.save(sheet, intoFolderID: nil, tags: [])
-        } catch {
-            #if DEBUG
-            print("[WhatsNew] Failed to create blank cue sheet: \(error)")
-            #endif
-        }
     }
 
     private func presentWhatsNewManually() {

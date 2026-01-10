@@ -79,6 +79,7 @@ extension URL: Identifiable { public var id: String { absoluteString } }
 struct CueSheetsSheet: View {
     @EnvironmentObject private var appSettings: AppSettings
     @Binding var isPresented: Bool
+    @Binding var openNewBlankEditor: Bool
     @Environment(\.dismiss) private var dismiss
     var canBroadcast: () -> Bool = { false }
     let onLoad: (CueSheet) -> Void
@@ -254,6 +255,12 @@ struct CueSheetsSheet: View {
         .background(Color.clear)
         // Base font for the entire Cue Sheets detent
        .font(.custom("Roboto-Regular", size: 17))
+        .onAppear {
+            handlePendingBlankEditor()
+        }
+        .onChange(of: openNewBlankEditor) { _ in
+            handlePendingBlankEditor()
+        }
 
         
         // Present the editor as a proper sheet instead of a custom overlay
@@ -377,6 +384,12 @@ struct CueSheetsSheet: View {
         s.modified = s.created
             editingSheet = s
         }
+
+    private func handlePendingBlankEditor() {
+        guard openNewBlankEditor else { return }
+        openNewBlankEditor = false
+        newBlank()
+    }
 
         private func delete(_ meta: CueLibraryIndex.SheetMeta) {
             do { try store.delete(metaID: meta.id) }
