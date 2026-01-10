@@ -3,7 +3,7 @@ import UIKit
 
 enum QuickAction: Equatable {
     case startResume
-    case countdown(Int)
+    case startCountdown
     case openCueSheets
     case joinRoom
 }
@@ -23,9 +23,8 @@ final class QuickActionRouter: ObservableObject {
         case "com.stagedevices.synctimer.join":
             pending = .joinRoom
         default:
-            if type.contains("countdown.") {
-                let sec = Int(type.split(separator: ".").last ?? "") ?? 0
-                pending = .countdown(sec)
+            if type == "com.stagedevices.synctimer.countdown" || type.contains("countdown") {
+                pending = .startCountdown
             } else {
                 return false
             }
