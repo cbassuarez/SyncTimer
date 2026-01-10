@@ -8,16 +8,12 @@ struct WhatsNewSheet: View {
     let onDismiss: () -> Void
 
     @State private var showReleaseNotes = false
+    @State private var drawSymbols = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 sheetContent
-            }
-            .scrollIndicators(.hidden)
-            .background(Color.clear)
-            .navigationDestination(isPresented: $showReleaseNotes) {
-                ReleaseNotesView(entry: entry)
             }
             .scrollIndicators(.hidden)
             .background(Color.clear)
@@ -66,6 +62,7 @@ struct WhatsNewSheet: View {
                 FeatureCard(
                     card: card,
                     reduceMotion: reduceMotion,
+                    drawSymbols: drawSymbols,
                     onAction: handleAction
                 )
             }
@@ -145,6 +142,7 @@ struct WhatsNewSheet: View {
 private struct FeatureCard: View {
     let card: WhatsNewCard
     let reduceMotion: Bool
+    let drawSymbols: Bool
     let onAction: (WhatsNewAction) -> Void
 
     var body: some View {
@@ -182,7 +180,7 @@ private struct FeatureCard: View {
             .accessibilityHidden(true)
 
         if #available(iOS 26.0, *), reduceMotion == false {
-            image.symbolEffect(.drawOn, options: .speed(1.2))
+            image.symbolEffect(.drawOn, options: .speed(1.2), isActive: drawSymbols)
         } else {
             image
         }
