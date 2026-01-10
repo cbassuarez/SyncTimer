@@ -57,6 +57,8 @@ extension Notification.Name {
     static let whatsNewOpenCueSheets = Notification.Name("whatsNewOpenCueSheets")
     /// Countdown quick actions for iOS home-screen shortcuts.
     static let quickActionCountdown = Notification.Name("quickActionCountdown")
+    /// Open the Join flow directly from quick actions.
+    static let quickActionOpenJoinFlow = Notification.Name("quickActionOpenJoinFlow")
 }
 
 extension SyncSettings.SyncConnectionMethod: SegmentedOption {
@@ -5630,11 +5632,10 @@ struct MainScreen: View {
                      if phase != .running { resetAll() }
                  }
                 .onReceive(NotificationCenter.default.publisher(for: .quickActionCountdown)) { note in
-                    guard let seconds = note.userInfo?["seconds"] as? Int, seconds > 0 else { return }
-                    guard !isCounting && !stopActive else { return }
+                    guard !stopActive else { return }
                     parentMode = .sync
-                    countdownDigits = timeToDigits(TimeInterval(seconds))
-                    toggleStart()
+                    let seconds = note.userInfo?["seconds"] as? Int ?? lastCountdownSecondsForQuickAction()
+                    startCountdownFromQuickAction(seconds: seconds)
                 }
                 .onDisappear {
                     wcCancellables.removeAll()
@@ -7913,6 +7914,30 @@ struct MainScreen: View {
         lightHaptic()
     }
 
+    private var lastCountdownDefaultsKey: String { "quickActions.lastCountdownSeconds" }
+
+    private func persistLastCountdownSeconds(_ seconds: TimeInterval) {
+        let s = max(0, Int(seconds.rounded()))
+        guard s > 0 else { return }
+        UserDefaults.standard.set(s, forKey: lastCountdownDefaultsKey)
+    }
+
+    private func lastCountdownSecondsForQuickAction() -> Int {
+        let s = UserDefaults.standard.integer(forKey: lastCountdownDefaultsKey)
+        return s > 0 ? s : 30
+    }
+
+    private func startCountdownFromQuickAction(seconds: Int) {
+        let secs = max(1, seconds)
+        guard phase == .idle else { return }
+
+        countdownDigits.removeAll()
+        countdownDuration = TimeInterval(secs)
+        countdownRemaining = TimeInterval(secs)
+        persistLastCountdownSeconds(countdownDuration)
+
+        toggleStart()
+    }
     
     //──────────────────── toggleStart / resetAll ─────────────────────────
     private func toggleStart() {
@@ -7954,6 +7979,9 @@ struct MainScreen: View {
                 countdownDigits.removeAll()
             } else {
                 countdownRemaining = countdownDuration
+            }
+            if countdownDuration > 0 {
+                persistLastCountdownSeconds(countdownDuration)
             }
             
             
@@ -14402,6 +14430,9 @@ innerBody
             whatsNewController.manualPresentationRequested = false
             presentWhatsNewManually()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .quickActionOpenJoinFlow)) { _ in
+            showJoinSheetFromWhatsNew = true
+        }
         .onChange(of: scenePhase) { newPhase in
             guard newPhase == .active else { return }
             if let action = quickActionRouter.pending {
@@ -14458,28 +14489,25 @@ innerBody
         switch action {
         case .startResume:
             AppActions.shared.startTimerAction()
-        case .countdown(let seconds):
-            startCountdown(seconds)
+        case .startCountdown:
+            NotificationCenter.default.post(
+                name: .quickActionCountdown,
+                object: nil
+            )
         case .openCueSheets:
+            showSettings = false
             NotificationCenter.default.post(
                 name: .whatsNewOpenCueSheets,
                 object: nil,
                 userInfo: ["createBlank": false]
             )
         case .joinRoom:
-            settingsPage = 2
-            pendingJoinFromWhatsNew = true
-            showSettings = true
+            showSettings = false
+            NotificationCenter.default.post(
+                name: .quickActionOpenJoinFlow,
+                object: nil
+            )
         }
-    }
-
-    private func startCountdown(_ seconds: Int) {
-        guard seconds > 0 else { return }
-        NotificationCenter.default.post(
-            name: .quickActionCountdown,
-            object: nil,
-            userInfo: ["seconds": seconds]
-        )
     }
 
     private func handleWhatsNewAction(_ action: WhatsNewAction) {
