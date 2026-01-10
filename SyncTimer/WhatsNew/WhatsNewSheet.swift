@@ -192,26 +192,17 @@ private struct FeatureCard: View {
     }
 
     private var resolvedSymbolName: String {
-        let fallback = "sparkles"
         let trimmed = card.symbol.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            logInvalidSymbol(trimmed)
-            return fallback
-        }
+        let resolvedName = trimmed.isEmpty ? "sparkles" : trimmed
+#if DEBUG && canImport(UIKit)
+        assert(UIImage(systemName: resolvedName) != nil, "Invalid SF Symbol: \(resolvedName)")
+#endif
 #if canImport(UIKit)
-        if UIImage(systemName: trimmed) == nil {
-            logInvalidSymbol(trimmed)
-            return fallback
+        if UIImage(systemName: resolvedName) == nil {
+            return "sparkles"
         }
 #endif
-        return trimmed
-    }
-
-    private func logInvalidSymbol(_ symbol: String) {
-#if DEBUG
-        let display = symbol.isEmpty ? "<empty>" : symbol
-        print("[WhatsNew] Invalid SF Symbol '\(display)' for card \(card.id)")
-#endif
+        return resolvedName
     }
 
     @ViewBuilder

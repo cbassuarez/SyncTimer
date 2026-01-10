@@ -9742,7 +9742,7 @@ struct ConnectionPage: View {
                     )
                 }
             }
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.large])
             .presentationDragIndicator(.visible)
             .presentationBackground(.clear)
             .presentationCornerRadius(28)
@@ -14212,7 +14212,10 @@ innerBody
             .preferredColorScheme(settings.appTheme == .dark ? .dark : .light)
         }
         .sheet(isPresented: $whatsNewController.isPresented, onDismiss: {
-            whatsNewController.markSeen(currentVersion: WhatsNewController.currentVersionString)
+            whatsNewController.markSeen(
+                currentVersion: WhatsNewController.currentVersionString,
+                currentBuild: WhatsNewController.currentBuildString
+            )
             whatsNewEntry = nil
         }) {
             if let entry = whatsNewEntry {
@@ -14367,8 +14370,16 @@ innerBody
     }
 
     private func openJoinFromWhatsNew() {
+        #if os(iOS)
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            showSettings = true
+        }
+        #endif
+        settingsPage = 2
+        DispatchQueue.main.async {
+            pendingJoinFromWhatsNew = true
+        }
         dismissWhatsNew()
-        pendingJoinFromWhatsNew = true
     }
 
     private func openCueSheetsCreateBlankFromWhatsNew() {
@@ -14387,9 +14398,11 @@ innerBody
 
     private func evaluateWhatsNew(reason: String) {
         let currentVersion = WhatsNewController.currentVersionString
+        let currentBuild = WhatsNewController.currentBuildString
         let entry = currentWhatsNewEntry
         whatsNewController.evaluatePresentationEligibility(
             currentVersion: currentVersion,
+            currentBuild: currentBuild,
             isIdle: isIdleForWhatsNew,
             isOnboardingVisible: isOnboardingVisible,
             isPresentingModal: isPresentingModal,
