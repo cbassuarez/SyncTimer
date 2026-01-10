@@ -9086,6 +9086,148 @@ extension View {
   }
 }
 #endif
+private func performToggleSyncMode(syncSettings: SyncSettings,
+                                   showSyncErrorAlert: Binding<Bool>,
+                                   syncErrorMessage: Binding<String>) {
+    if syncSettings.isEnabled {
+        // — TURN SYNC OFF —
+        switch syncSettings.connectionMethod {
+        case .network:
+            if syncSettings.role == .parent { syncSettings.stopParent() }
+            else                           { syncSettings.stopChild() }
+
+        case .bluetooth:
+            if syncSettings.role == .parent { syncSettings.stopParent() }
+            else                           { syncSettings.stopChild() }
+
+        case .bonjour:
+            syncSettings.bonjourManager.stopAdvertising()
+            syncSettings.bonjourManager.stopBrowsing()
+            if syncSettings.role == .parent { syncSettings.stopParent() }
+            else                             { syncSettings.stopChild() }
+        }
+
+        syncSettings.isEnabled     = false
+        syncSettings.statusMessage = "Sync stopped"
+
+    } else {
+        // — PRE-CHECK RADIOS —
+        switch syncSettings.connectionMethod {
+        case .network, .bonjour:
+            // Wi-Fi must be up
+            let monitor = NWPathMonitor(requiredInterfaceType: .wifi)
+            let sem = DispatchSemaphore(value: 0)
+            monitor.pathUpdateHandler = { _ in sem.signal() }
+            monitor.start(queue: .global(qos: .background))
+            sem.wait()                  // wait for first update
+            let path = monitor.currentPath
+            monitor.cancel()
+            guard path.status == .satisfied else {
+                syncErrorMessage.wrappedValue = "Wi-Fi is off or not connected.\nPlease enable Wi-Fi to sync."
+                showSyncErrorAlert.wrappedValue = true
+                return
+            }
+
+        case .bluetooth:
+                // Only error if Bluetooth is explicitly powered OFF
+                let btMgr = CBCentralManager(delegate: nil, queue: nil, options: nil)
+                if btMgr.state == .poweredOff {
+                    syncErrorMessage.wrappedValue = "Bluetooth is off.\nPlease enable Bluetooth to sync."
+                    showSyncErrorAlert.wrappedValue = true
+                    return
+                }
+        }
+
+        // — TURN SYNC ON — (existing logic unchanged)
+        switch syncSettings.connectionMethod {
+        case .network:
+            if syncSettings.role == .parent { syncSettings.startParent() }
+            else                           { syncSettings.startChild() }
+
+        case .bluetooth:
+            if syncSettings.role == .parent { syncSettings.startParent() }
+            else                           { syncSettings.startChild() }
+            if syncSettings.tapPairingAvailable {
+                syncSettings.beginTapPairing()
+            } else {
+                syncSettings.tapStateText = "Not available on Mac"
+            }
+
+        case .bonjour:
+            if syncSettings.role == .parent {
+                syncSettings.startParent()
+                syncSettings.bonjourManager.startAdvertising()
+                syncSettings.bonjourManager.startBrowsing()
+                syncSettings.statusMessage = "Bonjour: advertising & listening"
+            } else {
+                syncSettings.bonjourManager.advertisePresence()
+                syncSettings.bonjourManager.startBrowsing()
+                syncSettings.statusMessage = "Bonjour: advertising & searching…"
+            }
+        }
+
+        syncSettings.isEnabled = true
+    }
+}
+
+private func stopSyncIfNeeded(syncSettings: SyncSettings) {
+    guard syncSettings.isEnabled else { return }
+    if syncSettings.role == .parent { syncSettings.stopParent() }
+    else { syncSettings.stopChild() }
+    syncSettings.isEnabled = false
+}
+
+private func startSyncIfNeeded(syncSettings: SyncSettings, toggleSyncMode: () -> Void) {
+    guard !syncSettings.isEnabled else { return }
+    toggleSyncMode()
+}
+
+private func startChildJoin(_ request: HostJoinRequestV1,
+                            transport: SyncSettings.SyncConnectionMethod = .bluetooth,
+                            syncSettings: SyncSettings,
+                            toggleSyncMode: () -> Void) {
+    stopSyncIfNeeded(syncSettings: syncSettings)
+    syncSettings.role = .child
+    syncSettings.connectionMethod = transport
+    let deviceName = request.deviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
+    syncSettings.stashJoinLabelCandidate(
+        hostUUID: request.hostUUID,
+        roomLabel: nil,
+        deviceName: deviceName
+    )
+    if transport == .bluetooth {
+        syncSettings.setJoinTargetHostUUID(request.hostUUID)
+    } else {
+        syncSettings.clearJoinConstraints()
+    }
+    if let deviceName, !deviceName.isEmpty {
+        syncSettings.pairingDeviceName = deviceName
+    }
+    startSyncIfNeeded(syncSettings: syncSettings, toggleSyncMode: toggleSyncMode)
+}
+
+private func startChildRoom(_ room: ChildSavedRoom,
+                            syncSettings: SyncSettings,
+                            toggleSyncMode: () -> Void) {
+    stopSyncIfNeeded(syncSettings: syncSettings)
+    syncSettings.role = .child
+    let transport = (room.preferredTransport == .bonjour) ? .network : room.preferredTransport
+    syncSettings.connectionMethod = transport
+    if transport != .bluetooth {
+        if let ip = room.peerIP { syncSettings.peerIP = ip }
+        if let port = room.peerPort { syncSettings.peerPort = port }
+        syncSettings.clearJoinConstraints()
+    } else if let hostUUID = room.hostUUID {
+        syncSettings.setJoinTargetHostUUID(hostUUID)
+    } else {
+        syncSettings.clearJoinConstraints()
+    }
+    if let hostUUID = room.hostUUID {
+        syncSettings.stashJoinLabelCandidate(hostUUID: hostUUID, roomLabel: nil, deviceName: nil)
+    }
+    startSyncIfNeeded(syncSettings: syncSettings, toggleSyncMode: toggleSyncMode)
+}
+
 struct ConnectionPage: View {
     @EnvironmentObject private var syncSettings: SyncSettings
     @EnvironmentObject private var settings: AppSettings
@@ -9365,139 +9507,11 @@ struct ConnectionPage: View {
         }
     // MARK: – toggleSyncMode (drop-in)
     private func toggleSyncMode() {
-        if syncSettings.isEnabled {
-            // — TURN SYNC OFF —
-            switch syncSettings.connectionMethod {
-            case .network:
-                if syncSettings.role == .parent { syncSettings.stopParent() }
-                else                           { syncSettings.stopChild() }
-
-            case .bluetooth:
-                if syncSettings.role == .parent { syncSettings.stopParent() }
-                else                           { syncSettings.stopChild() }
-
-            case .bonjour:
-                syncSettings.bonjourManager.stopAdvertising()
-                syncSettings.bonjourManager.stopBrowsing()
-                if syncSettings.role == .parent { syncSettings.stopParent() }
-                else                             { syncSettings.stopChild() }
-            }
-
-            syncSettings.isEnabled     = false
-            syncSettings.statusMessage = "Sync stopped"
-
-        } else {
-            // — PRE-CHECK RADIOS —
-            switch syncSettings.connectionMethod {
-            case .network, .bonjour:
-                // Wi-Fi must be up
-                let monitor = NWPathMonitor(requiredInterfaceType: .wifi)
-                let sem = DispatchSemaphore(value: 0)
-                monitor.pathUpdateHandler = { _ in sem.signal() }
-                monitor.start(queue: .global(qos: .background))
-                sem.wait()                  // wait for first update
-                let path = monitor.currentPath
-                monitor.cancel()
-                guard path.status == .satisfied else {
-                    syncErrorMessage   = "Wi-Fi is off or not connected.\nPlease enable Wi-Fi to sync."
-                    showSyncErrorAlert = true
-                    return
-                }
-
-            case .bluetooth:
-                    // Only error if Bluetooth is explicitly powered OFF
-                    let btMgr = CBCentralManager(delegate: nil, queue: nil, options: nil)
-                    if btMgr.state == .poweredOff {
-                        syncErrorMessage   = "Bluetooth is off.\nPlease enable Bluetooth to sync."
-                        showSyncErrorAlert = true
-                        return
-                    }
-            }
-
-            // — TURN SYNC ON — (existing logic unchanged)
-            switch syncSettings.connectionMethod {
-            case .network:
-                if syncSettings.role == .parent { syncSettings.startParent() }
-                else                           { syncSettings.startChild() }
-
-            case .bluetooth:
-                if syncSettings.role == .parent { syncSettings.startParent() }
-                else                           { syncSettings.startChild() }
-                if syncSettings.tapPairingAvailable {
-                    syncSettings.beginTapPairing()
-                } else {
-                    syncSettings.tapStateText = "Not available on Mac"
-                }
-
-            case .bonjour:
-                if syncSettings.role == .parent {
-                    syncSettings.startParent()
-                    syncSettings.bonjourManager.startAdvertising()
-                    syncSettings.bonjourManager.startBrowsing()
-                    syncSettings.statusMessage = "Bonjour: advertising & listening"
-                } else {
-                    syncSettings.bonjourManager.advertisePresence()
-                    syncSettings.bonjourManager.startBrowsing()
-                    syncSettings.statusMessage = "Bonjour: advertising & searching…"
-                }
-            }
-
-            syncSettings.isEnabled = true
-        }
-    }
-
-    private func stopSyncIfNeeded() {
-        guard syncSettings.isEnabled else { return }
-        if syncSettings.role == .parent { syncSettings.stopParent() }
-        else { syncSettings.stopChild() }
-        syncSettings.isEnabled = false
-    }
-
-    private func startSyncIfNeeded() {
-        guard !syncSettings.isEnabled else { return }
-        toggleSyncMode()
-    }
-
-    private func startChildJoin(_ request: HostJoinRequestV1,
-                                transport: SyncSettings.SyncConnectionMethod = .bluetooth) {
-        stopSyncIfNeeded()
-        syncSettings.role = .child
-        syncSettings.connectionMethod = transport
-        let deviceName = request.deviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        syncSettings.stashJoinLabelCandidate(
-            hostUUID: request.hostUUID,
-            roomLabel: nil,
-            deviceName: deviceName
+        performToggleSyncMode(
+            syncSettings: syncSettings,
+            showSyncErrorAlert: $showSyncErrorAlert,
+            syncErrorMessage: $syncErrorMessage
         )
-        if transport == .bluetooth {
-            syncSettings.setJoinTargetHostUUID(request.hostUUID)
-        } else {
-            syncSettings.clearJoinConstraints()
-        }
-        if let deviceName, !deviceName.isEmpty {
-            syncSettings.pairingDeviceName = deviceName
-        }
-        startSyncIfNeeded()
-    }
-
-    private func startChildRoom(_ room: ChildSavedRoom) {
-        stopSyncIfNeeded()
-        syncSettings.role = .child
-        let transport = (room.preferredTransport == .bonjour) ? .network : room.preferredTransport
-        syncSettings.connectionMethod = transport
-        if transport != .bluetooth {
-            if let ip = room.peerIP { syncSettings.peerIP = ip }
-            if let port = room.peerPort { syncSettings.peerPort = port }
-            syncSettings.clearJoinConstraints()
-        } else if let hostUUID = room.hostUUID {
-            syncSettings.setJoinTargetHostUUID(hostUUID)
-        } else {
-            syncSettings.clearJoinConstraints()
-        }
-        if let hostUUID = room.hostUUID {
-            syncSettings.stashJoinLabelCandidate(hostUUID: hostUUID, roomLabel: nil, deviceName: nil)
-        }
-        startSyncIfNeeded()
     }
 
     /// Friendly description for each method
@@ -9734,10 +9748,19 @@ struct ConnectionPage: View {
                 } else {
                     ChildJoinSheet(
                         onJoinRequest: { request, transport in
-                            startChildJoin(request, transport: transport)
+                            startChildJoin(
+                                request,
+                                transport: transport,
+                                syncSettings: syncSettings,
+                                toggleSyncMode: toggleSyncMode
+                            )
                         },
                         onJoinRoom: { room in
-                            startChildRoom(room)
+                            startChildRoom(
+                                room,
+                                syncSettings: syncSettings,
+                                toggleSyncMode: toggleSyncMode
+                            )
                         }
                     )
                 }
@@ -14083,6 +14106,7 @@ struct ContentView: View {
     @State private var isPresentingPresetEditor = false
     @State private var whatsNewEntry: WhatsNewVersionEntry? = nil
     @State private var pendingWhatsNewCueSheetCreate = false
+    @State private var showJoinSheetFromWhatsNew = false
 
     private let whatsNewIndex = WhatsNewContentLoader.load()
     
@@ -14228,6 +14252,43 @@ innerBody
                 .presentationDragIndicator(.visible)
             }
         }
+        .sheet(isPresented: $showJoinSheetFromWhatsNew) {
+            Group {
+                if syncSettings.role == .parent {
+                    GenerateJoinQRSheet(
+                        deviceName: hostDeviceName,
+                        hostUUIDString: hostUUIDString,
+                        hostShareURL: hostShareURL,
+                        onRequestEnableSync: {
+                            guard !syncSettings.isEnabled else { return }
+                            toggleSyncMode()
+                        }
+                    )
+                } else {
+                    ChildJoinSheet(
+                        onJoinRequest: { request, transport in
+                            startChildJoin(
+                                request,
+                                transport: transport,
+                                syncSettings: syncSettings,
+                                toggleSyncMode: toggleSyncMode
+                            )
+                        },
+                        onJoinRoom: { room in
+                            startChildRoom(
+                                room,
+                                syncSettings: syncSettings,
+                                toggleSyncMode: toggleSyncMode
+                            )
+                        }
+                    )
+                }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(.clear)
+            .presentationCornerRadius(28)
+        }
         .alert(isPresented: $showSyncErrorAlert) {
             Alert(title: Text("Cannot Start Sync"),
                   message: Text(syncErrorMessage),
@@ -14344,6 +14405,27 @@ innerBody
         whatsNewIndex?.entry(for: WhatsNewController.currentVersionString)
     }
 
+    private var hostUUIDString: String {
+        syncSettings.localPeerID.uuidString
+    }
+
+    private var hostDeviceName: String {
+        UIDevice.current.name
+    }
+
+    private var hostShareURL: URL {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "synctimerapp.com"
+        components.path = "/host"
+        components.queryItems = [
+            URLQueryItem(name: "v", value: "1"),
+            URLQueryItem(name: "host_uuid", value: hostUUIDString),
+            URLQueryItem(name: "device_name", value: hostDeviceName)
+        ]
+        return components.url ?? URL(string: "https://synctimerapp.com/host")!
+    }
+
     // Whats New eligibility inputs: onboarding flag, timer phase, join flow, cue sheet/preset sheets, and settings.
     private var isOnboardingVisible: Bool { !hasSeenWalkthrough }
     private var isJoinFlowActive: Bool { joinRouter.pending != nil || joinRouter.needsHostPicker }
@@ -14370,16 +14452,11 @@ innerBody
     }
 
     private func openJoinFromWhatsNew() {
-        #if os(iOS)
-        if UIDevice.current.userInterfaceIdiom == .phone {
-            showSettings = true
-        }
-        #endif
-        settingsPage = 2
-        DispatchQueue.main.async {
-            pendingJoinFromWhatsNew = true
-        }
+        pendingJoinFromWhatsNew = false
         dismissWhatsNew()
+        DispatchQueue.main.async {
+            showJoinSheetFromWhatsNew = true
+        }
     }
 
     private func openCueSheetsCreateBlankFromWhatsNew() {
@@ -14463,6 +14540,14 @@ innerBody
                 showSettings = false
                 mainMode = .sync
         joinRouter.markConsumed()
+    }
+
+    private func toggleSyncMode() {
+        performToggleSyncMode(
+            syncSettings: syncSettings,
+            showSyncErrorAlert: $showSyncErrorAlert,
+            syncErrorMessage: $syncErrorMessage
+        )
     }
 
     private func persistChildRoomOnEstablished() {
