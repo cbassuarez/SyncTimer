@@ -163,7 +163,15 @@ final class SyncTimerMenuDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         registerQuickActions()
+#if targetEnvironment(macCatalyst)
         return true
+#else
+        if let shortcutItem = launchOptions?[.shortcutItem] as? UIApplicationShortcutItem {
+            handleQuickAction(shortcutItem)
+            return false
+        }
+        return true
+#endif
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
@@ -240,19 +248,21 @@ final class SyncTimerMenuDelegate: UIResponder, UIApplicationDelegate {
 #else
         guard let action = QuickActionType.fromShortcutType(shortcutItem.type) else { return false }
         let defaults = UserDefaults.standard
-        defaults.set(action.rawValue, forKey: QuickActionStorage.typeKey)
-        defaults.set(0, forKey: QuickActionStorage.payloadSecondsKey)
-        defaults.set(false, forKey: QuickActionStorage.openJoinLargeKey)
+        defaults.set(action.rawValue, forKey: QuickActionDefaults.typeKey)
+        defaults.set(0, forKey: QuickActionDefaults.secondsKey)
+        defaults.set(false, forKey: QuickActionDefaults.openJoinLargeKey)
+        defaults.set(false, forKey: QuickActionDefaults.pendingOpenJoinSheetKey)
 
         switch action {
         case .countdown30:
-            defaults.set(30, forKey: QuickActionStorage.payloadSecondsKey)
+            defaults.set(30, forKey: QuickActionDefaults.secondsKey)
         case .countdown60:
-            defaults.set(60, forKey: QuickActionStorage.payloadSecondsKey)
+            defaults.set(60, forKey: QuickActionDefaults.secondsKey)
         case .countdown300:
-            defaults.set(300, forKey: QuickActionStorage.payloadSecondsKey)
+            defaults.set(300, forKey: QuickActionDefaults.secondsKey)
         case .openJoinRoom:
-            defaults.set(true, forKey: QuickActionStorage.openJoinLargeKey)
+            defaults.set(true, forKey: QuickActionDefaults.openJoinLargeKey)
+            defaults.set(true, forKey: QuickActionDefaults.pendingOpenJoinSheetKey)
         case .startResume, .openCueSheets, .openCurrentCueSheet:
             break
         }

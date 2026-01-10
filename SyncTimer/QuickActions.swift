@@ -5,7 +5,7 @@
 
 import Foundation
 
-enum QuickActionType: String, CaseIterable {
+enum QuickActionType: String {
     case startResume
     case countdown30
     case countdown60
@@ -15,10 +15,8 @@ enum QuickActionType: String, CaseIterable {
     case openJoinRoom
 
     static var typePrefix: String {
-        if let bundleID = Bundle.main.bundleIdentifier {
-            return "\(bundleID)."
-        }
-        return "synctimer."
+        let bundleID = Bundle.main.bundleIdentifier ?? "SyncTimer"
+        return "\(bundleID).qa."
     }
 
     var shortcutType: String {
@@ -33,11 +31,17 @@ enum QuickActionType: String, CaseIterable {
     }
 }
 
-enum QuickActionStorage {
+enum QuickActionDefaults {
     static let typeKey = "launch.quickAction.type"
-    static let payloadSecondsKey = "launch.quickAction.payloadSeconds"
+    static let secondsKey = "launch.quickAction.payloadSeconds"
     static let openJoinLargeKey = "launch.quickAction.openJoinLarge"
     static let pendingOpenJoinSheetKey = "launch.pendingOpenJoinSheet"
-    static let pendingOpenJoinLargeKey = "launch.pendingOpenJoinLarge"
     static let countdownSecondsUserInfoKey = "seconds"
+}
+
+extension Notification.Name {
+    static let quickActionStartResume = Notification.Name("quickAction.startResume")
+    static let quickActionStartCountdown = Notification.Name("quickAction.startCountdown")
+    static let quickActionOpenCueSheets = Notification.Name("quickAction.openCueSheets")
+    static let quickActionOpenCurrentCueSheet = Notification.Name("quickAction.openCurrentCueSheet")
 }
