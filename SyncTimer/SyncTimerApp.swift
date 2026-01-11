@@ -5673,7 +5673,8 @@ struct MainScreen: View {
                         isStopActive: stopActive,
                         stopRemainingActive: stopRemaining,
                         cueEvents: snapshot.cues,
-                        restartEvents: snapshot.restarts
+                        restartEvents: snapshot.restarts,
+                        showHours: appSettings.showHours
                         // If you extended TimerMessage with role/link/controlsEnabled/etc, you can also pass them here:
                         // , role: (syncSettings.role == .parent ? "parent" : "child")
                         // , link: linkStr

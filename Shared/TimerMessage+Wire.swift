@@ -71,6 +71,7 @@ public struct TimerMessage: Codable, Equatable {
         public var syncLamp: String?
         /// one-shot edge for cue/zero-flash haptic (optional)
         public var flashNow: Bool?
+        public var showHours: Bool?
         public var display: TimerDisplayWire?
         public var assetManifest: [CueAssetManifestItem]?
         public var assetRequests: [UUID]?
@@ -98,6 +99,7 @@ public struct TimerMessage: Codable, Equatable {
                       controlsEnabled: Bool? = nil,
                       syncLamp: String? = nil,
                       flashNow: Bool? = nil,
+                      showHours: Bool? = nil,
                       display: TimerDisplayWire? = nil,
                       assetManifest: [CueAssetManifestItem]? = nil,
                       assetRequests: [UUID]? = nil,
@@ -123,6 +125,7 @@ public struct TimerMessage: Codable, Equatable {
                   self.controlsEnabled   = controlsEnabled
                   self.syncLamp          = syncLamp
                   self.flashNow          = flashNow
+        self.showHours         = showHours
         self.display           = display
         self.assetManifest     = assetManifest
         self.assetRequests     = assetRequests
