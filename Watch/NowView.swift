@@ -41,6 +41,7 @@ struct NowView: View {
 
     @State private var latestMessage: TimerMessage?
     @State private var pageSelection: Int = 0
+    @State private var snapCounter: UInt64 = 0
 
     // Tickers
     private let staleTick  = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
@@ -59,7 +60,17 @@ struct NowView: View {
         let timerProviders = makeTimerProviders()
 
         TabView(selection: $pageSelection) {
-            WatchFacePage(renderModel: renderModel, timerProviders: timerProviders, isLive: pageSelection == 0)
+            WatchFacePage(
+                renderModel: renderModel,
+                timerProviders: timerProviders,
+                isLive: pageSelection == 0,
+                snapshotToken: snapCounter
+            )
+            #if DEBUG
+            .overlay(alignment: .topLeading) {
+                WatchDebugOverlay(lines: debugLines)
+            }
+            #endif
                 .tag(0)
             WatchDetailsPage(
                 renderModel: renderModel,
@@ -119,6 +130,11 @@ struct NowView: View {
                 prevSnapT    = now
 
                 latestMessage = msg
+                if let seq = msg.stateSeq ?? msg.actionSeq {
+                    snapCounter = seq
+                } else {
+                    snapCounter &+= 1
+                }
             }
         }
 
@@ -277,6 +293,47 @@ struct NowView: View {
 
     private func currentStop(nowUptime: TimeInterval) -> TimeInterval {
         max(0, baseStop + vStop * (nowUptime - baseT0))
+    }
+}
+
+#if DEBUG
+private struct WatchDebugOverlay: View {
+    let lines: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(lines, id: \.self) { line in
+                Text(line)
+            }
+        }
+        .font(.system(size: 8, weight: .regular, design: .monospaced))
+        .foregroundStyle(.white)
+        .padding(4)
+        .background(Color.black.opacity(0.55))
+        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+        .padding(.leading, 6)
+        .padding(.top, 4)
+    }
+}
+#endif
+
+private extension NowView {
+    var debugLines: [String] {
+        #if DEBUG
+        let now = ProcessInfo.processInfo.systemUptime
+        let ageMs = Int(max(0, now - lastSnapUptime) * 1000)
+        let seqText = latestMessage?.stateSeq ?? latestMessage?.actionSeq ?? snapCounter
+        let stopCount = latestMessage?.stopEvents.count ?? 0
+        let cueCount = latestMessage?.cueEvents?.count ?? 0
+        let restartCount = latestMessage?.restartEvents?.count ?? 0
+        return [
+            "seq:\(seqText) phase:\(phaseStr) rem:\(String(format: "%.2f", snapMain))",
+            "events s:\(stopCount) c:\(cueCount) r:\(restartCount) age:\(ageMs)ms",
+            "v:\(String(format: "%.2f", vMain)) base:\(String(format: "%.2f", baseMain)) live:\(pageSelection == 0)"
+        ]
+        #else
+        return []
+        #endif
     }
 }
 
