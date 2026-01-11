@@ -8,6 +8,7 @@ import SwiftUI
 import Combine
 import AudioToolbox
 import CoreText
+import Sentry
 import Network
 import SystemConfiguration
 import AVFoundation
@@ -15066,7 +15067,28 @@ struct SyncTimerApp: App {
     @State private var lastTickUptime: Double? = nil
     @StateObject private var cueBadge = CueBadgeState()
     init() {
+        //  Start sentry as early as possible, but only if configured.
+            if let dsn = Bundle.main.object(forInfoDictionaryKey: "SENTRY_DSN") as? String,
+               !dsn.isEmpty {
+                SentrySDK.start { options in
+                    options.dsn = dsn
 
+                    #if DEBUG
+                    options.debug = true
+                    options.environment = "debug"
+                    #else
+                    options.debug = false
+                    options.environment = "production"
+                    #endif
+
+                    // Keep performance off until you explicitly want it:
+                    options.tracesSampleRate = 0
+
+                    // Safer defaults (avoid accidentally sending PII):
+                    options.sendDefaultPii = false
+                }
+            }
+        
         UIApplication.shared.isIdleTimerDisabled = true
         registerRoboto()
         

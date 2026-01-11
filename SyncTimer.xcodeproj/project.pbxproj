@@ -20,6 +20,7 @@
 		96F296452E793F130039B071 /* ControlRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96F296132E793F130039B071 /* ControlRequest.swift */; };
 		96F2965D2E793F130039B071 /* ConnectivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96F296122E793F130039B071 /* ConnectivityManager.swift */; };
 		96F2965E2E793F130039B071 /* ControlRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96F296132E793F130039B071 /* ControlRequest.swift */; };
+		96F408E32F133BA3000045BB /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 96F408E22F133BA3000045BB /* Sentry */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -312,6 +313,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				9636A7392E79193100A062B6 /* WatchConnectivity.framework in Frameworks */,
+				96F408E32F133BA3000045BB /* Sentry in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -551,6 +553,7 @@
 			);
 			name = SyncTimer;
 			packageProductDependencies = (
+				96F408E22F133BA3000045BB /* Sentry */,
 			);
 			productName = SyncTimer;
 			productReference = 96DB420D2DE84D160027E9AA /* SyncTimer.app */;
@@ -657,6 +660,7 @@
 			mainGroup = 96DB42042DE84D160027E9AA;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				96F408E12F133BA3000045BB /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 96DB420E2DE84D160027E9AA /* Products */;
@@ -1599,6 +1603,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		96F408E12F133BA3000045BB /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/getsentry/sentry-cocoa";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		96F408E22F133BA3000045BB /* Sentry */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 96F408E12F133BA3000045BB /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
+			productName = Sentry;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 96DB42052DE84D160027E9AA /* Project object */;
 }
