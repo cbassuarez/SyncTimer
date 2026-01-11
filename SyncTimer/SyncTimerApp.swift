@@ -14322,93 +14322,150 @@ struct AboutPage: View {
 
             var body: some View {
                 GeometryReader { proxy in
-                    let trackHeight: CGFloat = 64
-                    let thumbSize: CGFloat = 44
-                    let horizontalPadding: CGFloat = 12
-                    let maxOffset = max(0, proxy.size.width - (horizontalPadding * 2 + thumbSize))
-                    let threshold = maxOffset * 0.85
+                    let metrics = layoutMetrics(for: proxy.size.width)
                     let isDragging = lock == .horizontal && dragX > 0
 
-                    AboutDrawerSurface(tint: tint) {
-                        ZStack(alignment: .leading) {
-                            Text(statusLabel)
-                                .font(.custom("Roboto-Regular", size: 15))
-                                .foregroundStyle(.white)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .opacity(isDragging ? 0.7 : 1)
-
-                            Circle()
-                                .fill(Color.white.opacity(0.22))
-                                .overlay(
-                                    Circle()
-                                        .stroke(Color.white.opacity(0.4), lineWidth: 1)
-                                )
-                                .overlay(
-                                    Group {
-                                        if #available(iOS 17.0, *) {
-                                            Image(systemName: symbolName)
-                                                .contentTransition(.symbolEffect(.replace))
-                                        } else {
-                                            Image(systemName: symbolName)
-                                        }
-                                    }
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundStyle(.white)
-                                )
-                                .frame(width: thumbSize, height: thumbSize)
-                                .offset(x: dragX)
-                                .gesture(
-                                    DragGesture(minimumDistance: 0)
-                                        .onChanged { value in
-                                            guard !didConfirm else { return }
-                                            if lock == .undecided {
-                                                let dx = value.translation.width
-                                                let dy = value.translation.height
-                                                if abs(dx) > 6 || abs(dy) > 6 {
-                                                    if abs(dx) > abs(dy) {
-                                                        lock = .horizontal
-                                                        baseX = dragX
-                                                    } else {
-                                                        lock = .vertical
-                                                    }
-                                                }
-                                            }
-                                            guard lock == .horizontal else { return }
-                                            let proposed = baseX + value.translation.width
-                                            dragX = min(max(0, proposed), maxOffset)
-                                        }
-                                        .onEnded { _ in
-                                            defer {
-                                                lock = .undecided
-                                                baseX = dragX
-                                            }
-                                            guard !didConfirm else { return }
-                                            guard lock == .horizontal else { return }
-                                            if dragX >= threshold {
-                                                confirmSend(maxOffset: maxOffset)
-                                            } else {
-                                                withAnimation(animationStyle()) {
-                                                    dragX = 0
-                                                }
-                                            }
-                                        }
-                                )
-                                .accessibilityHidden(true)
-                        }
-                        .padding(.horizontal, horizontalPadding)
-                        .frame(height: trackHeight)
-                    }
-                    .frame(height: trackHeight)
-                    .allowsHitTesting(!didConfirm)
+                    trackView(
+                        height: metrics.trackHeight,
+                        horizontalPadding: metrics.horizontalPadding,
+                        isDragging: isDragging,
+                        maxOffset: metrics.maxOffset,
+                        threshold: metrics.threshold,
+                        thumbSize: metrics.thumbSize
+                    )
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("Send Report")
                     .accessibilityHint("Slide to confirm sending diagnostics and optional screenshot.")
                     .accessibilityValue(phase == .idle ? "Not sent" : phase == .sending ? "Sending" : "Sent")
                     .accessibilityAction(.activate) {
-                        confirmSend(maxOffset: maxOffset)
+                        confirmSend(maxOffset: metrics.maxOffset)
                     }
                 }
                 .frame(height: 64)
+            }
+
+            private struct LayoutMetrics {
+                let trackHeight: CGFloat
+                let thumbSize: CGFloat
+                let horizontalPadding: CGFloat
+                let maxOffset: CGFloat
+                let threshold: CGFloat
+            }
+
+            private func layoutMetrics(for width: CGFloat) -> LayoutMetrics {
+                let trackHeight: CGFloat = 64
+                let thumbSize: CGFloat = 44
+                let horizontalPadding: CGFloat = 12
+                let maxOffset = max(0, width - (horizontalPadding * 2 + thumbSize))
+                let threshold = maxOffset * 0.85
+                return LayoutMetrics(
+                    trackHeight: trackHeight,
+                    thumbSize: thumbSize,
+                    horizontalPadding: horizontalPadding,
+                    maxOffset: maxOffset,
+                    threshold: threshold
+                )
+            }
+
+            @ViewBuilder
+            private func trackView(
+                height: CGFloat,
+                horizontalPadding: CGFloat,
+                isDragging: Bool,
+                maxOffset: CGFloat,
+                threshold: CGFloat,
+                thumbSize: CGFloat
+            ) -> some View {
+                AboutDrawerSurface(tint: tint) {
+                    ZStack(alignment: .leading) {
+                        labelView(isDragging: isDragging)
+                        thumbView(
+                            maxOffset: maxOffset,
+                            threshold: threshold,
+                            thumbSize: thumbSize
+                        )
+                    }
+                    .padding(.horizontal, horizontalPadding)
+                    .frame(height: height)
+                }
+                .frame(height: height)
+                .allowsHitTesting(!didConfirm)
+            }
+
+            private func labelView(isDragging: Bool) -> some View {
+                Text(statusLabel)
+                    .font(.custom("Roboto-Regular", size: 15))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .opacity(isDragging ? 0.7 : 1)
+            }
+
+            private func thumbView(
+                maxOffset: CGFloat,
+                threshold: CGFloat,
+                thumbSize: CGFloat
+            ) -> some View {
+                Circle()
+                    .fill(Color.white.opacity(0.22))
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white.opacity(0.4), lineWidth: 1)
+                    )
+                    .overlay(thumbIcon)
+                    .frame(width: thumbSize, height: thumbSize)
+                    .offset(x: dragX)
+                    .gesture(dragGesture(maxOffset: maxOffset, threshold: threshold))
+                    .accessibilityHidden(true)
+            }
+
+            private var thumbIcon: some View {
+                Group {
+                    if #available(iOS 17.0, *) {
+                        Image(systemName: symbolName)
+                            .contentTransition(.symbolEffect(.replace))
+                    } else {
+                        Image(systemName: symbolName)
+                    }
+                }
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+            }
+
+            private func dragGesture(maxOffset: CGFloat, threshold: CGFloat) -> some Gesture {
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        guard !didConfirm else { return }
+                        if lock == .undecided {
+                            let dx = value.translation.width
+                            let dy = value.translation.height
+                            if abs(dx) > 6 || abs(dy) > 6 {
+                                if abs(dx) > abs(dy) {
+                                    lock = .horizontal
+                                    baseX = dragX
+                                } else {
+                                    lock = .vertical
+                                }
+                            }
+                        }
+                        guard lock == .horizontal else { return }
+                        let proposed = baseX + value.translation.width
+                        dragX = min(max(0, proposed), maxOffset)
+                    }
+                    .onEnded { _ in
+                        defer {
+                            lock = .undecided
+                            baseX = dragX
+                        }
+                        guard !didConfirm else { return }
+                        guard lock == .horizontal else { return }
+                        if dragX >= threshold {
+                            confirmSend(maxOffset: maxOffset)
+                        } else {
+                            withAnimation(animationStyle()) {
+                                dragX = 0
+                            }
+                        }
+                    }
             }
         }
 
@@ -17002,4 +17059,3 @@ private extension SyncTimerApp {
         }
     }
 }
-
