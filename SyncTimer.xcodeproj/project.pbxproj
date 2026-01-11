@@ -170,6 +170,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				NowView.swift,
+				WatchStubs.swift,
 				WatchSyncTimerApp.swift,
 			);
 			target = 9636A7412E791DBB00A062B6 /* SyncTimerWatch Watch App */;
@@ -192,11 +193,6 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		9636A7432E791DBB00A062B6 /* SyncTimerWatch Watch App */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "SyncTimerWatch Watch App";
-			sourceTree = "<group>";
-		};
 		9636A7512E791DBD00A062B6 /* SyncTimerWatch Watch AppTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "SyncTimerWatch Watch AppTests";
@@ -352,7 +348,6 @@
 				96DB420F2DE84D160027E9AA /* SyncTimer */,
 				96DB42202DE84D190027E9AA /* SyncTimerTests */,
 				96DB422A2DE84D190027E9AA /* SyncTimerUITests */,
-				9636A7432E791DBB00A062B6 /* SyncTimerWatch Watch App */,
 				9636A7512E791DBD00A062B6 /* SyncTimerWatch Watch AppTests */,
 				9636A75B2E791DBD00A062B6 /* SyncTimerWatch Watch AppUITests */,
 				967A68DA2F0DDD1E00FCD067 /* SyncTimerJoinClip */,
@@ -404,9 +399,6 @@
 			buildRules = (
 			);
 			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				9636A7432E791DBB00A062B6 /* SyncTimerWatch Watch App */,
 			);
 			name = "SyncTimerWatch Watch App";
 			packageProductDependencies = (
@@ -901,6 +893,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = SyncTimerWatch;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.StageDevices.SyncTimer;
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = NO;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -935,6 +928,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = SyncTimerWatch;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.StageDevices.SyncTimer;
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = NO;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
