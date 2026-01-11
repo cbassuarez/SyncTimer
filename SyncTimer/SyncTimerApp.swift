@@ -14117,6 +14117,8 @@ struct AboutPage: View {
     private struct ReviewReportSheet: View {
         @EnvironmentObject private var appSettings: AppSettings
         @Environment(\.dismiss) private var dismiss
+        @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
         let version: String
         let build: String
@@ -14251,20 +14253,191 @@ struct AboutPage: View {
             }
         }
 
+        private struct SlideToSend: View {
+            let tint: Color
+            let reduceMotion: Bool
+            let onConfirm: () -> Void
+
+            @State private var dragX: CGFloat = 0
+            @State private var didConfirm = false
+            @State private var phase: Phase = .idle
+            @State private var lock: Lock = .undecided
+            @State private var baseX: CGFloat = 0
+
+            private enum Phase {
+                case idle
+                case sending
+                case sent
+            }
+
+            private enum Lock {
+                case undecided
+                case horizontal
+                case vertical
+            }
+
+            private var statusLabel: String {
+                switch phase {
+                case .idle:
+                    return "Slide to Send"
+                case .sending:
+                    return "Sending…"
+                case .sent:
+                    return "Sent"
+                }
+            }
+
+            private var symbolName: String {
+                switch phase {
+                case .idle:
+                    return "paperplane.fill"
+                case .sending:
+                    return "paperplane"
+                case .sent:
+                    return "checkmark"
+                }
+            }
+
+            private func animationStyle() -> Animation {
+                if reduceMotion {
+                    return .easeOut(duration: 0.15)
+                }
+                return .interactiveSpring(response: 0.25, dampingFraction: 0.86, blendDuration: 0.1)
+            }
+
+            private func confirmSend(maxOffset: CGFloat) {
+                guard !didConfirm else { return }
+                didConfirm = true
+                phase = .sending
+                withAnimation(animationStyle()) {
+                    dragX = maxOffset
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    onConfirm()
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                    phase = .sent
+                }
+            }
+
+            var body: some View {
+                GeometryReader { proxy in
+                    let trackHeight: CGFloat = 64
+                    let thumbSize: CGFloat = 44
+                    let horizontalPadding: CGFloat = 12
+                    let maxOffset = max(0, proxy.size.width - (horizontalPadding * 2 + thumbSize))
+                    let threshold = maxOffset * 0.85
+                    let isDragging = lock == .horizontal && dragX > 0
+
+                    AboutDrawerSurface(tint: tint) {
+                        ZStack(alignment: .leading) {
+                            Text(statusLabel)
+                                .font(.custom("Roboto-Regular", size: 15))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .opacity(isDragging ? 0.7 : 1)
+
+                            Circle()
+                                .fill(Color.white.opacity(0.22))
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color.white.opacity(0.4), lineWidth: 1)
+                                )
+                                .overlay(
+                                    Group {
+                                        if #available(iOS 17.0, *) {
+                                            Image(systemName: symbolName)
+                                                .contentTransition(.symbolEffect(.replace))
+                                        } else {
+                                            Image(systemName: symbolName)
+                                        }
+                                    }
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundStyle(.white)
+                                )
+                                .frame(width: thumbSize, height: thumbSize)
+                                .offset(x: dragX)
+                                .gesture(
+                                    DragGesture(minimumDistance: 0)
+                                        .onChanged { value in
+                                            guard !didConfirm else { return }
+                                            if lock == .undecided {
+                                                let dx = value.translation.width
+                                                let dy = value.translation.height
+                                                if abs(dx) > 6 || abs(dy) > 6 {
+                                                    if abs(dx) > abs(dy) {
+                                                        lock = .horizontal
+                                                        baseX = dragX
+                                                    } else {
+                                                        lock = .vertical
+                                                    }
+                                                }
+                                            }
+                                            guard lock == .horizontal else { return }
+                                            let proposed = baseX + value.translation.width
+                                            dragX = min(max(0, proposed), maxOffset)
+                                        }
+                                        .onEnded { _ in
+                                            defer {
+                                                lock = .undecided
+                                                baseX = dragX
+                                            }
+                                            guard !didConfirm else { return }
+                                            guard lock == .horizontal else { return }
+                                            if dragX >= threshold {
+                                                confirmSend(maxOffset: maxOffset)
+                                            } else {
+                                                withAnimation(animationStyle()) {
+                                                    dragX = 0
+                                                }
+                                            }
+                                        }
+                                )
+                                .accessibilityHidden(true)
+                        }
+                        .padding(.horizontal, horizontalPadding)
+                        .frame(height: trackHeight)
+                    }
+                    .frame(height: trackHeight)
+                    .allowsHitTesting(!didConfirm)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Send Report")
+                    .accessibilityHint("Slide to confirm sending diagnostics and optional screenshot.")
+                    .accessibilityValue(phase == .idle ? "Not sent" : phase == .sending ? "Sending" : "Sent")
+                    .accessibilityAction(.activate) {
+                        confirmSend(maxOffset: maxOffset)
+                    }
+                }
+                .frame(height: 64)
+            }
+        }
+
         var body: some View {
+            let confirmSend = {
+                Haptics.light()
+                dismiss()
+                onConfirmSend()
+            }
+
             NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         summaryCard
 
-                        Button {
-                            Haptics.light()
-                            dismiss()
-                            onConfirmSend()
-                        } label: {
-                            sendDrawer
+                        if voiceOverEnabled {
+                            Button(action: confirmSend) {
+                                sendDrawer
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Send Report")
+                            .accessibilityHint("Sends diagnostics and optional screenshot. You’ll receive an Event ID.")
+                        } else {
+                            SlideToSend(
+                                tint: appSettings.flashColor,
+                                reduceMotion: reduceMotion,
+                                onConfirm: confirmSend
+                            )
                         }
-                        .buttonStyle(.plain)
                     }
                     .padding(16)
                 }
@@ -16829,5 +17002,4 @@ private extension SyncTimerApp {
         }
     }
 }
-
 
