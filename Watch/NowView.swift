@@ -1,81 +1,22 @@
 import SwiftUI
 import Combine
 
-// MARK: - Watch-only mini components (no external deps)
-private struct WT_TimerCard: View {
+struct WatchNowRenderModel {
     let formattedMain: String
-    let phaseLabel   : String
-    let stopLine     : String?   // "Stop 00:12.34" or nil
-
-    var body: some View {
-        VStack(spacing: 4) {
-            Text(formattedMain)
-                .font(.system(size: 32, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .minimumScaleFactor(0.5)
-
-            HStack(spacing: 6) {
-                Capsule().fill(phaseLabel == "RUNNING" ? Color.green :
-                               phaseLabel == "COUNTDOWN" ? Color.orange : Color.gray)
-                    .frame(width: 8, height: 8)
-                Text(phaseLabel)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-
-            if let stopLine {
-                Text(stopLine)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct WT_SyncBar: View {
-    let status: String   // e.g. "Fresh" / "Stale"
-    var body: some View {
-        HStack(spacing: 8) {
-            Circle().fill(status == "Fresh" ? Color.green : Color.orange)
-                .frame(width: 8, height: 8)
-            Text(status)
-                .font(.caption2)
-                .lineLimit(1)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Image(systemName: "lock.fill")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .opacity(0.6)   // visible but controls live on phone
-        }
-        .padding(.horizontal, 2)
-    }
-}
-
-private struct WT_SyncBottomButtons: View {
-    let isCounting: Bool
-    let enabled   : Bool
-    let startStop : () -> Void
-    let reset     : () -> Void
-    var body: some View {
-        HStack {
-            Button("Reset", action: reset)
-                .disabled(isCounting || !enabled)
-
-            Spacer(minLength: 12)
-
-            Button(isCounting ? "Stop" : "Start", action: startStop)
-                .disabled(!enabled)
-        }
-        .font(.callout)
-    }
+    let phaseLabel: String
+    let isStale: Bool
+    let stopLine: String?
+    let canStartStop: Bool
+    let canReset: Bool
+    let lockHint: String?
+    let linkIconName: String?
+    let accent: Color
 }
 
 // MARK: - Drift-free NowView with .CC formatting (uses monotonic systemUptime)
 struct NowView: View {
+    @EnvironmentObject private var appSettings: AppSettings
+
     // Raw snapshot payload
     @State private var phaseStr: String = "idle"      // "idle" | "countdown" | "running" | "paused"
     @State private var snapMain: TimeInterval = 0     // value from the last snapshot
@@ -99,6 +40,8 @@ struct NowView: View {
     @State private var displayMain : TimeInterval = 0
     @State private var displayStop : TimeInterval = 0
 
+    @State private var latestMessage: TimerMessage?
+
     // Tickers
     private let staleTick  = Timer.publish(every: 0.6, on: .main, in: .common).autoconnect()
     private let renderTick = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect() // 20 Hz
@@ -109,28 +52,23 @@ struct NowView: View {
     private var isCounting: Bool { phaseStr == "running" || phaseStr == "countdown" }
 
     var body: some View {
-        VStack(spacing: 8) {
-            // 1) TimerCard (drift-free; shows .CC)
-            WT_TimerCard(
-                formattedMain: formatWithCC(displayMain, preferHours: preferHours),
-                phaseLabel: phaseChip(phaseStr),
-                stopLine: stopActive ? "Stop " + formatWithCC(max(0, displayStop), preferHours: false) : nil
+        let renderModel = makeRenderModel()
+        let detailsModel = makeDetailsModel()
+
+        TabView {
+            WatchFacePage(renderModel: renderModel)
+            WatchDetailsPage(
+                renderModel: renderModel,
+                detailsModel: detailsModel
             )
-            .opacity(isStale ? 0.7 : 1.0)
-
-            // 2) SyncBar (informational)
-            WT_SyncBar(status: isStale ? "Stale" : "Fresh")
-                .opacity(0.9)
-
-            // 3) Bottom buttons (watch sends; phone gates authority)
-            WT_SyncBottomButtons(
-                isCounting: (phaseStr == "running"),
-                enabled: !isStale,
+            WatchControlsPage(
+                renderModel: renderModel,
                 startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
-                reset:     { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
+                reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
             )
         }
-        .padding(.horizontal, 8)
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .tint(appSettings.flashColor)
 
         // Receive 4 Hz snapshots → update baseline + estimate velocity
         .onReceive(ConnectivityManager.shared.$incoming.compactMap { $0 }) { msg in
@@ -172,6 +110,8 @@ struct NowView: View {
             // Save for next velocity estimate
             prevSnapMain = snapMain
             prevSnapT    = now
+
+            latestMessage = msg
         }
 
         // Mark stale if no snapshot for > 0.5 s
@@ -186,6 +126,45 @@ struct NowView: View {
             displayMain = baseMain + vMain * dt
             displayStop = max(0, baseStop + vStop * dt)
         }
+    }
+
+    private func makeRenderModel() -> WatchNowRenderModel {
+        let phaseLabel = phaseChip(phaseStr)
+        let stopLine = stopActive ? "Stop " + formatWithCC(max(0, displayStop), preferHours: false) : nil
+        let controlsEnabled = latestMessage?.controlsEnabled
+        let canStartStop = !isStale && (controlsEnabled ?? true)
+        let canReset = !isStale && !isCounting
+        let lockHint: String? = {
+            if isStale { return "Waiting for sync" }
+            if canStartStop == false { return "Controls available on iPhone" }
+            if canReset == false { return "Reset available when stopped" }
+            return nil
+        }()
+
+        return WatchNowRenderModel(
+            formattedMain: formatWithCC(displayMain, preferHours: preferHours),
+            phaseLabel: phaseLabel,
+            isStale: isStale,
+            stopLine: stopLine,
+            canStartStop: canStartStop,
+            canReset: canReset,
+            lockHint: lockHint,
+            linkIconName: linkIconName(for: latestMessage),
+            accent: appSettings.flashColor
+        )
+    }
+
+    private func makeDetailsModel() -> WatchNowDetailsModel {
+        let now = ProcessInfo.processInfo.systemUptime
+        let age = lastSnapT > 0 ? max(0, now - lastSnapT) : 0
+        return WatchNowDetailsModel(
+            isFresh: !isStale,
+            age: age,
+            role: latestMessage?.role,
+            link: latestMessage?.link,
+            sheetLabel: latestMessage?.sheetLabel,
+            eventDots: makeEventDots(message: latestMessage)
+        )
     }
 
     // MARK: - Formatting
@@ -217,6 +196,28 @@ struct NowView: View {
             body = String(format: "%02d:%02d.%02d", m, s, cs)
         }
         return neg ? "−" + body : body
+    }
+
+    private func linkIconName(for message: TimerMessage?) -> String? {
+        if message?.parentLockEnabled == true { return "iphone.and.arrow.forward" }
+        if message?.role == "child" { return "iphone" }
+        if let link = message?.link {
+            switch link {
+            case "unreachable":
+                return "link.slash"
+            default:
+                return "link"
+            }
+        }
+        return nil
+    }
+
+    private func makeEventDots(message: TimerMessage?) -> [WatchEventDot] {
+        guard let message else { return [] }
+        let stops = message.stopEvents.map { WatchEventDot(kind: .stop, time: $0.eventTime) }
+        let cues = (message.cueEvents ?? []).map { WatchEventDot(kind: .cue, time: $0.cueTime) }
+        let restarts = (message.restartEvents ?? []).map { WatchEventDot(kind: .restart, time: $0.restartTime) }
+        return (stops + cues + restarts).sorted { $0.time < $1.time }
     }
 }
 
