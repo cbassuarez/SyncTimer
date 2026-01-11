@@ -5164,10 +5164,16 @@ struct MainScreen: View {
     
     var body: some View {
         GeometryReader { geo in
+            mainLayout(in: geo)
+        }
+    }
+
+    @ViewBuilder
+    private func mainLayout(in geo: GeometryProxy) -> some View {
         // Use the *actual window* size
-            let winSize: CGSize = geo.size
-                        let screenWidth: CGFloat  = winSize.width
-                        let screenHeight: CGFloat = winSize.height
+        let winSize: CGSize = geo.size
+        let screenWidth: CGFloat  = winSize.width
+        let screenHeight: CGFloat = winSize.height
 
             // Phones keep their size-class logic
             let isPhoneLandscape: Bool = (verticalSizeClass == .compact)
@@ -5580,11 +5586,9 @@ struct MainScreen: View {
                 }
             }
             // ✅ Publish this window size to the whole subtree so your
-              //    iPad sublayouts and computed properties can read it.
-              .environment(\.containerSize, winSize)
-        }
-
-               .dynamicTypeSize(.medium ... .medium)
+            //    iPad sublayouts and computed properties can read it.
+            .environment(\.containerSize, winSize)
+                .dynamicTypeSize(.medium ... .medium)
                 .alert(isPresented: $showSyncErrorAlert) {
                     Alert(
                         title: Text("Cannot Start Sync"),
@@ -5593,9 +5597,8 @@ struct MainScreen: View {
                     )
                 }
                 .toolbar(isPadDevice ? .hidden : .automatic, for: .navigationBar)
-                    .navigationBarHidden(isPadDevice)
-                   
-                
+                .navigationBarHidden(isPadDevice)
+
             // 1) Watch commands → Parent-only control (phone enforces authority)
                 .onAppear {
                     installDisciplineProviders()
@@ -5673,7 +5676,8 @@ struct MainScreen: View {
                         isStopActive: stopActive,
                         stopRemainingActive: stopRemaining,
                         cueEvents: snapshot.cues,
-                        restartEvents: snapshot.restarts
+                        restartEvents: snapshot.restarts,
+                        showHours: settings.showHours
                         // If you extended TimerMessage with role/link/controlsEnabled/etc, you can also pass them here:
                         // , role: (syncSettings.role == .parent ? "parent" : "child")
                         // , link: linkStr

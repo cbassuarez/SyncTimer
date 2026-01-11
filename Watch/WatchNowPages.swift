@@ -14,6 +14,7 @@ struct WatchTimerProviders {
     let nowUptimeProvider: () -> TimeInterval
     let formattedStringProvider: (TimeInterval) -> String
     let stopLineProvider: (TimeInterval) -> String?
+    let stopDigitsProvider: (TimeInterval) -> String
 }
 
 struct WatchEventDot: Identifiable {
@@ -29,6 +30,20 @@ struct WatchEventDot: Identifiable {
     var id: String {
         "\(kind.rawValue)-\(Int(time * 100))"
     }
+}
+
+enum WatchFaceEventKind {
+    case stop
+    case cue
+    case restart
+    case message
+    case image
+    case empty
+}
+
+struct WatchFaceEvent {
+    let kind: WatchFaceEventKind
+    let time: TimeInterval
 }
 
 struct WatchGlassCard<Content: View>: View {
@@ -141,39 +156,29 @@ struct WatchFacePage: View {
     let isLive: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
-    @State private var pulse = false
 
     var body: some View {
         VStack(spacing: 10) {
             WatchGlassCard(tint: renderModel.accent) {
-                ZStack {
-                    ringView
-                        .frame(maxWidth: .infinity)
-
-                    VStack(spacing: 6) {
-                        WatchTimerHeader(
-                            formattedMain: renderModel.formattedMain,
-                            stopLine: nil,
-                            accent: renderModel.accent,
-                            isStale: renderModel.isStale,
-                            size: 40,
-                            isLive: isLive,
-                            timerProviders: timerProviders
-                        )
-                        chipRow
-                    }
+                VStack(alignment: .leading, spacing: 8) {
+                    WatchTimerHeader(
+                        formattedMain: renderModel.formattedMain,
+                        stopLine: nil,
+                        accent: renderModel.accent,
+                        isStale: renderModel.isStale,
+                        size: 40,
+                        isLive: isLive,
+                        timerProviders: timerProviders
+                    )
+                    chipRow
+                    faceEventsRow
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 6)
             }
         }
         .padding(.horizontal, 8)
         .padding(.top, 4)
-        .onAppear {
-            guard shouldPulse else { return }
-            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
-                pulse.toggle()
-            }
-        }
     }
 
     private var chipRow: some View {
@@ -197,26 +202,36 @@ struct WatchFacePage: View {
             .animation(.easeInOut(duration: 0.2), value: renderModel.phaseLabel)
     }
 
-    private var shouldPulse: Bool {
-        renderModel.phaseLabel == "RUNNING" && !reduceMotion && !isLuminanceReduced
-    }
-
-    private var ringView: some View {
-        Circle()
-            .stroke(renderModel.accent.opacity(ringOpacity), lineWidth: 3)
-            .padding(4)
-            .opacity(shouldPulse ? (pulse ? 0.5 : 0.9) : 0.8)
-    }
-
-    private var ringOpacity: Double {
-        switch renderModel.phaseLabel {
-        case "COUNTDOWN":
-            return 0.65
-        case "RUNNING":
-            return 0.7
-        default:
-            return 0.35
+    private var faceEventsRow: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                ForEach(Array(eventKinds.enumerated()), id: \.offset) { _, kind in
+                    WatchFaceEventCircle(kind: kind, accent: renderModel.accent)
+                }
+            }
+            Spacer(minLength: 4)
+            Group {
+                if isLive {
+                    TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { _ in
+                        let nowUptime = timerProviders.nowUptimeProvider()
+                        Text(timerProviders.stopDigitsProvider(nowUptime))
+                    }
+                } else {
+                    Text(renderModel.stopDigits)
+                }
+            }
+            .font(.footnote.weight(.semibold))
+            .monospacedDigit()
+            .foregroundStyle(renderModel.isStopActive ? renderModel.accent : .secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
         }
+    }
+
+    private var eventKinds: [WatchFaceEventKind] {
+        let kinds = renderModel.faceEvents.prefix(5).map(\.kind)
+        if kinds.count >= 5 { return Array(kinds) }
+        return kinds + Array(repeating: .empty, count: 5 - kinds.count)
     }
 }
 
@@ -395,6 +410,73 @@ private struct WatchEventDotView: View {
     }
 }
 
+private struct WatchFaceEventCircle: View {
+    let kind: WatchFaceEventKind
+    let accent: Color
+
+    var body: some View {
+        ZStack {
+            circle
+                .frame(width: 22, height: 22)
+            icon
+        }
+    }
+
+    @ViewBuilder
+    private var circle: some View {
+        switch kind {
+        case .stop:
+            Circle().fill(accent)
+        case .message:
+            Circle()
+                .fill(accent.opacity(0.18))
+                .overlay(Circle().stroke(accent, lineWidth: 1.2))
+        case .cue, .restart, .image:
+            Circle().stroke(accent, lineWidth: 1.4)
+        case .empty:
+            Circle().stroke(Color.secondary.opacity(0.45), lineWidth: 1.2)
+        }
+    }
+
+    @ViewBuilder
+    private var icon: some View {
+        switch kind {
+        case .stop:
+            Image(systemName: "playpause")
+                .font(.caption2.weight(.semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.white)
+        case .cue:
+            Image(systemName: "bolt.fill")
+                .font(.caption2.weight(.semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(accent)
+        case .restart:
+            Image(systemName: "arrow.counterclockwise")
+                .font(.caption2.weight(.semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(accent)
+        case .message:
+            Image(systemName: "text.quote")
+                .font(.caption2.weight(.semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(accent)
+        case .image:
+            ZStack {
+                RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                    .stroke(accent, lineWidth: 1.0)
+                    .frame(width: 12, height: 9)
+                Image(systemName: "mountain.2")
+                    .font(.caption2.weight(.semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(accent)
+            }
+        case .empty:
+            EmptyView()
+        }
+    }
+}
+
 #Preview {
     WatchFacePage(
         renderModel: WatchNowRenderModel(
@@ -402,16 +484,24 @@ private struct WatchEventDotView: View {
             phaseLabel: "RUNNING",
             isStale: false,
             stopLine: nil,
+            stopDigits: "00:10.00",
+            isStopActive: true,
             canStartStop: true,
             canReset: false,
             lockHint: "Reset available when stopped",
             linkIconName: "iphone",
+            faceEvents: [
+                WatchFaceEvent(kind: .stop, time: 10),
+                WatchFaceEvent(kind: .cue, time: 8),
+                WatchFaceEvent(kind: .restart, time: 5)
+            ],
             accent: .red
         ),
         timerProviders: WatchTimerProviders(
             nowUptimeProvider: { 0 },
             formattedStringProvider: { _ in "12:34.56" },
-            stopLineProvider: { _ in nil }
+            stopLineProvider: { _ in nil },
+            stopDigitsProvider: { _ in "00:10.00" }
         ),
         isLive: false
     )
