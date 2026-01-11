@@ -12723,6 +12723,7 @@ struct FallingIconsView: View {
 // 3) ABOUT
 struct AboutPage: View {
     @State private var showCreditsSheet = false
+    @State private var showTroubleshootSheet = false
 
     @State private var showHallOfFame = false
     @State private var tapCount = 0
@@ -12736,6 +12737,7 @@ struct AboutPage: View {
     let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
     let build   = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
     @EnvironmentObject private var appSettings: AppSettings
+    @EnvironmentObject private var syncSettings: SyncSettings
     @EnvironmentObject private var whatsNewController: WhatsNewController
     
     private var flashTint: Color { appSettings.flashColor }
@@ -12906,6 +12908,386 @@ struct AboutPage: View {
                 }
             }
             .clipShape(shape)
+        }
+    }
+
+    private struct TroubleshootSheet: View {
+        @EnvironmentObject private var appSettings: AppSettings
+        @EnvironmentObject private var syncSettings: SyncSettings
+        @Environment(\.dismiss) private var dismiss
+        @AppStorage("settingsPage") private var settingsPage = 0
+
+        @State private var includeDeviceName = false
+        @State private var lastEventId: String? = nil
+        @State private var copyConfirmationVisible = false
+        @State private var shareItem: ShareItem? = nil
+
+        let version: String
+        let build: String
+        let supportURL: URL
+
+        private var aboutTint: Color {
+            appSettings.appTheme == .dark ? .white : .gray
+        }
+
+        private var heroCard: some View {
+            let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+
+            return VStack(alignment: .leading, spacing: 6) {
+                Text("Troubleshooting")
+                    .font(.title3.weight(.semibold))
+                Text("Send a report with diagnostics + an Event ID.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                if let lastEventId {
+                    Text("Event ID: \(lastEventId)")
+                        .font(.system(.footnote, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .padding(.top, 4)
+                }
+            }
+            .padding(14)
+            .background {
+                if #available(iOS 26.0, *) {
+                    shape
+                        .fill(Color.clear)
+                        .glassEffect(.regular, in: shape)
+                        .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
+                } else {
+                    shape
+                        .fill(.ultraThinMaterial)
+                        .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
+                }
+            }
+            .clipShape(shape)
+        }
+
+        var body: some View {
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        heroCard
+
+                        sectionHeader("Quick actions")
+                        quickActions
+                        privacyToggleRow
+
+                        Divider().opacity(0.5)
+
+                        sectionHeader("Status")
+                        statusCard
+
+                        Divider().opacity(0.5)
+
+                        sectionHeader("Common fixes")
+                        commonFixes
+                    }
+                    .padding(16)
+                }
+                .scrollIndicators(.hidden)
+                .navigationTitle("")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+                .sheet(item: $shareItem) { item in
+                    ShareSheet(activityItems: [item.url])
+                }
+            }
+        }
+
+        @ViewBuilder
+        private func sectionHeader(_ title: String) -> some View {
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(nil)
+        }
+
+        private var quickActions: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                Button {
+                    copyDiagnostics()
+                } label: {
+                    AboutDrawerSurface {
+                        AboutDrawerRow(icon: "doc.on.doc", title: "Copy Diagnostics", tint: aboutTint)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                if copyConfirmationVisible {
+                    Text("Copied to clipboard")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 8)
+                }
+
+                Button {
+                    shareDiagnostics()
+                } label: {
+                    AboutDrawerSurface {
+                        AboutDrawerRow(icon: "square.and.arrow.up", title: "Share Diagnostics", tint: aboutTint)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    sendSentryReport()
+                } label: {
+                    AboutDrawerSurface {
+                        AboutDrawerRow(icon: "paperplane.fill", title: "Send Bug Report (Sentry)", tint: aboutTint)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                if lastEventId != nil {
+                    Button {
+                        copyEventId()
+                    } label: {
+                        AboutDrawerSurface {
+                            AboutDrawerRow(icon: "number.circle", title: "Copy Event ID", tint: aboutTint)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+
+        private var privacyToggleRow: some View {
+            AboutDrawerSurface {
+                HStack(spacing: 10) {
+                    Image(systemName: "person.text.rectangle")
+                        .font(.system(size: 15, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(aboutTint)
+                        .frame(width: 22, alignment: .center)
+
+                    Toggle(isOn: $includeDeviceName) {
+                        Text("Include device name")
+                            .font(.custom("Roboto-Regular", size: 15))
+                            .foregroundStyle(aboutTint)
+                    }
+                    .toggleStyle(SwitchToggleStyle(tint: appSettings.flashColor))
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 10)
+                .frame(minHeight: 38)
+            }
+        }
+
+        private var statusCard: some View {
+            let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+            return VStack(alignment: .leading, spacing: 8) {
+                statusRow(label: "Version", value: "\(version) (\(build))")
+                statusRow(label: "Device", value: deviceLabel)
+                statusRow(label: "iOS", value: UIDevice.current.systemVersion)
+                statusRow(label: "Theme", value: appSettings.appTheme.rawValue.capitalized)
+                statusRow(label: "Reduce Motion", value: UIAccessibility.isReduceMotionEnabled ? "On" : "Off")
+                statusRow(label: "Sync", value: syncStatusDescription)
+            }
+            .font(.footnote)
+            .padding(14)
+            .background {
+                if #available(iOS 26.0, *) {
+                    shape
+                        .fill(Color.clear)
+                        .glassEffect(.regular, in: shape)
+                        .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
+                } else {
+                    shape
+                        .fill(.ultraThinMaterial)
+                        .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
+                }
+            }
+            .clipShape(shape)
+        }
+
+        private func statusRow(label: String, value: String) -> some View {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(label)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 120, alignment: .leading)
+                Text(value)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+
+        private var commonFixes: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                Button {
+                    settingsPage = 2
+                    dismiss()
+                } label: {
+                    AboutDrawerSurface {
+                        AboutDrawerRow(icon: "gearshape.fill", title: "Open Sync settings", tint: aboutTint)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    NotificationCenter.default.post(name: .whatsNewOpenCueSheets, object: nil)
+                    dismiss()
+                } label: {
+                    AboutDrawerSurface {
+                        AboutDrawerRow(icon: "list.bullet.rectangle", title: "Open Cue Sheets", tint: aboutTint)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    openSystemSettings(urlString: "App-Prefs:root=Bluetooth")
+                } label: {
+                    AboutDrawerSurface {
+                        AboutDrawerRow(icon: "bolt.horizontal.fill", title: "Open Bluetooth settings", tint: aboutTint)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    openSystemSettings(urlString: "App-Prefs:root=WIFI")
+                } label: {
+                    AboutDrawerSurface {
+                        AboutDrawerRow(icon: "wifi", title: "Open Wi-Fi settings", tint: aboutTint)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                Link(destination: supportURL) {
+                    AboutDrawerSurface {
+                        AboutDrawerRow(icon: "safari", title: "Open Support Website", tint: aboutTint)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+
+        private var deviceLabel: String {
+            let model = UIDevice.current.model
+            guard includeDeviceName else { return model }
+            return "\(model) (\(UIDevice.current.name))"
+        }
+
+        private var syncStatusDescription: String {
+            let status = syncSettings.isEnabled
+                ? (syncSettings.isEstablished ? "Connected" : "Connecting")
+                : "Off"
+            return "\(syncSettings.role.rawValue.capitalized) • \(syncSettings.connectionMethod.rawValue.capitalized) • \(status)"
+        }
+
+        private func copyDiagnostics() {
+            UIPasteboard.general.string = makeDiagnosticsSnapshot()
+            Haptics.light()
+            withAnimation(.easeInOut(duration: 0.2)) {
+                copyConfirmationVisible = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    copyConfirmationVisible = false
+                }
+            }
+        }
+
+        private func shareDiagnostics() {
+            guard let url = makeDiagnosticsFileURL() else { return }
+            shareItem = ShareItem(url: url)
+        }
+
+        private func sendSentryReport() {
+            let diagnostics = makeDiagnosticsSnapshot()
+            var capturedId: SentryId?
+
+            SentrySDK.withScope { scope in
+                scope.setContext(value: ["snapshot": diagnostics], key: "diagnostics")
+                scope.setTag(value: "manual_bug_report", key: "source")
+                if let data = diagnostics.data(using: .utf8) {
+                    let attachment = SentryAttachment(data: data,
+                                                     filename: "SyncTimer-Diagnostics.txt",
+                                                     contentType: "text/plain")
+                    scope.addAttachment(attachment)
+                }
+                capturedId = SentrySDK.capture(message: "User bug report")
+            }
+
+            lastEventId = capturedId?.sentryIdString
+        }
+
+        private func copyEventId() {
+            guard let lastEventId else { return }
+            UIPasteboard.general.string = lastEventId
+            Haptics.light()
+        }
+
+        private func openSystemSettings(urlString: String) {
+            guard let url = URL(string: urlString) else { return }
+            UIApplication.shared.open(url) { success in
+                guard !success else { return }
+                if let fallback = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(fallback)
+                }
+            }
+        }
+
+        private func makeDiagnosticsFileURL() -> URL? {
+            let diagnostics = makeDiagnosticsSnapshot()
+            let fileName = "SyncTimer-Diagnostics.txt"
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+            do {
+                try diagnostics.write(to: url, atomically: true, encoding: .utf8)
+                return url
+            } catch {
+                return nil
+            }
+        }
+
+        private func makeDiagnosticsSnapshot() -> String {
+            var lines: [String] = []
+            lines.append("SyncTimer Diagnostics")
+            lines.append("Version: \(version) (\(build))")
+            lines.append("iOS: \(UIDevice.current.systemVersion)")
+            lines.append("Device: \(UIDevice.current.model)")
+            if includeDeviceName {
+                lines.append("Device Name: \(UIDevice.current.name)")
+            }
+            lines.append("Theme: \(appSettings.appTheme.rawValue.capitalized)")
+            lines.append("Flash Color: \(flashColorDescription())")
+            lines.append("Reduce Motion: \(UIAccessibility.isReduceMotionEnabled ? "On" : "Off")")
+            lines.append("Sync Role: \(syncSettings.role.rawValue.capitalized)")
+            lines.append("Sync Method: \(syncSettings.connectionMethod.rawValue.capitalized)")
+            lines.append("Sync Enabled: \(syncSettings.isEnabled ? "On" : "Off")")
+            lines.append("Sync Established: \(syncSettings.isEstablished ? "Yes" : "No")")
+            return lines.joined(separator: "\n")
+        }
+
+        private func flashColorDescription() -> String {
+            let uiColor = UIColor(appSettings.flashColor)
+            var red: CGFloat = 0
+            var green: CGFloat = 0
+            var blue: CGFloat = 0
+            var alpha: CGFloat = 0
+            if uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) {
+                return String(format: "#%02X%02X%02X", Int(red * 255), Int(green * 255), Int(blue * 255))
+            }
+            return "Custom"
+        }
+
+        private struct ShareItem: Identifiable {
+            let id = UUID()
+            let url: URL
+        }
+
+        private struct ShareSheet: UIViewControllerRepresentable {
+            let activityItems: [Any]
+
+            func makeUIViewController(context: Context) -> UIActivityViewController {
+                UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+            }
+
+            func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
         }
     }
 
@@ -13105,8 +13487,15 @@ struct AboutPage: View {
                            .frame(maxWidth: .infinity, alignment: .leading)
                         aboutLinkCell(title: "Privacy Policy", icon: "hand.raised.fill",
                                       url: URL(string: "https://www.cbassuarez.com/synctimer-privacy-policy")!)
-                        aboutLinkCell(title: "Report a Bug", icon: "ladybug.fill",
-                                      url: URL(string: "https://www.synctimerapp.com/support")!)
+                        Button {
+                            showTroubleshootSheet = true
+                        } label: {
+                            AboutDrawerSurface {
+                                AboutDrawerRow(icon: "ladybug.fill", title: "Report a Bug", tint: aboutTint)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         aboutLinkCell(title: "Terms of Service", icon: "doc.text.fill",
                                       url: URL(string: "https://www.cbassuarez.com/synctimer-terms-of-service")!)
                     }
@@ -13198,6 +13587,17 @@ struct AboutPage: View {
                     .environmentObject(appSettings)
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showTroubleshootSheet) {
+                TroubleshootSheet(
+                    version: version,
+                    build: build,
+                    supportURL: URL(string: "https://www.synctimerapp.com/support")!
+                )
+                .environmentObject(appSettings)
+                .environmentObject(syncSettings)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
             }
 
             .overlay(
