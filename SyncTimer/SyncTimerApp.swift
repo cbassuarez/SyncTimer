@@ -5586,11 +5586,9 @@ struct MainScreen: View {
                 }
             }
             // ✅ Publish this window size to the whole subtree so your
-              //    iPad sublayouts and computed properties can read it.
-              .environment(\.containerSize, winSize)
-        }
-
-               .dynamicTypeSize(.medium ... .medium)
+            //    iPad sublayouts and computed properties can read it.
+            .environment(\.containerSize, winSize)
+                .dynamicTypeSize(.medium ... .medium)
                 .alert(isPresented: $showSyncErrorAlert) {
                     Alert(
                         title: Text("Cannot Start Sync"),
@@ -5599,9 +5597,8 @@ struct MainScreen: View {
                     )
                 }
                 .toolbar(isPadDevice ? .hidden : .automatic, for: .navigationBar)
-                    .navigationBarHidden(isPadDevice)
-                   
-                
+                .navigationBarHidden(isPadDevice)
+
             // 1) Watch commands → Parent-only control (phone enforces authority)
                 .onAppear {
                     installDisciplineProviders()
