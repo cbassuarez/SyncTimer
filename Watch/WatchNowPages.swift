@@ -169,6 +169,7 @@ struct WatchFacePage: View {
     let renderModel: WatchNowRenderModel
     let timerProviders: WatchTimerProviders
     let isLive: Bool
+    let snapshotToken: UInt64
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -224,6 +225,7 @@ struct WatchFacePage: View {
                     WatchFaceEventCircle(kind: kind, accent: renderModel.accent)
                 }
             }
+            .id(snapshotToken)
             Spacer(minLength: 4)
             Group {
                 if isLive {
@@ -384,58 +386,12 @@ private struct WatchTimerLiveText: View {
     let formattedProvider: (TimeInterval) -> String
     let fallback: String
 
-    @State private var lastRenderedCs: Int
-    @State private var cachedString: String
-
-    init(
-        nowUptimeProvider: @escaping () -> TimeInterval,
-        timeProvider: @escaping (TimeInterval) -> TimeInterval,
-        formattedProvider: @escaping (TimeInterval) -> String,
-        fallback: String
-    ) {
-        self.nowUptimeProvider = nowUptimeProvider
-        self.timeProvider = timeProvider
-        self.formattedProvider = formattedProvider
-        self.fallback = fallback
-        _lastRenderedCs = State(initialValue: Int.min)
-        _cachedString = State(initialValue: fallback)
-    }
-
     var body: some View {
         TimelineView(.animation) { _ in
             let nowUptime = nowUptimeProvider()
-            let timeValue = timeProvider(nowUptime)
-            let currentCs = Int((abs(timeValue) * 100).rounded())
-            WatchTimerCachedText(
-                currentCs: currentCs,
-                nowUptime: nowUptime,
-                formatter: formattedProvider,
-                lastRenderedCs: $lastRenderedCs,
-                cachedString: $cachedString
-            )
+            let text = formattedProvider(nowUptime)
+            Text(text.isEmpty ? fallback : text)
         }
-    }
-}
-
-private struct WatchTimerCachedText: View {
-    let currentCs: Int
-    let nowUptime: TimeInterval
-    let formatter: (TimeInterval) -> String
-    @Binding var lastRenderedCs: Int
-    @Binding var cachedString: String
-
-    var body: some View {
-        Text(cachedString)
-            .onAppear { updateIfNeeded(nowUptime: nowUptime) }
-            .onChange(of: currentCs) { _ in
-                updateIfNeeded(nowUptime: nowUptime)
-            }
-    }
-
-    private func updateIfNeeded(nowUptime: TimeInterval) {
-        guard currentCs != lastRenderedCs else { return }
-        lastRenderedCs = currentCs
-        cachedString = formatter(nowUptime)
     }
 }
 
@@ -583,6 +539,7 @@ private struct WatchFaceEventCircle: View {
             stopLineProvider: { _ in nil },
             stopDigitsProvider: { _ in "00:10.00" }
         ),
-        isLive: false
+        isLive: false,
+        snapshotToken: 0
     )
 }
