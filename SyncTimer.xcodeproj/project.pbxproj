@@ -539,7 +539,7 @@
 				9633A7042DF6CCFD00875623 /* CopyFiles */,
 				962A5F1B2E0D53AE005A36E9 /* Embed Watch Content */,
 				967A69012F0DDD1F00FCD067 /* Embed App Clips */,
-				55C024B5B385485D9CF82DF3 /* Sentry: upload debug symbols (dSYM) */,
+				55C024B5B385485D9CF82DF3 /* Upload dSYMs to Sentry (non-blocking) */,
 			);
 			buildRules = (
 			);
@@ -749,7 +749,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		55C024B5B385485D9CF82DF3 /* Sentry: upload debug symbols (dSYM) */ = {
+		55C024B5B385485D9CF82DF3 /* Upload dSYMs to Sentry (non-blocking) */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -757,12 +757,12 @@
 			);
 			inputPaths = (
 			);
-			name = "Sentry: upload debug symbols (dSYM)";
+			name = "Upload dSYMs to Sentry (non-blocking)";
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "set -e\n\nif ! command -v sentry-cli >/dev/null 2>&1; then\n  echo \"sentry-cli not found; skipping dSYM upload\"\n  exit 0\nfi\n\nif [ -z \"${SENTRY_AUTH_TOKEN:-}\" ]; then\n  echo \"Sentry auth not set; skipping dSYM upload\"\n  exit 0\nfi\n\nif [ -z \"${SENTRY_ORG:-}\" ] || [ -z \"${SENTRY_PROJECT:-}\" ]; then\n  echo \"Sentry org/project not set; skipping dSYM upload\"\n  exit 0\nfi\n\nexport SENTRY_RELEASE=\"${PRODUCT_BUNDLE_IDENTIFIER}@${MARKETING_VERSION}+${CURRENT_PROJECT_VERSION}\"\nexport SENTRY_DIST=\"${CURRENT_PROJECT_VERSION}\"\n\nif [ -z \"${DWARF_DSYM_FOLDER_PATH:-}\" ]; then\n  echo \"No dSYM folder path; skipping upload\"\n  exit 0\nfi\n\nsentry-cli debug-files upload --org \"${SENTRY_ORG}\" --project \"${SENTRY_PROJECT}\" --release \"${SENTRY_RELEASE}\" --dist \"${SENTRY_DIST}\" \"${DWARF_DSYM_FOLDER_PATH}\"\n";
+			shellPath = /bin/bash;
+			shellScript = "#!/bin/bash\nset -e\n\necho \"=== Sentry dSYM upload (non-blocking) ===\"\necho \"CONFIGURATION=${CONFIGURATION}\"\necho \"PRODUCT_BUNDLE_IDENTIFIER=${PRODUCT_BUNDLE_IDENTIFIER}\"\necho \"MARKETING_VERSION=${MARKETING_VERSION}\"\necho \"CURRENT_PROJECT_VERSION=${CURRENT_PROJECT_VERSION}\"\necho \"DWARF_DSYM_FOLDER_PATH=${DWARF_DSYM_FOLDER_PATH}\"\necho \"DWARF_DSYM_FILE_NAME=${DWARF_DSYM_FILE_NAME}\"\n\n# Xcode Run Script phases often don't inherit your shell PATH.\n# Support both Apple Silicon + Intel Homebrew locations.\nexport PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\"\n\nif ! command -v sentry-cli >/dev/null 2>&1; then\n  echo \"warning: sentry-cli not found in PATH; skipping dSYM upload\"\n  exit 0\nfi\n\n# Never print tokens. Just confirm presence.\nif [ -z \"${SENTRY_AUTH_TOKEN:-}\" ]; then\n  echo \"warning: SENTRY_AUTH_TOKEN not set; skipping dSYM upload\"\n  exit 0\nfi\n\nif [ -z \"${SENTRY_ORG:-}\" ] || [ -z \"${SENTRY_PROJECT:-}\" ]; then\n  echo \"warning: SENTRY_ORG and/or SENTRY_PROJECT not set; skipping dSYM upload\"\n  exit 0\nfi\n\nif [ -z \"${DWARF_DSYM_FOLDER_PATH:-}\" ]; then\n  echo \"warning: DWARF_DSYM_FOLDER_PATH not set; skipping dSYM upload\"\n  exit 0\nfi\n\n# Release/dist metadata from env (no hardcoding in Swift).\nexport SENTRY_RELEASE=\"${PRODUCT_BUNDLE_IDENTIFIER}@${MARKETING_VERSION}+${CURRENT_PROJECT_VERSION}\"\nexport SENTRY_DIST=\"${CURRENT_PROJECT_VERSION}\"\n\necho \"SENTRY_ORG=${SENTRY_ORG}\"\necho \"SENTRY_PROJECT=${SENTRY_PROJECT}\"\necho \"SENTRY_RELEASE=${SENTRY_RELEASE}\"\necho \"SENTRY_DIST=${SENTRY_DIST}\"\necho \"Using sentry-cli: $(command -v sentry-cli)\"\nsentry-cli --version\n\n# If a specific dSYM name exists, prefer uploading that single path.\nDSYM_PATH=\"${DWARF_DSYM_FOLDER_PATH}\"\nif [ -n \"${DWARF_DSYM_FILE_NAME:-}\" ] && [ -d \"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}\" ]; then\n  DSYM_PATH=\"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}\"\nfi\n\nif [ ! -e \"${DSYM_PATH}\" ]; then\n  echo \"warning: No dSYM found at ${DSYM_PATH}; skipping upload\"\n  exit 0\nfi\n\necho \"Uploading dSYM from: ${DSYM_PATH}\"\n\n# Non-blocking behavior: if upload fails, warn but don't fail build.\n# (Still keep 'set -e' for internal safety; we catch the final command.)\nif ! sentry-cli debug-files upload \\\n  --org \"${SENTRY_ORG}\" \\\n  --project \"${SENTRY_PROJECT}\" \\\n  --release \"${SENTRY_RELEASE}\" \\\n  --dist \"${SENTRY_DIST}\" \\\n  \"${DSYM_PATH}\"; then\n  echo \"warning: sentry-cli upload failed (non-blocking). Check auth/org/project/release/dist and dSYM UUID match.\"\n  exit 0\nfi\n\necho \"Sentry dSYM upload complete.\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -893,6 +893,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = S74572Q65M;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -926,6 +927,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = S74572Q65M;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1051,6 +1053,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 3;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = S74572Q65M;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1088,6 +1091,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 3;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = S74572Q65M;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1401,6 +1405,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 3;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_ASSET_PATHS = "\"SyncTimer/Preview Content\"";
 				DEVELOPMENT_TEAM = S74572Q65M;
 				ENABLE_PREVIEWS = YES;
