@@ -5164,10 +5164,16 @@ struct MainScreen: View {
     
     var body: some View {
         GeometryReader { geo in
+            mainLayout(in: geo)
+        }
+    }
+
+    @ViewBuilder
+    private func mainLayout(in geo: GeometryProxy) -> some View {
         // Use the *actual window* size
-            let winSize: CGSize = geo.size
-                        let screenWidth: CGFloat  = winSize.width
-                        let screenHeight: CGFloat = winSize.height
+        let winSize: CGSize = geo.size
+        let screenWidth: CGFloat  = winSize.width
+        let screenHeight: CGFloat = winSize.height
 
             // Phones keep their size-class logic
             let isPhoneLandscape: Bool = (verticalSizeClass == .compact)
@@ -5674,7 +5680,7 @@ struct MainScreen: View {
                         stopRemainingActive: stopRemaining,
                         cueEvents: snapshot.cues,
                         restartEvents: snapshot.restarts,
-                        showHours: appSettings.showHours
+                        showHours: settings.showHours
                         // If you extended TimerMessage with role/link/controlsEnabled/etc, you can also pass them here:
                         // , role: (syncSettings.role == .parent ? "parent" : "child")
                         // , link: linkStr
