@@ -18,6 +18,7 @@ public final class ConnectivityManager: NSObject, ObservableObject {
     @Published public private(set) var incoming: TimerMessage?
     @Published private(set) var incomingSyncEnvelope: SyncEnvelope?
     public let commands = PassthroughSubject<ControlRequest, Never>()
+    public let snapshotRequests = PassthroughSubject<SnapshotRequest, Never>()
     /// Convenience: only returns session when supported **and** activated.
         private var activatedSession: WCSession? {
             #if canImport(WatchConnectivity)
@@ -97,6 +98,10 @@ public final class ConnectivityManager: NSObject, ObservableObject {
         send(ControlRequest(cmd))
     }
 
+    public func requestSnapshot(origin: String = "watchOS") {
+        send(SnapshotRequest(origin: origin))
+    }
+
     func sendSyncEnvelope(_ envelope: SyncEnvelope) {
         send(envelope)
     }
@@ -141,6 +146,9 @@ extension ConnectivityManager: WCSessionDelegate {
         }
         if let cmd = try? dec.decode(ControlRequest.self, from: data) {
             DispatchQueue.main.async { self.commands.send(cmd) }; return
+        }
+        if let request = try? dec.decode(SnapshotRequest.self, from: data) {
+            DispatchQueue.main.async { self.snapshotRequests.send(request) }; return
         }
         print("⚠️ [WC] unknown payload")
     }

@@ -4315,6 +4315,48 @@ struct MainScreen: View {
             return (stops, cues, restarts, label)
         }
 
+    private func sendWatchSnapshot() {
+        // Snapshot checklist:
+        // - Cadence is still driven by wcTick (4 Hz).
+        // - Phase mapping, lock rules, and timer math are unchanged.
+        // - Snapshot wire payload stays optional/compatible with older builds.
+        let phaseString: String = {
+            switch phase {
+            case .idle: return "idle"
+            case .countdown: return "countdown"
+            case .running: return "running"
+            case .paused: return "paused"
+            }
+        }()
+
+        // Include live event snapshot so children stay in sync while running.
+        let snapshot = encodeCurrentEvents()
+        let tm = TimerMessage(
+            action: .update,
+            timestamp: Date().timeIntervalSince1970,
+            phase: phaseString,
+            remaining: displayMainTime(),
+            stopEvents: snapshot.stops,
+            anchorElapsed: elapsed,
+            parentLockEnabled: syncSettings.parentLockEnabled,
+            isStopActive: stopActive,
+            stopRemainingActive: stopRemaining,
+            cueEvents: snapshot.cues,
+            restartEvents: snapshot.restarts,
+            showHours: settings.showHours
+            // If you extended TimerMessage with role/link/controlsEnabled/etc, you can also pass them here:
+            // , role: (syncSettings.role == .parent ? "parent" : "child")
+            // , controlsEnabled: (syncSettings.role == .parent && syncSettings.isEnabled && syncSettings.isEstablished && !(syncSettings.parentLockEnabled ?? false))
+            // , syncLamp: (syncSettings.isEnabled && syncSettings.isEstablished ? "green" : (syncSettings.isEnabled ? "amber" : "red"))
+            // , flashNow: flashZero
+        )
+
+        ConnectivityManager.shared.send(tm)
+        if syncSettings.role == .parent && syncSettings.isEnabled {
+            syncSettings.broadcastToChildren(tm)   // ← keep children’s snapshot hot (stops + cues + restarts)
+        }
+    }
+
     // ── Environment & Settings ────────────────────────────────
     @EnvironmentObject private var settings   : AppSettings
     @EnvironmentObject var syncSettings: SyncSettings
@@ -5622,6 +5664,12 @@ struct MainScreen: View {
                             }
                         }
                         .store(in: &wcCancellables)
+                    ConnectivityManager.shared.snapshotRequests
+                        .receive(on: DispatchQueue.main)
+                        .sink { _ in
+                            sendWatchSnapshot()
+                        }
+                        .store(in: &wcCancellables)
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .TimerStart)) { _ in
                     if !isCounting { toggleStart() }   // start/resume only; never pause a running/countdown timer
@@ -5645,51 +5693,7 @@ struct MainScreen: View {
             
             // 2) Push TimerMessage snapshots at 4 Hz
                 .onReceive(wcTick) { _ in
-                    let phaseString: String = {
-                        switch phase {
-                        case .idle: return "idle"
-                        case .countdown: return "countdown"
-                        case .running: return "running"
-                        case .paused: return "paused"
-                        }
-                    }()
-                    
-                    let linkStr: String = {
-                        if !syncSettings.isEnabled { return "unreachable" }
-                        switch syncSettings.connectionMethod {
-                        case .bonjour:   return "bonjour"
-                        case .bluetooth: return "nearby"
-                        case .network:   return "network"
-                        }
-                    }()
-                    
-                    // Include live event snapshot so children stay in sync while running.
-                    let snapshot = encodeCurrentEvents()
-                    let tm = TimerMessage(
-                        action: .update,
-                        timestamp: Date().timeIntervalSince1970,
-                        phase: phaseString,
-                        remaining: displayMainTime(),
-                        stopEvents: snapshot.stops,
-                        anchorElapsed: elapsed,
-                        parentLockEnabled: syncSettings.parentLockEnabled,
-                        isStopActive: stopActive,
-                        stopRemainingActive: stopRemaining,
-                        cueEvents: snapshot.cues,
-                        restartEvents: snapshot.restarts,
-                        showHours: settings.showHours
-                        // If you extended TimerMessage with role/link/controlsEnabled/etc, you can also pass them here:
-                        // , role: (syncSettings.role == .parent ? "parent" : "child")
-                        // , link: linkStr
-                        // , controlsEnabled: (syncSettings.role == .parent && syncSettings.isEnabled && syncSettings.isEstablished && !(syncSettings.parentLockEnabled ?? false))
-                        // , syncLamp: (syncSettings.isEnabled && syncSettings.isEstablished ? "green" : (syncSettings.isEnabled ? "amber" : "red"))
-                        // , flashNow: flashZero
-                    )
-                    
-                    ConnectivityManager.shared.send(tm)
-                    if syncSettings.role == .parent && syncSettings.isEnabled {
-                        syncSettings.broadcastToChildren(tm)   // ← keep children’s snapshot hot (stops + cues + restarts)
-                    }
+                    sendWatchSnapshot()
 
                     if syncSettings.role == .parent,
                        syncSettings.isEnabled,
@@ -7920,6 +7924,7 @@ struct MainScreen: View {
     
     //──────────────────── toggleStart / resetAll ─────────────────────────
     private func toggleStart() {
+        defer { sendWatchSnapshot() }
         switch phase {
         case .idle:
             // If we previously finished a countdown and the user then edited digits,
@@ -8155,6 +8160,7 @@ struct MainScreen: View {
     // MARK: – Reset everything (called by your “Reset” button)
     private func resetAll() {
         guard phase == .idle || phase == .paused else { return }
+        defer { sendWatchSnapshot() }
         ticker?.cancel()
         phase = .idle
         clearPlaybackStopAnchor()

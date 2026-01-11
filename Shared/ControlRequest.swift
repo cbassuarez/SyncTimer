@@ -21,3 +21,13 @@ public struct ControlRequest: Codable, Equatable {
         self.ts = ts
     }
 }
+
+public struct SnapshotRequest: Codable, Equatable {
+    public let origin: String
+    public let ts: TimeInterval
+
+    public init(origin: String = "watchOS", ts: TimeInterval = Date().timeIntervalSince1970) {
+        self.origin = origin
+        self.ts = ts
+    }
+}

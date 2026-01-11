@@ -26,6 +26,7 @@ struct WatchSyncTimerApp: App {
                 .onChange(of: scenePhase) { phase in
                     if phase == .active {
                         ConnectivityManager.shared.start()
+                        ConnectivityManager.shared.requestSnapshot()
                     }
                 }
         }

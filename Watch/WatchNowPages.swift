@@ -12,6 +12,8 @@ struct WatchNowDetailsModel {
 
 struct WatchTimerProviders {
     let nowUptimeProvider: () -> TimeInterval
+    let mainValueProvider: (TimeInterval) -> TimeInterval
+    let stopValueProvider: (TimeInterval) -> TimeInterval
     let formattedStringProvider: (TimeInterval) -> String
     let stopLineProvider: (TimeInterval) -> String?
     let stopDigitsProvider: (TimeInterval) -> String
@@ -116,35 +118,48 @@ struct WatchTimerHeader: View {
     let timerProviders: WatchTimerProviders
 
     var body: some View {
-        Group {
-            if isLive {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { _ in
-                    let nowUptime = timerProviders.nowUptimeProvider()
-                    let liveMain = timerProviders.formattedStringProvider(nowUptime)
-                    let liveStopLine = timerProviders.stopLineProvider(nowUptime)
-                    headerStack(formattedMain: liveMain, stopLine: liveStopLine)
-                }
-            } else {
-                headerStack(formattedMain: formattedMain, stopLine: stopLine)
-            }
-        }
+        headerStack
         .opacity(isStale ? 0.7 : 1.0)
     }
 
     @ViewBuilder
-    private func headerStack(formattedMain: String, stopLine: String?) -> some View {
+    private var headerStack: some View {
         VStack(spacing: 4) {
-            Text(formattedMain)
-                .font(.system(size: size, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
+            Group {
+                if isLive {
+                    WatchTimerLiveText(
+                        nowUptimeProvider: timerProviders.nowUptimeProvider,
+                        timeProvider: timerProviders.mainValueProvider,
+                        formattedProvider: timerProviders.formattedStringProvider,
+                        fallback: formattedMain
+                    )
+                } else {
+                    Text(formattedMain)
+                }
+            }
+            .font(.system(size: size, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
 
-            if let stopLine {
-                Text(stopLine)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            if stopLine != nil {
+                Group {
+                    if isLive {
+                        WatchTimerLiveText(
+                            nowUptimeProvider: timerProviders.nowUptimeProvider,
+                            timeProvider: timerProviders.stopValueProvider,
+                            formattedProvider: { nowUptime in
+                                timerProviders.stopLineProvider(nowUptime) ?? ""
+                            },
+                            fallback: stopLine ?? ""
+                        )
+                    } else if let stopLine {
+                        Text(stopLine)
+                    }
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -212,10 +227,12 @@ struct WatchFacePage: View {
             Spacer(minLength: 4)
             Group {
                 if isLive {
-                    TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { _ in
-                        let nowUptime = timerProviders.nowUptimeProvider()
-                        Text(timerProviders.stopDigitsProvider(nowUptime))
-                    }
+                    WatchTimerLiveText(
+                        nowUptimeProvider: timerProviders.nowUptimeProvider,
+                        timeProvider: timerProviders.stopValueProvider,
+                        formattedProvider: timerProviders.stopDigitsProvider,
+                        fallback: renderModel.stopDigits
+                    )
                 } else {
                     Text(renderModel.stopDigits)
                 }
@@ -361,6 +378,67 @@ struct WatchControlsPage: View {
     }
 }
 
+private struct WatchTimerLiveText: View {
+    let nowUptimeProvider: () -> TimeInterval
+    let timeProvider: (TimeInterval) -> TimeInterval
+    let formattedProvider: (TimeInterval) -> String
+    let fallback: String
+
+    @State private var lastRenderedCs: Int
+    @State private var cachedString: String
+
+    init(
+        nowUptimeProvider: @escaping () -> TimeInterval,
+        timeProvider: @escaping (TimeInterval) -> TimeInterval,
+        formattedProvider: @escaping (TimeInterval) -> String,
+        fallback: String
+    ) {
+        self.nowUptimeProvider = nowUptimeProvider
+        self.timeProvider = timeProvider
+        self.formattedProvider = formattedProvider
+        self.fallback = fallback
+        _lastRenderedCs = State(initialValue: Int.min)
+        _cachedString = State(initialValue: fallback)
+    }
+
+    var body: some View {
+        TimelineView(.animation) { _ in
+            let nowUptime = nowUptimeProvider()
+            let timeValue = timeProvider(nowUptime)
+            let currentCs = Int((abs(timeValue) * 100).rounded())
+            WatchTimerCachedText(
+                currentCs: currentCs,
+                nowUptime: nowUptime,
+                formatter: formattedProvider,
+                lastRenderedCs: $lastRenderedCs,
+                cachedString: $cachedString
+            )
+        }
+    }
+}
+
+private struct WatchTimerCachedText: View {
+    let currentCs: Int
+    let nowUptime: TimeInterval
+    let formatter: (TimeInterval) -> String
+    @Binding var lastRenderedCs: Int
+    @Binding var cachedString: String
+
+    var body: some View {
+        Text(cachedString)
+            .onAppear { updateIfNeeded(nowUptime: nowUptime) }
+            .onChange(of: currentCs) { _ in
+                updateIfNeeded(nowUptime: nowUptime)
+            }
+    }
+
+    private func updateIfNeeded(nowUptime: TimeInterval) {
+        guard currentCs != lastRenderedCs else { return }
+        lastRenderedCs = currentCs
+        cachedString = formatter(nowUptime)
+    }
+}
+
 private struct WatchEventDotsRow: View {
     let eventDots: [WatchEventDot]
 
@@ -499,6 +577,8 @@ private struct WatchFaceEventCircle: View {
         ),
         timerProviders: WatchTimerProviders(
             nowUptimeProvider: { 0 },
+            mainValueProvider: { _ in 0 },
+            stopValueProvider: { _ in 0 },
             formattedStringProvider: { _ in "12:34.56" },
             stopLineProvider: { _ in nil },
             stopDigitsProvider: { _ in "00:10.00" }
