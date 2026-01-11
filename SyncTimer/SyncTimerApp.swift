@@ -12918,6 +12918,7 @@ struct AboutPage: View {
         @AppStorage("settingsPage") private var settingsPage = 0
 
     @State private var includeDeviceName = false
+    @State private var includeScreenshot = false
     @State private var lastEventId: String? = nil
 
     @State private var copyConfirmationVisible = false
@@ -13192,6 +13193,7 @@ struct AboutPage: View {
                     version: version,
                     build: build,
                     includeDeviceName: includeDeviceName,
+                    includeScreenshot: $includeScreenshot,
                     notes: reportNotes,
                     diagnostics: makeDiagnosticsSnapshot(),
                     onConfirmSend: {
@@ -13356,6 +13358,7 @@ struct AboutPage: View {
         let version: String
         let build: String
         let includeDeviceName: Bool
+        @Binding var includeScreenshot: Bool
         let notes: String
         let diagnostics: String
         let onConfirmSend: () -> Void
@@ -13404,6 +13407,12 @@ struct AboutPage: View {
                     Text(includeDeviceName ? "Included" : "Not included")
                         .foregroundStyle(.primary)
                 }
+
+                Toggle(isOn: $includeScreenshot) {
+                    Text("Include screenshot (may contain sensitive info)")
+                        .foregroundStyle(.primary)
+                }
+                .toggleStyle(SwitchToggleStyle(tint: appSettings.flashColor))
 
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("Notes")
@@ -13565,6 +13574,20 @@ struct AboutPage: View {
                 )
                 scope.addAttachment(attachment)
             }
+            if includeScreenshot {
+                if let pngData = captureScreenshotPNG() {
+                    let attachment = Attachment(
+                        data: pngData,
+                        filename: "SyncTimer-Screenshot.png",
+                        contentType: "image/png"
+                    )
+                    scope.addAttachment(attachment)
+                } else {
+                    #if DEBUG
+                    print("Failed to capture screenshot for manual report.")
+                    #endif
+                }
+            }
         }
 
         let idString = eventId.sentryIdString
@@ -13599,6 +13622,22 @@ struct AboutPage: View {
                 UIApplication.shared.open(fallback)
             }
         }
+    }
+
+    private func captureScreenshotPNG() -> Data? {
+        let scenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+        let window = scenes
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow } ?? scenes.first?.windows.first
+        guard let window else { return nil }
+
+        let bounds = window.bounds
+        let renderer = UIGraphicsImageRenderer(bounds: bounds)
+        let image = renderer.image { _ in
+            window.drawHierarchy(in: bounds, afterScreenUpdates: true)
+        }
+        return image.pngData()
     }
 
     private func makeDiagnosticsFileURL() -> URL? {
@@ -15853,31 +15892,6 @@ struct SyncTimerApp: App {
     @State private var lastTickUptime: Double? = nil
     @StateObject private var cueBadge = CueBadgeState()
     init() {
-        //  Start sentry as early as possible, but only if configured.
-        let dsnValue = (Bundle.main.object(forInfoDictionaryKey: "SENTRY_DSN") as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let isPlaceholder = dsnValue.hasPrefix("$(") && dsnValue.hasSuffix(")")
-        if !dsnValue.isEmpty, !isPlaceholder {
-            SentrySDK.start { options in
-                options.dsn = dsnValue
-
-                #if DEBUG
-                options.debug = true
-                options.environment = "debug"
-                #else
-                options.debug = false
-                options.environment = "release"
-                #endif
-
-                // Keep performance off until you explicitly want it:
-                options.tracesSampleRate = 0
-                options.enableAutoSessionTracking = true
-
-                // Safer defaults (avoid accidentally sending PII):
-                options.sendDefaultPii = false
-            }
-        }
-        
         UIApplication.shared.isIdleTimerDisabled = true
         registerRoboto()
         
