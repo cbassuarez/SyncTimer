@@ -4,6 +4,8 @@ import UIKit
 #endif
 
 struct WhatsNewSheet: View {
+    @State private var didKickDraw = false
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let entry: WhatsNewVersionEntry
@@ -11,7 +13,7 @@ struct WhatsNewSheet: View {
     let onDismiss: () -> Void
 
     @State private var showReleaseNotes = false
-    @State private var drawSymbols = false
+    @State private var drawSymbols = false   // pulse true briefly to run draw-on
 
     var body: some View {
         NavigationStack {
@@ -24,12 +26,18 @@ struct WhatsNewSheet: View {
                 ReleaseNotesView(entry: entry)
             }
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            if #available(iOS 26.0, *) {
-                drawSymbols = true
-            }
+        .task {
+            guard reduceMotion == false else { return }
+            guard didKickDraw == false else { return }
+            didKickDraw = true
+
+            drawSymbols = false
+            try? await Task.sleep(nanoseconds: 80_000_000)   // let views mount
+            drawSymbols = true                               // triggers drawOn
+            try? await Task.sleep(nanoseconds: 1_100_000_000)
+            drawSymbols = false                              // hide overlay (base stays)
         }
+
     }
 
     private var sheetContent: some View {
@@ -87,6 +95,7 @@ struct WhatsNewSheet: View {
         } label: {
             Text("More improvements")
                 .font(.headline)
+                .foregroundStyle(.black)
         }
         .padding(.top, 4)
     }
@@ -97,7 +106,8 @@ struct WhatsNewSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
         } icon: {
             Image(systemName: "checkmark.circle.fill")
-                .symbolRenderingMode(.hierarchical)
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(.tint, .tint.opacity(0.28))
                 .accessibilityHidden(true)
         }
         .labelStyle(.titleAndIcon)
@@ -145,51 +155,84 @@ struct WhatsNewSheet: View {
 }
 
 private struct FeatureCard: View {
+
     let card: WhatsNewCard
     let reduceMotion: Bool
     let drawSymbols: Bool
     let onAction: (WhatsNewAction) -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            featureIcon
-                .padding(.top, 2)
+        Button {
+            WhatsNewHaptics.triggerIfPhone()
+            onAction(card.ctaAction)
+        } label: {
+            HStack(alignment: .center, spacing: 12) {
+                featureIcon
+                    .padding(.leading, 2)
+                    .padding(.vertical, 2)
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(card.headline)
-                    .font(.headline)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(card.body)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button(card.ctaTitle) {
-                    WhatsNewHaptics.triggerIfPhone()
-                    onAction(card.ctaAction)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(card.headline)
+                        .font(.headline)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(card.body)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                    .frame(maxHeight: .infinity, alignment: .center)
             }
-            Spacer(minLength: 0)
+            .padding(12)
+            .background(cardBackground)
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-        .padding(12)
-        .background(cardBackground)
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(card.ctaTitle)
     }
+
 
     @ViewBuilder
     private var featureIcon: some View {
-        let image = Image(systemName: resolvedSymbolName)
-            .font(.system(size: 22, weight: .semibold))
-            .symbolRenderingMode(.hierarchical)
-            .foregroundStyle(.primary)
+        let base = Image(systemName: resolvedSymbolName)
+            .font(.system(size: 44, weight: .semibold))
+            .symbolRenderingMode(.palette)
+            // Two explicit layers: always colored (and “multicolor-ish” on multi-layer symbols).
+            .foregroundStyle(.tint, .tint.opacity(0.28))
             .accessibilityHidden(true)
 
-        if #available(iOS 26.0, *), reduceMotion == false {
-            image.symbolEffect(.drawOn, options: .speed(1.2), isActive: drawSymbols)
-        } else {
-            image
+        let overlay = Image(systemName: resolvedSymbolName)
+            .font(.system(size: 44, weight: .semibold))
+            // Keep draw-on overlay single-color so the stroke is legible.
+            .symbolRenderingMode(.monochrome)
+            .foregroundStyle(.tint)
+            .accessibilityHidden(true)
+
+        ZStack {
+            base
+
+            // Only render overlay while animating; otherwise it masks the base and you see "gray -> black".
+            if #available(iOS 26.0, *), reduceMotion == false, drawSymbols {
+                overlay
+                    .opacity(drawSymbols ? 1 : 0) // so it never masks the base when idle
+                    .animation(.none, value: drawSymbols)
+                    .symbolEffect(.drawOn, options: .speed(1.10), isActive: drawSymbols)
+                    .allowsHitTesting(false)
+
+            }
         }
+        .frame(width: 60, height: 60, alignment: .topLeading)
     }
+
 
     private var resolvedSymbolName: String {
         let trimmed = card.symbol.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -271,13 +314,16 @@ private struct ReleaseNotesView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("More improvements")
                 .font(.headline)
+                .foregroundStyle(.black)
+
             ForEach(entry.bullets ?? [], id: \.self) { bullet in
                 Label {
                     Text(bullet)
                         .fixedSize(horizontal: false, vertical: true)
                 } icon: {
                     Image(systemName: "checkmark.circle.fill")
-                        .symbolRenderingMode(.hierarchical)
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(.tint, .tint.opacity(0.28))
                         .accessibilityHidden(true)
                 }
                 .labelStyle(.titleAndIcon)

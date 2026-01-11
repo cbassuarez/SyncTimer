@@ -4313,8 +4313,6 @@ struct MainScreen: View {
             return (stops, cues, restarts, label)
         }
 
-
-
     // ── Environment & Settings ────────────────────────────────
     @EnvironmentObject private var settings   : AppSettings
     @EnvironmentObject var syncSettings: SyncSettings
@@ -5621,8 +5619,9 @@ struct MainScreen: View {
                         .store(in: &wcCancellables)
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .TimerStart)) { _ in
-                     if phase != .running { toggleStart() }
-                 }
+                    if !isCounting { toggleStart() }   // start/resume only; never pause a running/countdown timer
+                }
+
                 .onReceive(NotificationCenter.default.publisher(for: .TimerPause)) { _ in
                      if phase == .running { toggleStart() }
                  }
@@ -8116,15 +8115,21 @@ struct MainScreen: View {
 
     private func startCountdownFromQuickAction(seconds: Int) {
         let secs = max(1, seconds)
+
+        // Allow starting a fresh countdown from a paused main timer (e.g. paused after post-countdown running).
+        if phase == .paused {
+            resetAll() // safe: resetAll() already guards (idle || paused)
+        }
         guard phase == .idle else { return }
 
         countdownDigits.removeAll()
-        countdownDuration = TimeInterval(secs)
+        countdownDuration  = TimeInterval(secs)
         countdownRemaining = TimeInterval(secs)
         persistLastCountdownSeconds(countdownDuration)
 
-        toggleStart()
+        toggleStart() // reuse existing countdown start/broadcast path
     }
+
 
     // helper to fold your broadcast code
     private func sendPause(to remaining: TimeInterval) {
@@ -12716,6 +12721,8 @@ struct FallingIconsView: View {
 
 // 3) ABOUT
 struct AboutPage: View {
+    @State private var showCreditsSheet = false
+
     @State private var showHallOfFame = false
     @State private var tapCount = 0
     @State private var showRain = false
@@ -12730,8 +12737,177 @@ struct AboutPage: View {
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var whatsNewController: WhatsNewController
     
+    private var flashTint: Color { appSettings.flashColor }
+
+    private var aboutTint: Color {
+        appSettings.appTheme == .dark ? .white : .gray
+    }
+
+    private var aboutGridColumns: [GridItem] {
+        [GridItem(.flexible()), GridItem(.flexible())]
+    }
+
+    @ViewBuilder
+    private func aboutLinkCell(title: String, icon: String, url: URL) -> some View {
+        Link(destination: url) {
+            AboutDrawerSurface {
+                AboutDrawerRow(icon: icon, title: title, tint: aboutTint)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     
-    
+    private struct AboutDrawerRow: View {
+        let icon: String
+        let title: String
+        let tint: Color
+        var chevronTint: Color = .secondary
+
+        var body: some View {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(tint)
+                    .frame(width: 22, alignment: .center)
+
+                Text(title)
+                    .font(.custom("Roboto-Regular", size: 15))
+                    .foregroundStyle(tint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(chevronTint)
+                    .accessibilityHidden(true)
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .frame(minHeight: 38)
+            .contentShape(Rectangle())
+        }
+    }
+
+    private struct AboutDrawerSurface<Content: View>: View {
+        var tint: Color? = nil
+        @ViewBuilder var content: () -> Content
+
+        var body: some View {
+            let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+
+            content()
+                .background {
+                    if #available(iOS 26.0, *) {
+                        ZStack {
+                         if let tint {
+                             // Tint wash (saturated “plate” feel)
+                             shape.fill(tint.opacity(0.22))
+                             // Glass on top, tinted
+                             shape
+                                 .fill(Color.clear)
+                                 .glassEffect(.regular.tint(tint), in: shape)
+                             // Rim
+                             shape.stroke(Color.white.opacity(0.14), lineWidth: 1)
+                         } else {
+                             // Neutral glass (existing behavior)
+                             shape
+                                 .fill(Color.clear)
+                                 .glassEffect(.regular, in: shape)
+                             shape.stroke(Color.white.opacity(0.12), lineWidth: 1)
+                         }
+                     }
+                    } else {
+                        ZStack {
+                                                 if let tint {
+                                                     shape.fill(tint.opacity(0.18))
+                                                 }
+                                                 shape.fill(.thinMaterial)
+                                                 shape.stroke(Color.white.opacity(0.12), lineWidth: 1)
+                                             }
+                    }
+                }
+                .clipShape(shape)
+        }
+    }
+
+    private struct CreditsSheet: View {
+        @EnvironmentObject private var appSettings: AppSettings
+        let onDismiss: () -> Void
+
+        var body: some View {
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Credits")
+                                .font(.title3.weight(.semibold))
+                            Text("Licenses and acknowledgements")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        creditsCard
+                    }
+                    .padding(16)
+                }
+                .scrollIndicators(.hidden)
+                .navigationTitle("")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { onDismiss() }
+                    }
+                }
+            }
+        }
+
+        private var creditsCard: some View {
+            let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+
+            return VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    Image(systemName: "textformat")
+                        .font(.system(size: 16, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.tint)
+                        .frame(width: 22)
+
+                    Text("Roboto")
+                        .font(.headline)
+
+                    Spacer()
+
+                    Image(systemName: "checkmark.seal.fill")
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("Roboto font family\nCopyright 2011 Google Inc.\nApache License 2.0")
+                    .font(.custom("Roboto-Light", size: 14))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            .padding(14)
+            .background {
+                if #available(iOS 26.0, *) {
+                    Color.clear
+                        .glassEffect(.regular, in: shape)
+                        .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
+                } else {
+                    shape
+                        .fill(.ultraThinMaterial)
+                        .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
+                }
+            }
+            .clipShape(shape)
+        }
+    }
+
     var body: some View {
         
         GeometryReader { geo in
@@ -12880,75 +13056,132 @@ struct AboutPage: View {
 
                 
                 Divider().opacity(0.5)
-                Button {
-                    whatsNewController.requestManualPresentation()
-                } label: {
-                    Label("What’s New", systemImage: "sparkles")
-                        .font(.custom("Roboto-Regular", size: 16))
-                        .tint(appSettings.appTheme == .dark ? .white : .gray)
-                }
-                Divider().opacity(0.5)
-                Text("Roboto font family\nCopyright 2011 Google Inc.\nApache License 2.0")
-                    .font(.custom("Roboto-Light", size: 14))
-                Divider().opacity(0.5)
-                
-                HStack {
-                    // left column
-                    VStack(alignment: .leading, spacing: 8) {
-                        Link("Website", destination: URL(string: "https://www.synctimerapp.com")!)
-                            .font(.custom("Roboto-Regular", size: 16))
-                            .tint(appSettings.appTheme == .dark ? .white : .gray)
-                        Link("Report a Bug", destination: URL(string: "https://www.synctimerapp.com/support")!)
-                            .font(.custom("Roboto-Regular", size: 16))
-                            .tint(appSettings.appTheme == .dark ? .white : .gray)
-                    }
-                    Spacer()
-                    // right column
-                    VStack(alignment: .trailing, spacing: 8) {
-                        Link("Privacy Policy", destination: URL(string: "https://www.cbassuarez.com/synctimer-privacy-policy")!)
-                            .font(.custom("Roboto-Regular", size: 16))
-                            .tint(appSettings.appTheme == .dark ? .white : .gray)
-                        Link("Terms of Service", destination: URL(string: "https://www.cbassuarez.com/synctimer-terms-of-service")!)
-                            .font(.custom("Roboto-Regular", size: 16))
-                        .tint(appSettings.appTheme == .dark ? .white : .gray)
-                    }
-                }
-                .font(.custom("Roboto-Regular", size: 16))
-                
-                Divider().opacity(0.5)
-                
-                // Share & Rate
-                HStack {
-                    if #available(iOS 16.0, *) {
-                        ShareLink(item: URL(string: "https://apps.apple.com/app/id123456789")!) {
-                            Label("Share This App", systemImage: "square.and.arrow.up")
-                                .font(.custom("Roboto-Regular", size: 16))
-                                .tint(appSettings.appTheme == .dark ? .white : .black)
-                        }
-                    } else {
+
+                // Row 1: What’s New + Credits (side-by-side to save height)
+                VStack(alignment: .leading, spacing: 8) {
+
+                    // Row 1: What’s New + Credits
+                    HStack(spacing: 10) {
                         Button {
-                            UIApplication.shared.open(URL(string: "https://apps.apple.com/app/id123456789")!)
+                            whatsNewController.requestManualPresentation()
                         } label: {
-                            Label("Share This App", systemImage: "square.and.arrow.up")
-                                .font(.custom("Roboto-Regular", size: 16))
-                                .tint(appSettings.appTheme == .dark ? .white : .black)
+                            AboutDrawerSurface(tint: flashTint) {
+                                       AboutDrawerRow(
+                                           icon: "sparkles",
+                                           title: "What’s New",
+                                           tint: .white,
+                                           chevronTint: .white.opacity(0.85)
+                                       )
+                                   }
                         }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity)
+
+                        Link(destination: URL(string: "https://www.synctimerapp.com")!) {
+                            AboutDrawerSurface(tint: flashTint) {
+                                       AboutDrawerRow(
+                                           icon: "safari",
+                                           title: "Website",
+                                           tint: .white,
+                                           chevronTint: .white.opacity(0.85)
+                                       )
+                                   }
+                          }
+                          .buttonStyle(.plain)
+                          .frame(maxWidth: .infinity)
                     }
-                    Spacer()
-                    Button {
-                        UIApplication.shared.open(URL(string: "itms-apps://itunes.apple.com/app/id123456789")!)
-                    } label: {
-                        Label("Rate on App Store", systemImage: "star.fill")
-                            .font(.custom("Roboto-Regular", size: 16))
-                            .tint(appSettings.appTheme == .dark ? .white : .black)
+
+                    // Row 2–3: Support links grid (slightly tighter spacing)
+                    LazyVGrid(columns: aboutGridColumns, spacing: 6) {
+                        Button {
+                               showCreditsSheet = true
+                           } label: {
+                               AboutDrawerSurface {
+                                   AboutDrawerRow(icon: "text.book.closed", title: "Credits", tint: aboutTint)
+                               }
+                           }
+                           .buttonStyle(.plain)
+                           .frame(maxWidth: .infinity, alignment: .leading)
+                        aboutLinkCell(title: "Privacy Policy", icon: "hand.raised.fill",
+                                      url: URL(string: "https://www.cbassuarez.com/synctimer-privacy-policy")!)
+                        aboutLinkCell(title: "Report a Bug", icon: "ladybug.fill",
+                                      url: URL(string: "https://www.synctimerapp.com/support")!)
+                        aboutLinkCell(title: "Terms of Service", icon: "doc.text.fill",
+                                      url: URL(string: "https://www.cbassuarez.com/synctimer-terms-of-service")!)
                     }
+
+                    // Row 4: Share + Rate (PLAIN buttons for max vertical room)
+                    HStack(spacing: 10) {
+
+                        if #available(iOS 16.0, *) {
+                            ShareLink(item: URL(string: "https://apps.apple.com/app/id123456789")!) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "square.and.arrow.up")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .symbolRenderingMode(.hierarchical)
+                                    Text("Share This App")
+                                        .font(.custom("Roboto-Regular", size: 14))
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.85)
+                                }
+                                .foregroundStyle(aboutTint)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                                .padding(.vertical, 4) // very compact
+                            }
+                            .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            Button {
+                                UIApplication.shared.open(URL(string: "https://apps.apple.com/app/id123456789")!)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "square.and.arrow.up")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .symbolRenderingMode(.hierarchical)
+                                    Text("Share This App")
+                                        .font(.custom("Roboto-Regular", size: 14))
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.85)
+                                }
+                                .foregroundStyle(aboutTint)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                                .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        Button {
+                            UIApplication.shared.open(URL(string: "itms-apps://itunes.apple.com/app/id123456789")!)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "star.fill")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .symbolRenderingMode(.hierarchical)
+                                Text("Rate on App Store")
+                                    .font(.custom("Roboto-Regular", size: 14))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
+                            }
+                            .foregroundStyle(aboutTint)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    Text("Made in Los Angeles, CA")
+                        .font(.custom("Roboto-Light", size: 12))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .layoutPriority(1) // keep it from being the first thing to disappear
                 }
-                .font(.custom("Roboto-Regular", size: 16))
-                
-                Text("Made in Los Angeles, CA")
-                    .font(.custom("Roboto-Light", size: 12))
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+
+
             }
             
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -12959,6 +13192,13 @@ struct AboutPage: View {
                     .presentationDetents([.medium])
                     .presentationDragIndicator(.hidden)
             }
+            .sheet(isPresented: $showCreditsSheet) {
+                CreditsSheet(onDismiss: { showCreditsSheet = false })
+                    .environmentObject(appSettings)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+
             .overlay(
                 Group {
                     if showRain {
@@ -14286,6 +14526,7 @@ innerBody
                     onAction: handleWhatsNewAction,
                     onDismiss: { dismissWhatsNew() }
                 )
+                .tint(settings.flashColor)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
             }
@@ -14485,7 +14726,9 @@ innerBody
     private func handleQuickAction(_ action: QuickAction) {
         switch action {
         case .startResume:
-            AppActions.shared.startTimerAction()
+            showSettings = false
+                        mainMode = .sync
+                        NotificationCenter.default.post(name: .TimerStart, object: nil)
         case .startCountdown:
             NotificationCenter.default.post(name: .quickActionCountdown, object: nil)
         case .openCueSheets:
