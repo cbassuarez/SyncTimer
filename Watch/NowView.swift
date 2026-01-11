@@ -327,9 +327,9 @@ private extension NowView {
         let cueCount = latestMessage?.cueEvents?.count ?? 0
         let restartCount = latestMessage?.restartEvents?.count ?? 0
         return [
-            "seq:\(seqText) phase:\(phaseStr) rem:\(String(format: \"%.2f\", snapMain))",
+            "seq:\(seqText) phase:\(phaseStr) rem:\(String(format: "%.2f", snapMain))",
             "events s:\(stopCount) c:\(cueCount) r:\(restartCount) age:\(ageMs)ms",
-            "v:\(String(format: \"%.2f\", vMain)) base:\(String(format: \"%.2f\", baseMain)) live:\(pageSelection == 0)"
+            "v:\(String(format: "%.2f", vMain)) base:\(String(format: "%.2f", baseMain)) live:\(pageSelection == 0)"
         ]
         #else
         return []
