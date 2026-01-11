@@ -45,6 +45,28 @@ public final class ConnectivityManager: NSObject, ObservableObject {
             #endif
         }
 
+    public func start() {
+        #if canImport(WatchConnectivity)
+        guard WCSession.isSupported() else {
+            print("[WC] WatchConnectivity not supported on this device.")
+            return
+        }
+        let s: WCSession
+        if let existing = session {
+            s = existing
+        } else {
+            s = WCSession.default
+            session = s
+        }
+        s.delegate = self
+        if s.activationState != .activated {
+            s.activate()
+        }
+        #else
+        print("[WC] WatchConnectivity not available on this platform.")
+        #endif
+    }
+
 
     // MARK: Send
 
@@ -95,6 +117,11 @@ extension ConnectivityManager: WCSessionDelegate {
     }
 
     #if os(iOS)
+    public func sessionDidBecomeInactive(_ session: WCSession) { session.activate() }
+    public func sessionDidDeactivate(_ session: WCSession)     { session.activate() }
+    #endif
+
+    #if os(watchOS)
     public func sessionDidBecomeInactive(_ session: WCSession) { session.activate() }
     public func sessionDidDeactivate(_ session: WCSession)     { session.activate() }
     #endif

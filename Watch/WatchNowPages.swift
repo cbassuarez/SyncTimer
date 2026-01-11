@@ -10,16 +10,25 @@ struct WatchNowDetailsModel {
     let eventDots: [WatchEventDot]
 }
 
+struct WatchTimerProviders {
+    let nowUptimeProvider: () -> TimeInterval
+    let formattedStringProvider: (TimeInterval) -> String
+    let stopLineProvider: (TimeInterval) -> String?
+}
+
 struct WatchEventDot: Identifiable {
-    enum Kind {
+    enum Kind: String {
         case stop
         case cue
         case restart
     }
 
-    let id = UUID()
     let kind: Kind
     let time: TimeInterval
+
+    var id: String {
+        "\(kind.rawValue)-\(Int(time * 100))"
+    }
 }
 
 struct WatchGlassCard<Content: View>: View {
@@ -38,7 +47,7 @@ struct WatchGlassCard<Content: View>: View {
             .frame(maxWidth: .infinity)
             .background(glassBackground(in: shape))
             .overlay(shape.stroke(rimColor, lineWidth: 0.6))
-            .shadow(color: Color.black.opacity(0.25), radius: 4, x: 0, y: 2)
+            .shadow(color: Color.black.opacity(0.12), radius: 1, x: 0, y: 0.5)
     }
 
     private var rimColor: Color {
@@ -88,8 +97,27 @@ struct WatchTimerHeader: View {
     let accent: Color
     let isStale: Bool
     let size: CGFloat
+    let isLive: Bool
+    let timerProviders: WatchTimerProviders
 
     var body: some View {
+        Group {
+            if isLive {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { _ in
+                    let nowUptime = timerProviders.nowUptimeProvider()
+                    let liveMain = timerProviders.formattedStringProvider(nowUptime)
+                    let liveStopLine = timerProviders.stopLineProvider(nowUptime)
+                    headerStack(formattedMain: liveMain, stopLine: liveStopLine)
+                }
+            } else {
+                headerStack(formattedMain: formattedMain, stopLine: stopLine)
+            }
+        }
+        .opacity(isStale ? 0.7 : 1.0)
+    }
+
+    @ViewBuilder
+    private func headerStack(formattedMain: String, stopLine: String?) -> some View {
         VStack(spacing: 4) {
             Text(formattedMain)
                 .font(.system(size: size, weight: .semibold, design: .rounded))
@@ -104,12 +132,13 @@ struct WatchTimerHeader: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .opacity(isStale ? 0.7 : 1.0)
     }
 }
 
 struct WatchFacePage: View {
     let renderModel: WatchNowRenderModel
+    let timerProviders: WatchTimerProviders
+    let isLive: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
@@ -128,7 +157,9 @@ struct WatchFacePage: View {
                             stopLine: nil,
                             accent: renderModel.accent,
                             isStale: renderModel.isStale,
-                            size: 40
+                            size: 40,
+                            isLive: isLive,
+                            timerProviders: timerProviders
                         )
                         chipRow
                     }
@@ -192,6 +223,8 @@ struct WatchFacePage: View {
 struct WatchDetailsPage: View {
     let renderModel: WatchNowRenderModel
     let detailsModel: WatchNowDetailsModel
+    let timerProviders: WatchTimerProviders
+    let isLive: Bool
 
     var body: some View {
         VStack(spacing: 8) {
@@ -201,7 +234,9 @@ struct WatchDetailsPage: View {
                     stopLine: renderModel.stopLine,
                     accent: renderModel.accent,
                     isStale: renderModel.isStale,
-                    size: 32
+                    size: 32,
+                    isLive: isLive,
+                    timerProviders: timerProviders
                 )
             }
 
@@ -262,6 +297,8 @@ struct WatchDetailsPage: View {
 
 struct WatchControlsPage: View {
     let renderModel: WatchNowRenderModel
+    let timerProviders: WatchTimerProviders
+    let isLive: Bool
     let startStop: () -> Void
     let reset: () -> Void
 
@@ -273,7 +310,9 @@ struct WatchControlsPage: View {
                     stopLine: renderModel.stopLine,
                     accent: renderModel.accent,
                     isStale: renderModel.isStale,
-                    size: 30
+                    size: 30,
+                    isLive: isLive,
+                    timerProviders: timerProviders
                 )
             }
 
@@ -368,6 +407,12 @@ private struct WatchEventDotView: View {
             lockHint: "Reset available when stopped",
             linkIconName: "iphone",
             accent: .red
-        )
+        ),
+        timerProviders: WatchTimerProviders(
+            nowUptimeProvider: { 0 },
+            formattedStringProvider: { _ in "12:34.56" },
+            stopLineProvider: { _ in nil }
+        ),
+        isLive: false
     )
 }
