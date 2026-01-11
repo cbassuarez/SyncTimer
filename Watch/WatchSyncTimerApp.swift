@@ -16,11 +16,18 @@ final class AppSettings: ObservableObject {
 @main
 struct WatchSyncTimerApp: App {
     @StateObject private var appSettings = AppSettings()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             NowView()
                 .environmentObject(appSettings)
+                .onAppear { ConnectivityManager.shared.start() }
+                .onChange(of: scenePhase) { phase in
+                    if phase == .active {
+                        ConnectivityManager.shared.start()
+                    }
+                }
         }
     }
 }

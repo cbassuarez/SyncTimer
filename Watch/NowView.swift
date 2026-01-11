@@ -33,18 +33,15 @@ struct NowView: View {
     // Freshness & velocity estimation
     @State private var prevSnapMain: TimeInterval = 0
     @State private var prevSnapT   : TimeInterval = 0
-    @State private var lastSnapT   : TimeInterval = 0
+    @State private var lastReceiveUptime: TimeInterval = 0
+    @State private var snapIntervalEMA: TimeInterval = 0
     @State private var isStale     : Bool = true
 
-    // Display values (updated by a 20 Hz ticker)
-    @State private var displayMain : TimeInterval = 0
-    @State private var displayStop : TimeInterval = 0
-
     @State private var latestMessage: TimerMessage?
+    @State private var pageSelection: Int = 0
 
     // Tickers
-    private let staleTick  = Timer.publish(every: 0.6, on: .main, in: .common).autoconnect()
-    private let renderTick = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect() // 20 Hz
+    private let staleTick  = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
 
     // User preference: show hours when enabled; otherwise auto (>=1h shows hours)
     @State private var preferHours: Bool = UserDefaults.standard.bool(forKey: "SyncTimerPreferHours")
@@ -54,18 +51,26 @@ struct NowView: View {
     var body: some View {
         let renderModel = makeRenderModel()
         let detailsModel = makeDetailsModel()
+        let timerProviders = makeTimerProviders()
 
-        TabView {
-            WatchFacePage(renderModel: renderModel)
+        TabView(selection: $pageSelection) {
+            WatchFacePage(renderModel: renderModel, timerProviders: timerProviders, isLive: pageSelection == 0)
+                .tag(0)
             WatchDetailsPage(
                 renderModel: renderModel,
-                detailsModel: detailsModel
+                detailsModel: detailsModel,
+                timerProviders: timerProviders,
+                isLive: pageSelection == 1
             )
+            .tag(1)
             WatchControlsPage(
                 renderModel: renderModel,
+                timerProviders: timerProviders,
+                isLive: pageSelection == 2,
                 startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
                 reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
             )
+            .tag(2)
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
         .tint(appSettings.flashColor)
@@ -74,7 +79,13 @@ struct NowView: View {
         .onReceive(ConnectivityManager.shared.$incoming.compactMap { $0 }) { msg in
             let now = ProcessInfo.processInfo.systemUptime
             isStale   = false
-            lastSnapT = now
+
+            if lastReceiveUptime > 0 {
+                let rawDt = now - lastReceiveUptime
+                let dt = rawDt.clamped(to: 0.05...2.0)
+                snapIntervalEMA = snapIntervalEMA == 0 ? dt : (0.85 * snapIntervalEMA + 0.15 * dt)
+            }
+            lastReceiveUptime = now
 
             // Store raw values
             phaseStr   = msg.phase
@@ -103,10 +114,6 @@ struct NowView: View {
             baseStop = snapStop
             baseT0   = now
 
-            // Seed display immediately
-            displayMain = baseMain
-            displayStop = baseStop
-
             // Save for next velocity estimate
             prevSnapMain = snapMain
             prevSnapT    = now
@@ -114,23 +121,21 @@ struct NowView: View {
             latestMessage = msg
         }
 
-        // Mark stale if no snapshot for > 0.5 s
+        // Mark stale if no snapshot for an adaptive timeout
         .onReceive(staleTick) { _ in
-            let age = ProcessInfo.processInfo.systemUptime - lastSnapT
-            isStale = age > 0.5
-        }
-
-        // Render at 20 Hz using local integration → no drift
-        .onReceive(renderTick) { _ in
-            let dt = ProcessInfo.processInfo.systemUptime - baseT0
-            displayMain = baseMain + vMain * dt
-            displayStop = max(0, baseStop + vStop * dt)
+            let age = ProcessInfo.processInfo.systemUptime - lastReceiveUptime
+            let ema = snapIntervalEMA == 0 ? 0.25 : snapIntervalEMA
+            let staleAfter = max(1.5, min(4.0, ema * 6.0))
+            let freshHold = max(0.8, min(2.0, ema * 3.0))
+            if age > staleAfter && age > freshHold {
+                isStale = true
+            }
         }
     }
 
     private func makeRenderModel() -> WatchNowRenderModel {
         let phaseLabel = phaseChip(phaseStr)
-        let stopLine = stopActive ? "Stop " + formatWithCC(max(0, displayStop), preferHours: false) : nil
+        let stopLine = stopActive ? "Stop " + formatWithCC(max(0, baseStop), preferHours: false) : nil
         let controlsEnabled = latestMessage?.controlsEnabled
         let canStartStop = !isStale && (controlsEnabled ?? true)
         let canReset = !isStale && !isCounting
@@ -142,7 +147,7 @@ struct NowView: View {
         }()
 
         return WatchNowRenderModel(
-            formattedMain: formatWithCC(displayMain, preferHours: preferHours),
+            formattedMain: formatWithCC(baseMain, preferHours: preferHours),
             phaseLabel: phaseLabel,
             isStale: isStale,
             stopLine: stopLine,
@@ -156,7 +161,7 @@ struct NowView: View {
 
     private func makeDetailsModel() -> WatchNowDetailsModel {
         let now = ProcessInfo.processInfo.systemUptime
-        let age = lastSnapT > 0 ? max(0, now - lastSnapT) : 0
+        let age = lastReceiveUptime > 0 ? max(0, now - lastReceiveUptime) : 0
         return WatchNowDetailsModel(
             isFresh: !isStale,
             age: age,
@@ -164,6 +169,19 @@ struct NowView: View {
             link: latestMessage?.link,
             sheetLabel: latestMessage?.sheetLabel,
             eventDots: makeEventDots(message: latestMessage)
+        )
+    }
+
+    private func makeTimerProviders() -> WatchTimerProviders {
+        WatchTimerProviders(
+            nowUptimeProvider: { ProcessInfo.processInfo.systemUptime },
+            formattedStringProvider: { nowUptime in
+                formatWithCC(currentMain(nowUptime: nowUptime), preferHours: preferHours)
+            },
+            stopLineProvider: { nowUptime in
+                guard stopActive else { return nil }
+                return "Stop " + formatWithCC(currentStop(nowUptime: nowUptime), preferHours: false)
+            }
         )
     }
 
@@ -218,6 +236,14 @@ struct NowView: View {
         let cues = (message.cueEvents ?? []).map { WatchEventDot(kind: .cue, time: $0.cueTime) }
         let restarts = (message.restartEvents ?? []).map { WatchEventDot(kind: .restart, time: $0.restartTime) }
         return (stops + cues + restarts).sorted { $0.time < $1.time }
+    }
+
+    private func currentMain(nowUptime: TimeInterval) -> TimeInterval {
+        baseMain + vMain * (nowUptime - baseT0)
+    }
+
+    private func currentStop(nowUptime: TimeInterval) -> TimeInterval {
+        max(0, baseStop + vStop * (nowUptime - baseT0))
     }
 }
 
