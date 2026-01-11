@@ -46,6 +46,7 @@ private enum Haptics {
         #endif
     }
 }
+
 //───────────────────
 // MARK: – tiny helpers
 //───────────────────
@@ -12840,75 +12841,781 @@ struct AboutPage: View {
         @EnvironmentObject private var appSettings: AppSettings
         let onDismiss: () -> Void
 
-        var body: some View {
-            NavigationStack {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
+    @State private var searchText: String = ""
+    @State private var expandedIDs: Set<String> = []
+    @State private var copyAllConfirmationVisible = false
 
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Credits")
-                                .font(.title3.weight(.semibold))
-                            Text("Licenses and acknowledgements")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
+    @State private var legacyShareItem: LegacyShareItem? = nil
 
-                        creditsCard
+    // MARK: - Data model
+
+    private enum CreditKind: String, CaseIterable {
+        case people = "People"
+        case font = "Fonts & Typography"
+        case library = "Open-source"
+        case service = "Services"
+    }
+
+    private struct CreditLink: Hashable {
+        let title: String
+        let url: URL
+        let systemImage: String
+    }
+
+    private struct CreditItem: Identifiable, Hashable {
+        let id: String
+        let kind: CreditKind
+        let name: String
+        let role: String
+        let licenseId: String?
+        let copyright: String?
+        let noticeText: String
+        let links: [CreditLink]
+        let isRequired: Bool
+        let systemImage: String
+    }
+
+    // MARK: - Constants
+
+    private var appDisplayName: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+        ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String)
+        ?? "SyncTimer"
+    }
+
+    private var versionString: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+    }
+
+    private var buildString: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+    }
+
+    private var osString: String {
+        "iOS \(UIDevice.current.systemVersion)"
+    }
+
+    private var supportURL: URL {
+        // TODO: set to your real support/contact page if different
+        URL(string: "https://www.synctimerapp.com/support")!
+    }
+
+    private var websiteURL: URL {
+        URL(string: "https://www.synctimerapp.com")!
+    }
+
+    private var privacyURL: URL {
+        // TODO: update if your canonical URL changes
+        URL(string: "https://www.cbassuarez.com/synctimer-privacy-policy")!
+    }
+
+    private var termsURL: URL {
+        // TODO: update if your canonical URL changes
+        URL(string: "https://www.cbassuarez.com/synctimer-terms-of-service")!
+    }
+
+    private var aboutTint: Color {
+        appSettings.appTheme == .dark ? .white : .gray
+    }
+
+    private var flashTint: Color { appSettings.flashColor }
+
+    // MARK: - Items
+
+    private var creditItems: [CreditItem] {
+        [
+            // People
+            CreditItem(
+                id: "stagedevices",
+                kind: .people,
+                name: "Stage Devices, LLC",
+                role: "Publisher",
+                licenseId: nil,
+                copyright: nil,
+                noticeText: "SyncTimer is produced and published by Stage Devices, LLC.",
+                links: [
+                    CreditLink(title: "Website", url: websiteURL, systemImage: "safari"),
+                    CreditLink(title: "Support", url: supportURL, systemImage: "questionmark.circle")
+                ],
+                isRequired: false,
+                systemImage: "building.2"
+            ),
+            CreditItem(
+                id: "design-engineering",
+                kind: .people,
+                name: "Design & Engineering",
+                role: "Sebastian Suarez",
+                licenseId: nil,
+                copyright: nil,
+                noticeText: "Design, engineering, and product direction.",
+                links: [
+                    CreditLink(title: "Support", url: supportURL, systemImage: "questionmark.circle")
+                ],
+                isRequired: false,
+                systemImage: "paintbrush.pointed"
+            ),
+
+            // Fonts
+            CreditItem(
+                id: "roboto",
+                kind: .font,
+                name: "Roboto",
+                role: "Used for UI text",
+                licenseId: "Apache-2.0",
+                copyright: "Copyright 2011 Google Inc.",
+                noticeText: """
+
+    Roboto font family
+    Copyright 2011 Google Inc.
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+    [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0)
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+    """,
+    links: [
+    CreditLink(title: "Website", url: URL(string: "[https://fonts.google.com/specimen/Roboto](https://fonts.google.com/specimen/Roboto)")!, systemImage: "globe"),
+    CreditLink(title: "License", url: URL(string: "[https://www.apache.org/licenses/LICENSE-2.0](https://www.apache.org/licenses/LICENSE-2.0)")!, systemImage: "doc.text")
+    ],
+    isRequired: true,
+    systemImage: "textformat"
+    ),
+
+            // Services / SDKs (present in codebase)
+            CreditItem(
+                id: "sentry",
+                kind: .service,
+                name: "Sentry",
+                role: "Crash reporting & diagnostics",
+                licenseId: "MIT", // TODO: confirm your exact Sentry SDK license for your pinned version
+                copyright: nil,
+                noticeText: """
+
+    Sentry SDK
+
+    License: MIT
+    Source and license details are provided by Sentry.
+
+    (If you ship Sentry via SPM/CocoaPods, paste the exact license text here for your pinned version.)
+    """,
+    links: [
+    CreditLink(title: "Website", url: URL(string: "[https://sentry.io](https://sentry.io)")!, systemImage: "globe"),
+    CreditLink(title: "License", url: URL(string: "[https://github.com/getsentry/sentry-cocoa](https://github.com/getsentry/sentry-cocoa)")!, systemImage: "doc.text")
+    ],
+    isRequired: true,
+    systemImage: "waveform.path.ecg"
+    )
+    ]
+    }
+
+    // MARK: - Search
+
+    private var normalizedQuery: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private func matchesQuery(_ item: CreditItem) -> Bool {
+        guard !normalizedQuery.isEmpty else { return true }
+        let haystack = [
+            item.kind.rawValue,
+            item.name,
+            item.role,
+            item.licenseId ?? "",
+            item.copyright ?? "",
+            item.noticeText
+        ]
+        .joined(separator: " • ")
+        .lowercased()
+
+        return haystack.contains(normalizedQuery)
+    }
+
+    private var filteredItems: [CreditItem] {
+        creditItems.filter(matchesQuery)
+    }
+
+    private func items(for kind: CreditKind) -> [CreditItem] {
+        filteredItems.filter { $0.kind == kind }
+    }
+
+    // MARK: - Third-party notices blob
+
+    private var requiredItems: [CreditItem] {
+        creditItems.filter { $0.isRequired }
+    }
+
+    private var requiredNoticesIncluded: Bool {
+        // “Included” here means: required items exist and have non-empty notice text.
+        !requiredItems.isEmpty && requiredItems.allSatisfy { !$0.noticeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    private var thirdPartyNoticesText: String {
+        requiredItems
+            .map { item in
+                let headerBits: [String] = [
+                    item.name,
+                    item.licenseId.map { "(\($0))" } ?? nil
+                ].compactMap { $0 }
+
+                let header = headerBits.joined(separator: " ")
+                return """
+
+    (header)
+    (item.noticeText.trimmingCharacters(in: .whitespacesAndNewlines))
+    """
+    }
+    .joined(separator: "\n\n—\n\n")
+    .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func makeThirdPartyNoticesFileURL() -> URL? {
+        let text = thirdPartyNoticesText
+        guard !text.isEmpty else { return nil }
+
+        let fileName = "ThirdPartyNotices.txt"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            return url
+        } catch {
+            return nil
+        }
+    }
+
+    // MARK: - UI pieces
+
+    private var heroCard: some View {
+        AboutDrawerSurface(tint: flashTint) {
+            HStack(alignment: .center, spacing: 12) {
+                Image("AppLogo")
+                    .resizable()
+                    .frame(width: 52, height: 52)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .shadow(color: .black.opacity(0.10), radius: 6, x: 0, y: 3)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(appDisplayName)
+                        .font(.custom("Roboto-SemiBold", size: 18))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+
+                    Text("Stage Devices, LLC • Made in Los Angeles")
+                        .font(.custom("Roboto-Regular", size: 13))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+
+                    HStack(spacing: 10) {
+                        Text("v\(versionString) (\(buildString))")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .lineLimit(1)
+
+                        Text(osString)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .lineLimit(1)
                     }
-                    .padding(16)
+                    .padding(.top, 2)
                 }
-                .scrollIndicators(.hidden)
-                .navigationTitle("")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") { onDismiss() }
-                    }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 14)
+            .padding(.horizontal, 14)
+        }
+    }
+
+    private var requiredNoticeRow: some View {
+        AboutDrawerSurface {
+            HStack(spacing: 10) {
+                Image(systemName: requiredNoticesIncluded ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(requiredNoticesIncluded ? .green : .orange)
+                    .frame(width: 22, alignment: .center)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(requiredNoticesIncluded ? "Required notices included" : "Notices need attention")
+                        .font(.custom("Roboto-SemiBold", size: 15))
+                        .foregroundStyle(aboutTint)
+                        .lineLimit(1)
+
+                    Text(requiredNoticesIncluded ? "Third-party notices are bundled for sharing and audit." : "Add/confirm any missing third-party license text.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
+        }
+    }
+
+    private func sectionHeader(_ title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(subtitle)
+                .font(.custom("Roboto-Regular", size: 13))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+        .padding(.horizontal, 2)
+    }
+
+    private func licensePill(_ licenseId: String?) -> some View {
+        HStack(spacing: 6) {
+            if let licenseId, !licenseId.isEmpty {
+                Text(licenseId)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(aboutTint)
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 8)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.white.opacity(appSettings.appTheme == .dark ? 0.10 : 0.24))
+                    )
             }
         }
+    }
 
-        private var creditsCard: some View {
-            let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+    private func toggleExpanded(_ id: String) {
+        if expandedIDs.contains(id) {
+            expandedIDs.remove(id)
+        } else {
+            expandedIDs.insert(id)
+        }
+    }
 
-            return VStack(alignment: .leading, spacing: 10) {
+    private func copyToClipboard(_ text: String) {
+        UIPasteboard.general.string = text
+    }
+
+    private func creditRow(_ item: CreditItem) -> some View {
+        let isExpanded = expandedIDs.contains(item.id)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.92)) {
+                    toggleExpanded(item.id)
+                }
+            } label: {
                 HStack(spacing: 10) {
-                    Image(systemName: "textformat")
-                        .font(.system(size: 16, weight: .semibold))
+                    Image(systemName: item.systemImage)
+                        .font(.system(size: 15, weight: .semibold))
                         .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.tint)
-                        .frame(width: 22)
+                        .foregroundStyle(item.kind == .font ? flashTint : aboutTint)
+                        .frame(width: 22, alignment: .center)
 
-                    Text("Roboto")
-                        .font(.headline)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.name)
+                            .font(.custom("Roboto-SemiBold", size: 15))
+                            .foregroundStyle(aboutTint)
+                            .lineLimit(1)
 
-                    Spacer()
+                        Text(item.role)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
 
-                    Image(systemName: "checkmark.seal.fill")
-                        .symbolRenderingMode(.hierarchical)
+                    Spacer(minLength: 8)
+
+                    licensePill(item.licenseId)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .animation(.easeInOut(duration: 0.18), value: isExpanded)
+                        .accessibilityHidden(true)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .contextMenu {
+                Button("Copy name") { copyToClipboard(item.name) }
+                if let id = item.licenseId, !id.isEmpty {
+                    Button("Copy license id") { copyToClipboard(id) }
+                }
+                Button("Copy full notice") { copyToClipboard(item.noticeText) }
+            }
+
+            if isExpanded {
+                if let c = item.copyright, !c.isEmpty {
+                    Text(c)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
                 }
 
-                Text("Roboto font family\nCopyright 2011 Google Inc.\nApache License 2.0")
-                    .font(.custom("Roboto-Light", size: 14))
+                Text(item.noticeText)
+                    .font(.custom("Roboto-Light", size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
-            }
-            .padding(14)
-            .background {
-                if #available(iOS 26.0, *) {
-                    Color.clear
-                        .glassEffect(.regular, in: shape)
-                        .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
-                } else {
-                    shape
-                        .fill(.ultraThinMaterial)
-                        .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
+
+                if !item.links.isEmpty {
+                    HStack(spacing: 10) {
+                        ForEach(item.links, id: \.self) { link in
+                            Link(destination: link.url) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: link.systemImage)
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .symbolRenderingMode(.hierarchical)
+                                    Text(link.title)
+                                        .font(.system(size: 13, weight: .semibold))
+                                }
+                                .foregroundStyle(aboutTint)
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, 10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(Color.white.opacity(appSettings.appTheme == .dark ? 0.08 : 0.18))
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        Button {
+                            copyToClipboard(item.noticeText)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .symbolRenderingMode(.hierarchical)
+                                Text("Copy notice")
+                                    .font(.system(size: 13, weight: .semibold))
+                            }
+                            .foregroundStyle(aboutTint)
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(Color.white.opacity(appSettings.appTheme == .dark ? 0.08 : 0.18))
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        Spacer(minLength: 0)
+                    }
                 }
             }
-            .clipShape(shape)
         }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.white.opacity(appSettings.appTheme == .dark ? 0.04 : 0.06))
+        )
+    }
+
+    private func sectionCard(title: String, subtitle: String, content: @escaping () -> AnyView) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader(title, subtitle: subtitle)
+            AboutDrawerSurface {
+                VStack(alignment: .leading, spacing: 10) {
+                    content()
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 8)
+            }
+        }
+    }
+
+    // MARK: - Legal card (copy/share + blob)
+
+    private var legalCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("Legal", subtitle: "Shareable third-party notices and policy links.")
+            AboutDrawerSurface {
+                VStack(alignment: .leading, spacing: 12) {
+
+                    // Copy / Share actions
+                    HStack(spacing: 10) {
+                        Button {
+                            copyToClipboard(thirdPartyNoticesText)
+                            withAnimation(.easeInOut(duration: 0.2)) { copyAllConfirmationVisible = true }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                                withAnimation(.easeInOut(duration: 0.2)) { copyAllConfirmationVisible = false }
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .symbolRenderingMode(.hierarchical)
+                                Text("Copy all notices")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .lineLimit(1)
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(flashTint)
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        if #available(iOS 16.0, *), let url = makeThirdPartyNoticesFileURL() {
+                            ShareLink(item: url) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "square.and.arrow.up")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .symbolRenderingMode(.hierarchical)
+                                    Text("Share notices")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .lineLimit(1)
+                                }
+                                .foregroundStyle(aboutTint)
+                                .padding(.vertical, 10)
+                                .padding(.horizontal, 12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .fill(Color.white.opacity(appSettings.appTheme == .dark ? 0.08 : 0.18))
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            Button {
+                                guard let url = makeThirdPartyNoticesFileURL() else { return }
+                                legacyShareItem = LegacyShareItem(activityItems: [url])
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "square.and.arrow.up")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .symbolRenderingMode(.hierarchical)
+                                    Text("Share notices")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .lineLimit(1)
+                                }
+                                .foregroundStyle(aboutTint)
+                                .padding(.vertical, 10)
+                                .padding(.horizontal, 12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .fill(Color.white.opacity(appSettings.appTheme == .dark ? 0.08 : 0.18))
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        Spacer(minLength: 0)
+                    }
+
+                    if copyAllConfirmationVisible {
+                        Text("Copied to clipboard")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 4)
+                    }
+
+                    // Third-party notices blob
+                    DisclosureGroup {
+                        Text(thirdPartyNoticesText.isEmpty ? "No notices available." : thirdPartyNoticesText)
+                            .font(.system(.footnote, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 6)
+                    } label: {
+                        Text("Third-party notices")
+                            .font(.custom("Roboto-SemiBold", size: 14))
+                            .foregroundStyle(aboutTint)
+                    }
+                    .tint(flashTint)
+
+                    // Policy links
+                    VStack(alignment: .leading, spacing: 8) {
+                        Link(destination: privacyURL) {
+                            AboutDrawerRow(icon: "hand.raised.fill", title: "Privacy Policy", tint: aboutTint)
+                        }
+                        .buttonStyle(.plain)
+
+                        Link(destination: termsURL) {
+                            AboutDrawerRow(icon: "doc.text.fill", title: "Terms of Service", tint: aboutTint)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 10)
+                .padding(.horizontal, 12)
+            }
+        }
+    }
+
+    // MARK: - Legacy share
+
+    private struct LegacyShareItem: Identifiable {
+        let id = UUID()
+        let activityItems: [Any]
+    }
+
+    private struct LegacyShareSheet: UIViewControllerRepresentable {
+        let activityItems: [Any]
+        func makeUIViewController(context: Context) -> UIActivityViewController {
+            UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+        }
+        func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+    }
+
+    // MARK: - Body
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    heroCard
+                    requiredNoticeRow
+
+                    // Search results “mode”
+                    if !normalizedQuery.isEmpty {
+                        sectionCard(
+                            title: "Results",
+                            subtitle: "Matching credits and licenses."
+                        ) {
+                            AnyView(
+                                VStack(alignment: .leading, spacing: 10) {
+                                    if filteredItems.isEmpty {
+                                        Text("No matches.")
+                                            .font(.custom("Roboto-Regular", size: 14))
+                                            .foregroundStyle(.secondary)
+                                            .padding(.vertical, 10)
+                                            .padding(.horizontal, 12)
+                                    } else {
+                                        ForEach(filteredItems) { item in
+                                            creditRow(item)
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    } else {
+                        // Prestige variant: Made by + Thanks + Fonts + Services + Legal
+                        sectionCard(
+                            title: "Made by",
+                            subtitle: "Publisher, contact, and core credits."
+                        ) {
+                            AnyView(
+                                VStack(alignment: .leading, spacing: 10) {
+                                    ForEach(items(for: .people)) { item in
+                                        creditRow(item)
+                                    }
+                                }
+                            )
+                        }
+
+                        sectionCard(
+                            title: "Thanks",
+                            subtitle: "Collaborators, testers, and institutions."
+                        ) {
+                            AnyView(
+                                VStack(alignment: .leading, spacing: 10) {
+                                    DisclosureGroup {
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            Text("• SyncTimer beta testers")
+                                            Text("• CalArts (testing & performance contexts)")
+                                            Text("• Colleagues and ensembles who stress-tested sync workflows")
+                                        }
+                                        .font(.custom("Roboto-Regular", size: 14))
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .padding(.top, 6)
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: "hands.sparkles.fill")
+                                                .font(.system(size: 15, weight: .semibold))
+                                                .symbolRenderingMode(.hierarchical)
+                                                .foregroundStyle(aboutTint)
+                                                .frame(width: 22, alignment: .center)
+
+                                            Text("Special thanks")
+                                                .font(.custom("Roboto-SemiBold", size: 15))
+                                                .foregroundStyle(aboutTint)
+
+                                            Spacer()
+                                        }
+                                        .contentShape(Rectangle())
+                                    }
+                                    .tint(flashTint)
+                                    .padding(.vertical, 10)
+                                    .padding(.horizontal, 12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                            .fill(Color.white.opacity(appSettings.appTheme == .dark ? 0.04 : 0.06))
+                                    )
+                                }
+                            )
+                        }
+
+                        sectionCard(
+                            title: "Fonts & Typography",
+                            subtitle: "Typefaces used by the app, with license details."
+                        ) {
+                            AnyView(
+                                VStack(alignment: .leading, spacing: 10) {
+                                    ForEach(items(for: .font)) { item in
+                                        creditRow(item)
+                                    }
+                                }
+                            )
+                        }
+
+                        sectionCard(
+                            title: "Open-source & Services",
+                            subtitle: "SDKs and services used for stability and diagnostics."
+                        ) {
+                            AnyView(
+                                VStack(alignment: .leading, spacing: 10) {
+                                    let services = items(for: .service) + items(for: .library)
+                                    if services.isEmpty {
+                                        Text("No third-party services listed.")
+                                            .font(.custom("Roboto-Regular", size: 14))
+                                            .foregroundStyle(.secondary)
+                                            .padding(.vertical, 10)
+                                            .padding(.horizontal, 12)
+                                    } else {
+                                        ForEach(services) { item in
+                                            creditRow(item)
+                                        }
+                                    }
+                                }
+                            )
+                        }
+
+                        legalCard
+                    }
+                }
+                .padding(16)
+            }
+            .scrollIndicators(.hidden)
+            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search credits & licenses")
+            .navigationTitle("Credits & Licenses")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { onDismiss() }
+                }
+            }
+            .sheet(item: $legacyShareItem) { item in
+                LegacyShareSheet(activityItems: item.activityItems)
+            }
+        }
+    }
+
     }
     
     private struct PressScaleStyle: ButtonStyle {
@@ -12920,6 +13627,8 @@ struct AboutPage: View {
         }
     }
 
+    
+    
 
     private struct TroubleshootSheet: View {
         @EnvironmentObject private var appSettings: AppSettings
@@ -12946,6 +13655,35 @@ struct AboutPage: View {
     @State private var expandQuickActions = true
     @State private var expandDetails = false
     @State private var expandFixes = false
+        
+        
+        private var topBarTitleFont: Font {
+            if #available(iOS 26.0, *) { return .largeTitle.weight(.semibold) }
+            return .title3.weight(.semibold)
+        }
+
+        private var topBarSubtitleFont: Font {
+            if #available(iOS 26.0, *) { return .subheadline }
+            return .footnote
+        }
+
+        private var troubleshootTopBarHeader: some View {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Report a Bug")
+                    .font(topBarTitleFont)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Text("Send a report with diagnostics and an Event ID.")
+                    .font(topBarSubtitleFont)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .multilineTextAlignment(.leading)
+            .accessibilityElement(children: .combine)
+        }
+
 
     let version: String
     let build: String
@@ -12962,21 +13700,7 @@ struct AboutPage: View {
         case .sent: return "checkmark"
         }
     }
-        
-        private var troubleshootHeader: some View {
-            VStack(spacing: 2) {
-                Text("Report a Bug")
-                    .font(.headline) // reads like a real sheet title
-
-                Text("Send a report with diagnostics and an Event ID.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-            .multilineTextAlignment(.center)
-            .accessibilityElement(children: .combine)
-        }
-
+    
 
     private var notesCard: some View {
         let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -13213,12 +13937,17 @@ struct AboutPage: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    troubleshootHeader
+                    HStack(spacing: 0) {
+                        troubleshootTopBarHeader
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
             }
+
             .sheet(item: $shareItem) { item in
                 ShareSheet(activityItems: [item.url])
             }
@@ -13397,20 +14126,33 @@ struct AboutPage: View {
         let diagnostics: String
         let onConfirmSend: () -> Void
 
-        private var reviewHeader: some View {
-            VStack(spacing: 2) {
-                Text("Review Report")
-                    .font(.headline)
-
-                Text("Confirm what will be sent. You’ll receive an Event ID.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-            .multilineTextAlignment(.center)
-            .accessibilityElement(children: .combine)
+        private var topBarTitleFont: Font {
+            if #available(iOS 26.0, *) { return .largeTitle.weight(.semibold) }
+            return .title3.weight(.semibold)
         }
 
+        private var topBarSubtitleFont: Font {
+            if #available(iOS 26.0, *) { return .subheadline }
+            return .footnote
+        }
+
+        private var reviewTopBarHeader: some View {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Review Report")
+                    .font(topBarTitleFont)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Text("Confirm what will be sent.")
+                    .font(topBarSubtitleFont)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .offset(x: -84)
+            .multilineTextAlignment(.leading)
+            .accessibilityElement(children: .combine)
+        }
 
         private var summaryCard: some View {
             let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -13531,12 +14273,17 @@ struct AboutPage: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .principal) {
-                        reviewHeader
+                        HStack(spacing: 0) {
+                            reviewTopBarHeader
+                            Spacer(minLength: 0)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Cancel") { dismiss() }
                     }
                 }
+
             }
         }
     }
@@ -16082,3 +16829,5 @@ private extension SyncTimerApp {
         }
     }
 }
+
+
