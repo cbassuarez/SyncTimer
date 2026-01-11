@@ -14,10 +14,10 @@
             filePath = "SyncTimer/SyncTimerApp.swift"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "15090"
-            endingLineNumber = "15090"
-            landmarkName = "init()"
-            landmarkType = "7">
+            startingLineNumber = "15094"
+            endingLineNumber = "15094"
+            landmarkName = "currentWhatsNewEntry"
+            landmarkType = "24">
          </BreakpointContent>
       </BreakpointProxy>
    </Breakpoints>

@@ -751,6 +751,7 @@
 /* Begin PBXShellScriptBuildPhase section */
 		55C024B5B385485D9CF82DF3 /* Sentry: upload debug symbols (dSYM) */ = {
 			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
@@ -1331,6 +1332,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 3;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_ASSET_PATHS = "\"SyncTimer/Preview Content\"";
 				DEVELOPMENT_TEAM = S74572Q65M;
 				ENABLE_PREVIEWS = YES;
@@ -1373,10 +1375,10 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.StageDevices.SyncTimer;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
+				SENTRY_DSN = "https://6f7884c374a05b7baad21398a79353f6@o4510650096484352.ingest.us.sentry.io/4510689304772608";
+				SENTRY_ORG = "stage-devices-llc";
+				SENTRY_PROJECT = "synctimer-ios";
 				SKIP_INSTALL = NO;
-				SENTRY_DSN = "";
-				SENTRY_ORG = "";
-				SENTRY_PROJECT = "";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = YES;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
@@ -1442,10 +1444,10 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.StageDevices.SyncTimer;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
+				SENTRY_DSN = "https://6f7884c374a05b7baad21398a79353f6@o4510650096484352.ingest.us.sentry.io/4510689304772608";
+				SENTRY_ORG = "stage-devices-llc";
+				SENTRY_PROJECT = "synctimer-ios";
 				SKIP_INSTALL = NO;
-				SENTRY_DSN = "";
-				SENTRY_ORG = "";
-				SENTRY_PROJECT = "";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = YES;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;

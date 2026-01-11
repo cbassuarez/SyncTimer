@@ -13176,8 +13176,15 @@ struct AboutPage: View {
             let status = syncSettings.isEnabled
                 ? (syncSettings.isEstablished ? "Connected" : "Connecting")
                 : "Off"
-            return "\(syncSettings.role.rawValue.capitalized) • \(syncSettings.connectionMethod.rawValue.capitalized) • \(status)"
-        }
+            return "\(roleDescription) • \(syncSettings.connectionMethod.rawValue) • \(status)"
+                    }
+
+                    private var roleDescription: String {
+                        switch syncSettings.role {
+                        case .parent: return "Parent"
+                        case .child: return "Child"
+                        }
+                    }
 
         private func copyDiagnostics() {
             UIPasteboard.general.string = makeDiagnosticsSnapshot()
@@ -13199,21 +13206,18 @@ struct AboutPage: View {
 
         private func sendSentryReport() {
             let diagnostics = makeDiagnosticsSnapshot()
-            var capturedId: SentryId?
-
-            SentrySDK.withScope { scope in
+            let eventId = SentrySDK.capture(message: "User bug report") { scope in
                 scope.setContext(value: ["snapshot": diagnostics], key: "diagnostics")
                 scope.setTag(value: "manual_bug_report", key: "source")
                 if let data = diagnostics.data(using: .utf8) {
-                    let attachment = SentryAttachment(data: data,
+                    let attachment = Attachment(data: data,
                                                      filename: "SyncTimer-Diagnostics.txt",
                                                      contentType: "text/plain")
                     scope.addAttachment(attachment)
                 }
-                capturedId = SentrySDK.capture(message: "User bug report")
             }
 
-            lastEventId = capturedId?.sentryIdString
+            lastEventId = eventId.sentryIdString
         }
 
         private func copyEventId() {
@@ -13256,8 +13260,8 @@ struct AboutPage: View {
             lines.append("Theme: \(appSettings.appTheme.rawValue.capitalized)")
             lines.append("Flash Color: \(flashColorDescription())")
             lines.append("Reduce Motion: \(UIAccessibility.isReduceMotionEnabled ? "On" : "Off")")
-            lines.append("Sync Role: \(syncSettings.role.rawValue.capitalized)")
-            lines.append("Sync Method: \(syncSettings.connectionMethod.rawValue.capitalized)")
+            lines.append("Sync Role: \(roleDescription)")
+                        lines.append("Sync Method: \(syncSettings.connectionMethod.rawValue)")
             lines.append("Sync Enabled: \(syncSettings.isEnabled ? "On" : "Off")")
             lines.append("Sync Established: \(syncSettings.isEstablished ? "Yes" : "No")")
             return lines.joined(separator: "\n")
