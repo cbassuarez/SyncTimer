@@ -15068,26 +15068,29 @@ struct SyncTimerApp: App {
     @StateObject private var cueBadge = CueBadgeState()
     init() {
         //  Start sentry as early as possible, but only if configured.
-            if let dsn = Bundle.main.object(forInfoDictionaryKey: "SENTRY_DSN") as? String,
-               !dsn.isEmpty {
-                SentrySDK.start { options in
-                    options.dsn = dsn
+        let dsnValue = (Bundle.main.object(forInfoDictionaryKey: "SENTRY_DSN") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let isPlaceholder = dsnValue.hasPrefix("$(") && dsnValue.hasSuffix(")")
+        if !dsnValue.isEmpty, !isPlaceholder {
+            SentrySDK.start { options in
+                options.dsn = dsnValue
 
-                    #if DEBUG
-                    options.debug = true
-                    options.environment = "debug"
-                    #else
-                    options.debug = false
-                    options.environment = "production"
-                    #endif
+                #if DEBUG
+                options.debug = true
+                options.environment = "debug"
+                #else
+                options.debug = false
+                options.environment = "release"
+                #endif
 
-                    // Keep performance off until you explicitly want it:
-                    options.tracesSampleRate = 0
+                // Keep performance off until you explicitly want it:
+                options.tracesSampleRate = 0
+                options.enableAutoSessionTracking = true
 
-                    // Safer defaults (avoid accidentally sending PII):
-                    options.sendDefaultPii = false
-                }
+                // Safer defaults (avoid accidentally sending PII):
+                options.sendDefaultPii = false
             }
+        }
         
         UIApplication.shared.isIdleTimerDisabled = true
         registerRoboto()
