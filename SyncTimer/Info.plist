@@ -56,6 +56,8 @@
 		<string>_synctimer._tcp.</string>
 		<string>_synctimer._udp.</string>
 	</array>
+	<key>SENTRY_DSN</key>
+	<string>$(SENTRY_DSN)</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UISceneConfigurations</key>

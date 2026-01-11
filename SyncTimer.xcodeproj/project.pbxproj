@@ -539,6 +539,7 @@
 				9633A7042DF6CCFD00875623 /* CopyFiles */,
 				962A5F1B2E0D53AE005A36E9 /* Embed Watch Content */,
 				967A69012F0DDD1F00FCD067 /* Embed App Clips */,
+				55C024B5B385485D9CF82DF3 /* Sentry: upload debug symbols (dSYM) */,
 			);
 			buildRules = (
 			);
@@ -746,6 +747,23 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		55C024B5B385485D9CF82DF3 /* Sentry: upload debug symbols (dSYM) */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Sentry: upload debug symbols (dSYM)";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\n\nif ! command -v sentry-cli >/dev/null 2>&1; then\n  echo \"sentry-cli not found; skipping dSYM upload\"\n  exit 0\nfi\n\nif [ -z \"${SENTRY_AUTH_TOKEN:-}\" ]; then\n  echo \"Sentry auth not set; skipping dSYM upload\"\n  exit 0\nfi\n\nif [ -z \"${SENTRY_ORG:-}\" ] || [ -z \"${SENTRY_PROJECT:-}\" ]; then\n  echo \"Sentry org/project not set; skipping dSYM upload\"\n  exit 0\nfi\n\nexport SENTRY_RELEASE=\"${PRODUCT_BUNDLE_IDENTIFIER}@${MARKETING_VERSION}+${CURRENT_PROJECT_VERSION}\"\nexport SENTRY_DIST=\"${CURRENT_PROJECT_VERSION}\"\n\nif [ -z \"${DWARF_DSYM_FOLDER_PATH:-}\" ]; then\n  echo \"No dSYM folder path; skipping upload\"\n  exit 0\nfi\n\nsentry-cli debug-files upload --org \"${SENTRY_ORG}\" --project \"${SENTRY_PROJECT}\" --release \"${SENTRY_RELEASE}\" --dist \"${SENTRY_DIST}\" \"${DWARF_DSYM_FOLDER_PATH}\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		9636A73E2E791DBB00A062B6 /* Sources */ = {
@@ -1356,6 +1374,9 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SKIP_INSTALL = NO;
+				SENTRY_DSN = "";
+				SENTRY_ORG = "";
+				SENTRY_PROJECT = "";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = YES;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
@@ -1422,6 +1443,9 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SKIP_INSTALL = NO;
+				SENTRY_DSN = "";
+				SENTRY_ORG = "";
+				SENTRY_PROJECT = "";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = YES;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
