@@ -36,8 +36,7 @@ struct NowView: View {
     // Freshness & velocity estimation
     @State private var prevSnapMain: TimeInterval = 0
     @State private var prevSnapT   : TimeInterval = 0
-    @State private var lastReceiveUptime: TimeInterval = 0
-    @State private var snapIntervalEMA: TimeInterval = 0
+    @State private var lastSnapUptime: TimeInterval = 0
     @State private var isStale     : Bool = true
 
     @State private var latestMessage: TimerMessage?
@@ -83,58 +82,55 @@ struct NowView: View {
 
         // Receive 4 Hz snapshots → update baseline + estimate velocity
         .onReceive(ConnectivityManager.shared.$incoming.compactMap { $0 }) { msg in
-            let now = ProcessInfo.processInfo.systemUptime
-            isStale   = false
+            Task { @MainActor in
+                let now = ProcessInfo.processInfo.systemUptime
+                lastSnapUptime = now
+                if isStale { isStale = false }
 
-            if lastReceiveUptime > 0 {
-                let rawDt = now - lastReceiveUptime
-                let dt = rawDt.clamped(to: 0.05...2.0)
-                snapIntervalEMA = snapIntervalEMA == 0 ? dt : (0.85 * snapIntervalEMA + 0.15 * dt)
-            }
-            lastReceiveUptime = now
+                // Store raw values
+                phaseStr   = msg.phase
+                snapMain   = msg.remaining
+                stopActive = msg.isStopActive ?? false
+                snapStop   = msg.stopRemainingActive ?? 0
 
-            // Store raw values
-            phaseStr   = msg.phase
-            snapMain   = msg.remaining
-            stopActive = msg.isStopActive ?? false
-            snapStop   = msg.stopRemainingActive ?? 0
-
-            // Estimate main velocity from consecutive snapshots (local monotonic clock)
-            if prevSnapT > 0 {
-                let dt  = now - prevSnapT
-                let dv  = snapMain - prevSnapMain
-                var v   = dt > 0 ? dv / dt : 0
-                if abs(v) < 0.2 { // noisy/flat → fall back by phase
-                    v = (phaseStr == "countdown") ? -1.0 : (phaseStr == "running" ? 1.0 : 0.0)
+                // Estimate main velocity from consecutive snapshots (local monotonic clock)
+                if prevSnapT > 0 {
+                    let dt  = now - prevSnapT
+                    let dv  = snapMain - prevSnapMain
+                    var v   = dt > 0 ? dv / dt : 0
+                    if abs(v) < 0.2 { // noisy/flat → fall back by phase
+                        v = (phaseStr == "countdown") ? -1.0 : (phaseStr == "running" ? 1.0 : 0.0)
+                    }
+                    vMain = (phaseStr == "paused" || phaseStr == "idle") ? 0.0 : v.clamped(to: -1.05...1.05)
+                } else {
+                    vMain = (phaseStr == "countdown") ? -1.0 : (phaseStr == "running" ? 1.0 : 0.0)
                 }
-                vMain = (phaseStr == "paused" || phaseStr == "idle") ? 0.0 : v.clamped(to: -1.05...1.05)
-            } else {
-                vMain = (phaseStr == "countdown") ? -1.0 : (phaseStr == "running" ? 1.0 : 0.0)
+
+                // Stop velocity: count down if active
+                vStop = stopActive ? -1.0 : 0.0
+
+                // Set new integration baseline
+                baseMain = snapMain
+                baseStop = snapStop
+                baseT0   = now
+
+                // Save for next velocity estimate
+                prevSnapMain = snapMain
+                prevSnapT    = now
+
+                latestMessage = msg
             }
-
-            // Stop velocity: count down if active
-            vStop = stopActive ? -1.0 : 0.0
-
-            // Set new integration baseline
-            baseMain = snapMain
-            baseStop = snapStop
-            baseT0   = now
-
-            // Save for next velocity estimate
-            prevSnapMain = snapMain
-            prevSnapT    = now
-
-            latestMessage = msg
         }
 
         // Mark stale if no snapshot for an adaptive timeout
         .onReceive(staleTick) { _ in
-            let age = ProcessInfo.processInfo.systemUptime - lastReceiveUptime
-            let ema = snapIntervalEMA == 0 ? 0.25 : snapIntervalEMA
-            let staleAfter = max(1.5, min(4.0, ema * 6.0))
-            let freshHold = max(0.8, min(2.0, ema * 3.0))
-            if age > staleAfter && age > freshHold {
-                isStale = true
+            let age = ProcessInfo.processInfo.systemUptime - lastSnapUptime
+            let staleThreshold = 1.5
+            let freshThreshold = 0.7
+            if isStale {
+                if age < freshThreshold { isStale = false }
+            } else {
+                if age > staleThreshold { isStale = true }
             }
         }
     }
@@ -170,7 +166,7 @@ struct NowView: View {
 
     private func makeDetailsModel() -> WatchNowDetailsModel {
         let now = ProcessInfo.processInfo.systemUptime
-        let age = lastReceiveUptime > 0 ? max(0, now - lastReceiveUptime) : 0
+        let age = lastSnapUptime > 0 ? max(0, now - lastSnapUptime) : 0
         return WatchNowDetailsModel(
             isFresh: !isStale,
             age: age,
@@ -184,6 +180,12 @@ struct NowView: View {
     private func makeTimerProviders() -> WatchTimerProviders {
         WatchTimerProviders(
             nowUptimeProvider: { ProcessInfo.processInfo.systemUptime },
+            mainValueProvider: { nowUptime in
+                currentMain(nowUptime: nowUptime)
+            },
+            stopValueProvider: { nowUptime in
+                currentStop(nowUptime: nowUptime)
+            },
             formattedStringProvider: { nowUptime in
                 formatWithCC(currentMain(nowUptime: nowUptime), preferHours: resolvedShowHours)
             },
