@@ -12917,36 +12917,457 @@ struct AboutPage: View {
         @Environment(\.dismiss) private var dismiss
         @AppStorage("settingsPage") private var settingsPage = 0
 
-        @State private var includeDeviceName = false
-        @State private var lastEventId: String? = nil
-        @State private var copyConfirmationVisible = false
-        @State private var shareItem: ShareItem? = nil
+    @State private var includeDeviceName = false
+    @State private var lastEventId: String? = nil
+
+    @State private var copyConfirmationVisible = false
+    @State private var shareItem: ShareItem? = nil
+
+    // New: notes + review gate
+    @State private var reportNotes: String = ""
+    @State private var showReviewSheet = false
+
+    // New: send-state icon cycle (paperplane.fill -> paperplane -> checkmark -> paperplane.fill)
+    private enum SendState: Equatable { case idle, sending, sent }
+    @State private var sendState: SendState = .idle
+
+    // New: disclosure sections
+    @State private var expandQuickActions = true
+    @State private var expandDetails = false
+    @State private var expandFixes = false
+
+    let version: String
+    let build: String
+    let supportURL: URL
+
+    private var aboutTint: Color {
+        appSettings.appTheme == .dark ? .white : .gray
+    }
+
+    private var sendIconName: String {
+        switch sendState {
+        case .idle: return "paperplane.fill"
+        case .sending: return "paperplane"
+        case .sent: return "checkmark"
+        }
+    }
+
+    private var heroCard: some View {
+        let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("Troubleshooting")
+                .font(.title3.weight(.semibold))
+
+            Text("Send a report with diagnostics and an Event ID.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            if let lastEventId {
+                Text("Event ID: \(lastEventId)")
+                    .font(.system(.footnote, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .padding(.top, 4)
+            }
+        }
+        .padding(14)
+        .background {
+            if #available(iOS 26.0, *) {
+                shape
+                    .fill(Color.clear)
+                    .glassEffect(.regular, in: shape)
+                    .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
+            } else {
+                shape
+                    .fill(.ultraThinMaterial)
+                    .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
+            }
+        }
+        .clipShape(shape)
+    }
+
+    private var notesCard: some View {
+        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: "text.bubble")
+                    .font(.system(size: 15, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(aboutTint)
+                    .frame(width: 22, alignment: .center)
+
+                Text("What happened? (optional)")
+                    .font(.custom("Roboto-Regular", size: 15))
+                    .foregroundStyle(aboutTint)
+
+                Spacer()
+            }
+
+            if #available(iOS 16.0, *) {
+                TextField("1–2 lines is perfect.", text: $reportNotes, axis: .vertical)
+                    .lineLimit(1...2)
+                    .font(.custom("Roboto-Regular", size: 14))
+                    .textInputAutocapitalization(.sentences)
+                    .disableAutocorrection(false)
+                    .padding(.top, 2)
+            } else {
+                TextField("1–2 lines is perfect.", text: $reportNotes)
+                    .font(.custom("Roboto-Regular", size: 14))
+                    .textInputAutocapitalization(.sentences)
+                    .disableAutocorrection(false)
+                    .padding(.top, 2)
+            }
+        }
+        .padding(12)
+        .background {
+            if #available(iOS 26.0, *) {
+                shape
+                    .fill(Color.clear)
+                    .glassEffect(.regular, in: shape)
+                    .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
+            } else {
+                shape
+                    .fill(.ultraThinMaterial)
+                    .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
+            }
+        }
+        .clipShape(shape)
+    }
+
+    private var primarySendDrawer: some View {
+        AboutDrawerSurface(tint: appSettings.flashColor) {
+            HStack(alignment: .center, spacing: 10) {
+                // icon with “magic replace” where supported
+                Group {
+                    if #available(iOS 17.0, *) {
+                        Image(systemName: sendIconName)
+                            .contentTransition(.symbolEffect(.replace))
+                    } else {
+                        Image(systemName: sendIconName)
+                    }
+                }
+                .font(.system(size: 15, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.white)
+                .frame(width: 22, alignment: .center)
+
+                Text("Send Report")
+                    .font(.custom("Roboto-Regular", size: 15))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .accessibilityHidden(true)
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .frame(minHeight: 38)
+            .contentShape(Rectangle())
+        }
+    }
+
+    private var privacyCard: some View {
+        AboutDrawerSurface {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 10) {
+                    Image(systemName: "person.text.rectangle")
+                        .font(.system(size: 15, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(aboutTint)
+                        .frame(width: 22, alignment: .center)
+
+                    Toggle(isOn: $includeDeviceName) {
+                        Text("Include device name")
+                            .font(.custom("Roboto-Regular", size: 15))
+                            .foregroundStyle(aboutTint)
+                    }
+                    .toggleStyle(SwitchToggleStyle(tint: appSettings.flashColor))
+                }
+
+                Text("Reports include diagnostics only. No location, contacts, or content from your cue sheets.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 32)
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    heroCard
+                    notesCard
+
+                    Button {
+                        guard sendState != .sending else { return }
+                        Haptics.light()
+                        showReviewSheet = true
+                    } label: {
+                        primarySendDrawer
+                    }
+                    .buttonStyle(.plain)
+
+                    privacyCard
+
+                    disclosureCard(
+                        title: "Quick actions",
+                        systemImage: "bolt.fill",
+                        isExpanded: $expandQuickActions
+                    ) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Button { copyDiagnostics() } label: {
+                                AboutDrawerSurface {
+                                    AboutDrawerRow(icon: "doc.on.doc", title: "Copy Diagnostics", tint: aboutTint)
+                                }
+                            }
+                            .buttonStyle(.plain)
+
+                            if copyConfirmationVisible {
+                                Text("Copied to clipboard")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.leading, 8)
+                            }
+
+                            Button { shareDiagnostics() } label: {
+                                AboutDrawerSurface {
+                                    AboutDrawerRow(icon: "square.and.arrow.up", title: "Share Diagnostics", tint: aboutTint)
+                                }
+                            }
+                            .buttonStyle(.plain)
+
+                            if lastEventId != nil {
+                                Button { copyEventId() } label: {
+                                    AboutDrawerSurface {
+                                        AboutDrawerRow(icon: "number.circle", title: "Copy Event ID", tint: aboutTint)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.top, 10)
+                    }
+
+                    disclosureCard(
+                        title: "Details",
+                        systemImage: "info.circle.fill",
+                        isExpanded: $expandDetails
+                    ) {
+                        statusCard
+                            .padding(.top, 10)
+                    }
+
+                    disclosureCard(
+                        title: "Fixes",
+                        systemImage: "wrench.and.screwdriver.fill",
+                        isExpanded: $expandFixes
+                    ) {
+                        commonFixes
+                            .padding(.top, 10)
+                    }
+                }
+                .padding(16)
+            }
+            .scrollIndicators(.hidden)
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .sheet(item: $shareItem) { item in
+                ShareSheet(activityItems: [item.url])
+            }
+            .sheet(isPresented: $showReviewSheet) {
+                ReviewReportSheet(
+                    version: version,
+                    build: build,
+                    includeDeviceName: includeDeviceName,
+                    notes: reportNotes,
+                    diagnostics: makeDiagnosticsSnapshot(),
+                    onConfirmSend: {
+                        showReviewSheet = false
+                        sendReport()
+                    }
+                )
+                .environmentObject(appSettings)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+            }
+        }
+        // Ensure the sheet defaults to medium and can expand on demand, with drag indicator.
+        .modifier(PresentationDefaults())
+    }
+
+    // MARK: - Glass disclosure card
+
+        @ViewBuilder
+        private func disclosureCard<Content: View>(
+            title: String,
+            systemImage: String,
+            isExpanded: Binding<Bool>,
+            @ViewBuilder content: @escaping () -> Content   //  add @escaping
+        ) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+
+        VStack(alignment: .leading, spacing: 0) {
+            DisclosureGroup(isExpanded: isExpanded) {
+                content()
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 15, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(aboutTint)
+                        .frame(width: 22, alignment: .center)
+
+                    Text(title)
+                        .font(.custom("Roboto-Regular", size: 15))
+                        .foregroundStyle(aboutTint)
+
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .tint(aboutTint)
+        }
+        .padding(12)
+        .background {
+            if #available(iOS 26.0, *) {
+                shape
+                    .fill(Color.clear)
+                    .glassEffect(.regular, in: shape)
+                    .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
+            } else {
+                shape
+                    .fill(.ultraThinMaterial)
+                    .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
+            }
+        }
+        .clipShape(shape)
+    }
+
+    // MARK: - Status
+
+    private var statusCard: some View {
+        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+        return VStack(alignment: .leading, spacing: 8) {
+            statusRow(label: "Version", value: "\(version) (\(build))")
+            statusRow(label: "Device", value: deviceLabel)
+            statusRow(label: "iOS", value: UIDevice.current.systemVersion)
+            statusRow(label: "Theme", value: appSettings.appTheme.rawValue.capitalized)
+            statusRow(label: "Reduce Motion", value: UIAccessibility.isReduceMotionEnabled ? "On" : "Off")
+            statusRow(label: "Sync", value: syncStatusDescription)
+        }
+        .font(.footnote)
+        .padding(14)
+        .background {
+            if #available(iOS 26.0, *) {
+                shape
+                    .fill(Color.clear)
+                    .glassEffect(.regular, in: shape)
+                    .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
+            } else {
+                shape
+                    .fill(.ultraThinMaterial)
+                    .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
+            }
+        }
+        .clipShape(shape)
+    }
+
+    private func statusRow(label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label)
+                .foregroundStyle(.secondary)
+                .frame(width: 120, alignment: .leading)
+            Text(value)
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    // MARK: - Fixes
+
+    private var commonFixes: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                settingsPage = 2
+                dismiss()
+            } label: {
+                AboutDrawerSurface {
+                    AboutDrawerRow(icon: "gearshape.fill", title: "Open Sync settings", tint: aboutTint)
+                }
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                NotificationCenter.default.post(name: .whatsNewOpenCueSheets, object: nil)
+                dismiss()
+            } label: {
+                AboutDrawerSurface {
+                    AboutDrawerRow(icon: "list.bullet.rectangle", title: "Open Cue Sheets", tint: aboutTint)
+                }
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                openSystemSettings(urlString: "App-Prefs:root=Bluetooth")
+            } label: {
+                AboutDrawerSurface {
+                    AboutDrawerRow(icon: "bolt.horizontal.fill", title: "Open Bluetooth settings", tint: aboutTint)
+                }
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                openSystemSettings(urlString: "App-Prefs:root=WIFI")
+            } label: {
+                AboutDrawerSurface {
+                    AboutDrawerRow(icon: "wifi", title: "Open Wi-Fi settings", tint: aboutTint)
+                }
+            }
+            .buttonStyle(.plain)
+
+            Link(destination: supportURL) {
+                AboutDrawerSurface {
+                    AboutDrawerRow(icon: "safari", title: "Open Support Website", tint: aboutTint)
+                }
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - Review sheet
+
+    private struct ReviewReportSheet: View {
+        @EnvironmentObject private var appSettings: AppSettings
+        @Environment(\.dismiss) private var dismiss
 
         let version: String
         let build: String
-        let supportURL: URL
+        let includeDeviceName: Bool
+        let notes: String
+        let diagnostics: String
+        let onConfirmSend: () -> Void
 
-        private var aboutTint: Color {
-            appSettings.appTheme == .dark ? .white : .gray
-        }
-
-        private var heroCard: some View {
+        private var hero: some View {
             let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
-
             return VStack(alignment: .leading, spacing: 6) {
-                Text("Troubleshooting")
+                Text("Review Report")
                     .font(.title3.weight(.semibold))
-                Text("Send a report with diagnostics + an Event ID.")
+                Text("Confirm what will be sent. You’ll receive an Event ID.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-
-                if let lastEventId {
-                    Text("Event ID: \(lastEventId)")
-                        .font(.system(.footnote, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .padding(.top, 4)
-                }
             }
             .padding(14)
             .background {
@@ -12964,130 +13385,53 @@ struct AboutPage: View {
             .clipShape(shape)
         }
 
-        var body: some View {
-            NavigationStack {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        heroCard
-
-                        sectionHeader("Quick actions")
-                        quickActions
-                        privacyToggleRow
-
-                        Divider().opacity(0.5)
-
-                        sectionHeader("Status")
-                        statusCard
-
-                        Divider().opacity(0.5)
-
-                        sectionHeader("Common fixes")
-                        commonFixes
-                    }
-                    .padding(16)
-                }
-                .scrollIndicators(.hidden)
-                .navigationTitle("")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") { dismiss() }
-                    }
-                }
-                .sheet(item: $shareItem) { item in
-                    ShareSheet(activityItems: [item.url])
-                }
-            }
-        }
-
-        @ViewBuilder
-        private func sectionHeader(_ title: String) -> some View {
-            Text(title)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .textCase(nil)
-        }
-
-        private var quickActions: some View {
-            VStack(alignment: .leading, spacing: 8) {
-                Button {
-                    copyDiagnostics()
-                } label: {
-                    AboutDrawerSurface {
-                        AboutDrawerRow(icon: "doc.on.doc", title: "Copy Diagnostics", tint: aboutTint)
-                    }
-                }
-                .buttonStyle(.plain)
-
-                if copyConfirmationVisible {
-                    Text("Copied to clipboard")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 8)
-                }
-
-                Button {
-                    shareDiagnostics()
-                } label: {
-                    AboutDrawerSurface {
-                        AboutDrawerRow(icon: "square.and.arrow.up", title: "Share Diagnostics", tint: aboutTint)
-                    }
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    sendSentryReport()
-                } label: {
-                    AboutDrawerSurface {
-                        AboutDrawerRow(icon: "paperplane.fill", title: "Send Bug Report (Sentry)", tint: aboutTint)
-                    }
-                }
-                .buttonStyle(.plain)
-
-                if lastEventId != nil {
-                    Button {
-                        copyEventId()
-                    } label: {
-                        AboutDrawerSurface {
-                            AboutDrawerRow(icon: "number.circle", title: "Copy Event ID", tint: aboutTint)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-
-        private var privacyToggleRow: some View {
-            AboutDrawerSurface {
-                HStack(spacing: 10) {
-                    Image(systemName: "person.text.rectangle")
-                        .font(.system(size: 15, weight: .semibold))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(aboutTint)
-                        .frame(width: 22, alignment: .center)
-
-                    Toggle(isOn: $includeDeviceName) {
-                        Text("Include device name")
-                            .font(.custom("Roboto-Regular", size: 15))
-                            .foregroundStyle(aboutTint)
-                    }
-                    .toggleStyle(SwitchToggleStyle(tint: appSettings.flashColor))
-                }
-                .padding(.vertical, 8)
-                .padding(.horizontal, 10)
-                .frame(minHeight: 38)
-            }
-        }
-
-        private var statusCard: some View {
+        private var summaryCard: some View {
             let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
-            return VStack(alignment: .leading, spacing: 8) {
-                statusRow(label: "Version", value: "\(version) (\(build))")
-                statusRow(label: "Device", value: deviceLabel)
-                statusRow(label: "iOS", value: UIDevice.current.systemVersion)
-                statusRow(label: "Theme", value: appSettings.appTheme.rawValue.capitalized)
-                statusRow(label: "Reduce Motion", value: UIAccessibility.isReduceMotionEnabled ? "On" : "Off")
-                statusRow(label: "Sync", value: syncStatusDescription)
+
+            return VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Version")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 90, alignment: .leading)
+                    Text("\(version) (\(build))")
+                        .foregroundStyle(.primary)
+                }
+
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Device name")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 90, alignment: .leading)
+                    Text(includeDeviceName ? "Included" : "Not included")
+                        .foregroundStyle(.primary)
+                }
+
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Notes")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 90, alignment: .leading)
+                    Text(notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "None" : notes)
+                        .foregroundStyle(.primary)
+                        .lineLimit(3)
+                }
+
+                DisclosureGroup {
+                    Text(diagnostics)
+                        .font(.system(.footnote, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                } label: {
+                    Text("Preview diagnostics")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .tint(appSettings.flashColor)
+
+                Text("No location, contacts, or cue sheet content are included.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
             }
             .font(.footnote)
             .padding(14)
@@ -13106,194 +13450,232 @@ struct AboutPage: View {
             .clipShape(shape)
         }
 
-        private func statusRow(label: String, value: String) -> some View {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(label)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 120, alignment: .leading)
-                Text(value)
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        private var sendDrawer: some View {
+            AboutDrawerSurface(tint: appSettings.flashColor) {
+                HStack(alignment: .center, spacing: 10) {
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.white)
+                        .frame(width: 22, alignment: .center)
+
+                    Text("Send Report")
+                        .font(.custom("Roboto-Regular", size: 15))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .accessibilityHidden(true)
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 10)
+                .frame(minHeight: 38)
+                .contentShape(Rectangle())
             }
         }
 
-        private var commonFixes: some View {
-            VStack(alignment: .leading, spacing: 8) {
-                Button {
-                    settingsPage = 2
-                    dismiss()
-                } label: {
-                    AboutDrawerSurface {
-                        AboutDrawerRow(icon: "gearshape.fill", title: "Open Sync settings", tint: aboutTint)
-                    }
-                }
-                .buttonStyle(.plain)
+        var body: some View {
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        hero
+                        summaryCard
 
-                Button {
-                    NotificationCenter.default.post(name: .whatsNewOpenCueSheets, object: nil)
-                    dismiss()
-                } label: {
-                    AboutDrawerSurface {
-                        AboutDrawerRow(icon: "list.bullet.rectangle", title: "Open Cue Sheets", tint: aboutTint)
-                    }
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    openSystemSettings(urlString: "App-Prefs:root=Bluetooth")
-                } label: {
-                    AboutDrawerSurface {
-                        AboutDrawerRow(icon: "bolt.horizontal.fill", title: "Open Bluetooth settings", tint: aboutTint)
-                    }
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    openSystemSettings(urlString: "App-Prefs:root=WIFI")
-                } label: {
-                    AboutDrawerSurface {
-                        AboutDrawerRow(icon: "wifi", title: "Open Wi-Fi settings", tint: aboutTint)
-                    }
-                }
-                .buttonStyle(.plain)
-
-                Link(destination: supportURL) {
-                    AboutDrawerSurface {
-                        AboutDrawerRow(icon: "safari", title: "Open Support Website", tint: aboutTint)
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-        }
-
-        private var deviceLabel: String {
-            let model = UIDevice.current.model
-            guard includeDeviceName else { return model }
-            return "\(model) (\(UIDevice.current.name))"
-        }
-
-        private var syncStatusDescription: String {
-            let status = syncSettings.isEnabled
-                ? (syncSettings.isEstablished ? "Connected" : "Connecting")
-                : "Off"
-            return "\(roleDescription) • \(syncSettings.connectionMethod.rawValue) • \(status)"
-                    }
-
-                    private var roleDescription: String {
-                        switch syncSettings.role {
-                        case .parent: return "Parent"
-                        case .child: return "Child"
+                        Button {
+                            Haptics.light()
+                            dismiss()
+                            onConfirmSend()
+                        } label: {
+                            sendDrawer
                         }
+                        .buttonStyle(.plain)
                     }
-
-        private func copyDiagnostics() {
-            UIPasteboard.general.string = makeDiagnosticsSnapshot()
-            Haptics.light()
-            withAnimation(.easeInOut(duration: 0.2)) {
-                copyConfirmationVisible = true
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    copyConfirmationVisible = false
+                    .padding(16)
+                }
+                .scrollIndicators(.hidden)
+                .navigationTitle("")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Cancel") { dismiss() }
+                    }
                 }
             }
-        }
-
-        private func shareDiagnostics() {
-            guard let url = makeDiagnosticsFileURL() else { return }
-            shareItem = ShareItem(url: url)
-        }
-
-        private func sendSentryReport() {
-            let diagnostics = makeDiagnosticsSnapshot()
-            let eventId = SentrySDK.capture(message: "User bug report") { scope in
-                scope.setContext(value: ["snapshot": diagnostics], key: "diagnostics")
-                scope.setTag(value: "manual_bug_report", key: "source")
-                if let data = diagnostics.data(using: .utf8) {
-                    let attachment = Attachment(data: data,
-                                                     filename: "SyncTimer-Diagnostics.txt",
-                                                     contentType: "text/plain")
-                    scope.addAttachment(attachment)
-                }
-            }
-
-            lastEventId = eventId.sentryIdString
-        }
-
-        private func copyEventId() {
-            guard let lastEventId else { return }
-            UIPasteboard.general.string = lastEventId
-            Haptics.light()
-        }
-
-        private func openSystemSettings(urlString: String) {
-            guard let url = URL(string: urlString) else { return }
-            UIApplication.shared.open(url) { success in
-                guard !success else { return }
-                if let fallback = URL(string: UIApplication.openSettingsURLString) {
-                    UIApplication.shared.open(fallback)
-                }
-            }
-        }
-
-        private func makeDiagnosticsFileURL() -> URL? {
-            let diagnostics = makeDiagnosticsSnapshot()
-            let fileName = "SyncTimer-Diagnostics.txt"
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
-            do {
-                try diagnostics.write(to: url, atomically: true, encoding: .utf8)
-                return url
-            } catch {
-                return nil
-            }
-        }
-
-        private func makeDiagnosticsSnapshot() -> String {
-            var lines: [String] = []
-            lines.append("SyncTimer Diagnostics")
-            lines.append("Version: \(version) (\(build))")
-            lines.append("iOS: \(UIDevice.current.systemVersion)")
-            lines.append("Device: \(UIDevice.current.model)")
-            if includeDeviceName {
-                lines.append("Device Name: \(UIDevice.current.name)")
-            }
-            lines.append("Theme: \(appSettings.appTheme.rawValue.capitalized)")
-            lines.append("Flash Color: \(flashColorDescription())")
-            lines.append("Reduce Motion: \(UIAccessibility.isReduceMotionEnabled ? "On" : "Off")")
-            lines.append("Sync Role: \(roleDescription)")
-                        lines.append("Sync Method: \(syncSettings.connectionMethod.rawValue)")
-            lines.append("Sync Enabled: \(syncSettings.isEnabled ? "On" : "Off")")
-            lines.append("Sync Established: \(syncSettings.isEstablished ? "Yes" : "No")")
-            return lines.joined(separator: "\n")
-        }
-
-        private func flashColorDescription() -> String {
-            let uiColor = UIColor(appSettings.flashColor)
-            var red: CGFloat = 0
-            var green: CGFloat = 0
-            var blue: CGFloat = 0
-            var alpha: CGFloat = 0
-            if uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) {
-                return String(format: "#%02X%02X%02X", Int(red * 255), Int(green * 255), Int(blue * 255))
-            }
-            return "Custom"
-        }
-
-        private struct ShareItem: Identifiable {
-            let id = UUID()
-            let url: URL
-        }
-
-        private struct ShareSheet: UIViewControllerRepresentable {
-            let activityItems: [Any]
-
-            func makeUIViewController(context: Context) -> UIActivityViewController {
-                UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
-            }
-
-            func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
         }
     }
+
+    // MARK: - Actions
+
+    private var deviceLabel: String {
+        let model = UIDevice.current.model
+        guard includeDeviceName else { return model }
+        return "\(model) (\(UIDevice.current.name))"
+    }
+
+    private var syncStatusDescription: String {
+        let status = syncSettings.isEnabled
+            ? (syncSettings.isEstablished ? "Connected" : "Connecting")
+            : "Off"
+        return "\(roleDescription) • \(syncSettings.connectionMethod.rawValue) • \(status)"
+    }
+
+    private var roleDescription: String {
+        switch syncSettings.role {
+        case .parent: return "Parent"
+        case .child: return "Child"
+        }
+    }
+
+    private func copyDiagnostics() {
+        UIPasteboard.general.string = makeDiagnosticsSnapshot()
+        Haptics.light()
+        withAnimation(.easeInOut(duration: 0.2)) { copyConfirmationVisible = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            withAnimation(.easeInOut(duration: 0.2)) { copyConfirmationVisible = false }
+        }
+    }
+
+    private func shareDiagnostics() {
+        guard let url = makeDiagnosticsFileURL() else { return }
+        shareItem = ShareItem(url: url)
+    }
+
+    private func sendReport() {
+        guard sendState != .sending else { return }
+
+        sendState = .sending
+        Haptics.light()
+
+        let diagnostics = makeDiagnosticsSnapshot()
+        let notes = reportNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let eventId = SentrySDK.capture(message: "User report") { scope in
+            scope.setTag(value: "manual_report", key: "source")
+            scope.setContext(value: ["snapshot": diagnostics], key: "diagnostics")
+            if !notes.isEmpty {
+                scope.setContext(value: ["notes": notes], key: "user_notes")
+            }
+            if let data = diagnostics.data(using: .utf8) {
+                let attachment = Attachment(
+                    data: data,
+                    filename: "SyncTimer-Diagnostics.txt",
+                    contentType: "text/plain"
+                )
+                scope.addAttachment(attachment)
+            }
+        }
+
+        let idString = eventId.sentryIdString
+        lastEventId = idString
+
+        // Show Event ID ephemerally in the hero.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) {
+            if lastEventId == idString { lastEventId = nil }
+        }
+
+        // sending -> sent -> idle (with “magic replace” in the icon)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            sendState = .sent
+            Haptics.light()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                sendState = .idle
+            }
+        }
+    }
+
+    private func copyEventId() {
+        guard let lastEventId else { return }
+        UIPasteboard.general.string = lastEventId
+        Haptics.light()
+    }
+
+    private func openSystemSettings(urlString: String) {
+        guard let url = URL(string: urlString) else { return }
+        UIApplication.shared.open(url) { success in
+            guard !success else { return }
+            if let fallback = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(fallback)
+            }
+        }
+    }
+
+    private func makeDiagnosticsFileURL() -> URL? {
+        let diagnostics = makeDiagnosticsSnapshot()
+        let fileName = "SyncTimer-Diagnostics.txt"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        do {
+            try diagnostics.write(to: url, atomically: true, encoding: .utf8)
+            return url
+        } catch {
+            return nil
+        }
+    }
+
+    private func makeDiagnosticsSnapshot() -> String {
+        var lines: [String] = []
+        lines.append("SyncTimer Diagnostics")
+        lines.append("Version: \(version) (\(build))")
+        lines.append("iOS: \(UIDevice.current.systemVersion)")
+        lines.append("Device: \(UIDevice.current.model)")
+        if includeDeviceName {
+            lines.append("Device Name: \(UIDevice.current.name)")
+        }
+        lines.append("Theme: \(appSettings.appTheme.rawValue.capitalized)")
+        lines.append("Flash Color: \(flashColorDescription())")
+        lines.append("Reduce Motion: \(UIAccessibility.isReduceMotionEnabled ? "On" : "Off")")
+        lines.append("Sync Role: \(roleDescription)")
+        lines.append("Sync Method: \(syncSettings.connectionMethod.rawValue)")
+        lines.append("Sync Enabled: \(syncSettings.isEnabled ? "On" : "Off")")
+        lines.append("Sync Established: \(syncSettings.isEstablished ? "Yes" : "No")")
+        return lines.joined(separator: "\n")
+    }
+
+    private func flashColorDescription() -> String {
+        let uiColor = UIColor(appSettings.flashColor)
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        if uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) {
+            return String(format: "#%02X%02X%02X", Int(red * 255), Int(green * 255), Int(blue * 255))
+        }
+        return "Custom"
+    }
+
+    // MARK: - ShareSheet
+
+    private struct ShareItem: Identifiable {
+        let id = UUID()
+        let url: URL
+    }
+
+    private struct ShareSheet: UIViewControllerRepresentable {
+        let activityItems: [Any]
+        func makeUIViewController(context: Context) -> UIActivityViewController {
+            UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+        }
+        func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+    }
+
+    // MARK: - Presentation defaults
+
+    private struct PresentationDefaults: ViewModifier {
+        func body(content: Content) -> some View {
+            if #available(iOS 16.0, *) {
+                content
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            } else {
+                content
+            }
+        }
+    }
+
+    }
+
+    
 
     var body: some View {
         

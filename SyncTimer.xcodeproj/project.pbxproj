@@ -752,7 +752,7 @@
 		55C024B5B385485D9CF82DF3 /* Upload dSYMs to Sentry (non-blocking) */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
+			buildActionMask = 12;
 			files = (
 			);
 			inputPaths = (
