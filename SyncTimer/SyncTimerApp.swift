@@ -9019,19 +9019,19 @@ struct TimerBehaviorPage: View {
             .padding(.leading, 0)
             .lineLimit(1)
 
-#if DEBUG
-    Divider()
-        .padding(.vertical, 4)
-
-    Toggle("Simulate Child Mode", isOn: $appSettings.simulateChildMode)
-        .toggleStyle(SwitchToggleStyle(tint: appSettings.flashColor))
-        .font(.custom("Roboto-Regular", size: 16))
-    Text("Applies incoming sync updates locally to preview child rendering.")
-        .font(.custom("Roboto-Light", size: 12))
-        .foregroundColor(.secondary)
-        .padding(.leading, 0)
-        .lineLimit(2)
-#endif
+          //#if DEBUG
+//    Divider()
+//        .padding(.vertical, 4)
+          //
+          //    Toggle("Simulate Child Mode", isOn: $appSettings.simulateChildMode)
+          //        .toggleStyle(SwitchToggleStyle(tint: appSettings.flashColor))
+          //        .font(.custom("Roboto-Regular", size: 16))
+          //   Text("Applies incoming sync updates locally to preview child rendering.")
+          //      .font(.custom("Roboto-Light", size: 12))
+          //      .foregroundColor(.secondary)
+          //     .padding(.leading, 0)
+          //      .lineLimit(2)
+          //#endif
     }
   }
 
@@ -12910,6 +12910,16 @@ struct AboutPage: View {
             .clipShape(shape)
         }
     }
+    
+    private struct PressScaleStyle: ButtonStyle {
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .scaleEffect(configuration.isPressed ? 0.985 : 1)
+                .opacity(configuration.isPressed ? 0.94 : 1)
+                .animation(.spring(response: 0.25, dampingFraction: 0.85), value: configuration.isPressed)
+        }
+    }
+
 
     private struct TroubleshootSheet: View {
         @EnvironmentObject private var appSettings: AppSettings
@@ -12952,41 +12962,21 @@ struct AboutPage: View {
         case .sent: return "checkmark"
         }
     }
+        
+        private var troubleshootHeader: some View {
+            VStack(spacing: 2) {
+                Text("Report a Bug")
+                    .font(.headline) // reads like a real sheet title
 
-    private var heroCard: some View {
-        let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
-
-        return VStack(alignment: .leading, spacing: 6) {
-            Text("Troubleshooting")
-                .font(.title3.weight(.semibold))
-
-            Text("Send a report with diagnostics and an Event ID.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            if let lastEventId {
-                Text("Event ID: \(lastEventId)")
-                    .font(.system(.footnote, design: .monospaced))
+                Text("Send a report with diagnostics and an Event ID.")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .padding(.top, 4)
+                    .lineLimit(2)
             }
+            .multilineTextAlignment(.center)
+            .accessibilityElement(children: .combine)
         }
-        .padding(14)
-        .background {
-            if #available(iOS 26.0, *) {
-                shape
-                    .fill(Color.clear)
-                    .glassEffect(.regular, in: shape)
-                    .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
-            } else {
-                shape
-                    .fill(.ultraThinMaterial)
-                    .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
-            }
-        }
-        .clipShape(shape)
-    }
+
 
     private var notesCard: some View {
         let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -13037,40 +13027,67 @@ struct AboutPage: View {
         .clipShape(shape)
     }
 
-    private var primarySendDrawer: some View {
-        AboutDrawerSurface(tint: appSettings.flashColor) {
-            HStack(alignment: .center, spacing: 10) {
-                // icon with “magic replace” where supported
-                Group {
-                    if #available(iOS 17.0, *) {
-                        Image(systemName: sendIconName)
-                            .contentTransition(.symbolEffect(.replace))
-                    } else {
-                        Image(systemName: sendIconName)
-                    }
-                }
-                .font(.system(size: 15, weight: .semibold))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.white)
-                .frame(width: 22, alignment: .center)
-
-                Text("Send Report")
-                    .font(.custom("Roboto-Regular", size: 15))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .accessibilityHidden(true)
+        private var sendSubtitle: String {
+            switch sendState {
+            case .idle:
+                return "Includes diagnostics. You’ll get an Event ID."
+            case .sending:
+                return "Sending…"
+            case .sent:
+                return "Sent. Event ID shown above."
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 10)
-            .frame(minHeight: 38)
-            .contentShape(Rectangle())
         }
-    }
+
+        private var primarySendDrawer: some View {
+            AboutDrawerSurface(tint: appSettings.flashColor) {
+                HStack(spacing: 12) {
+                    // icon badge (more “button”, less “row”)
+                    ZStack {
+                        Circle().fill(Color.white.opacity(0.18))
+                        Group {
+                            if #available(iOS 17.0, *) {
+                                Image(systemName: sendIconName)
+                                    .contentTransition(.symbolEffect(.replace))
+                            } else {
+                                Image(systemName: sendIconName)
+                            }
+                        }
+                        .font(.system(size: 16, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.white)
+                    }
+                    .frame(width: 36, height: 36)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Send Report")
+                            .font(.custom("Roboto-SemiBold", size: 17))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+
+                        Text(sendSubtitle)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.9))
+                            .lineLimit(2)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.white.opacity(0.9))
+                        .accessibilityHidden(true)
+                }
+                .padding(.vertical, 14)
+                .padding(.horizontal, 14)
+                .frame(minHeight: 64)   // <- the key: not a tiny strip anymore
+                .contentShape(Rectangle())
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Send Report")
+            .accessibilityHint("Review what will be sent, then send a report and receive an Event ID.")
+        }
+
 
     private var privacyCard: some View {
         AboutDrawerSurface {
@@ -13104,7 +13121,20 @@ struct AboutPage: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    heroCard
+                    if let lastEventId {
+                        HStack(spacing: 8) {
+                            Text("Last Event ID")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(lastEventId)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 2)
+                    }
                     notesCard
 
                     Button {
@@ -13114,8 +13144,9 @@ struct AboutPage: View {
                     } label: {
                         primarySendDrawer
                     }
-                    .buttonStyle(.plain)
-
+                    .buttonStyle(PressScaleStyle())
+                    .disabled(sendState == .sending)
+                    
                     privacyCard
 
                     disclosureCard(
@@ -13181,6 +13212,9 @@ struct AboutPage: View {
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    troubleshootHeader
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
@@ -13363,30 +13397,20 @@ struct AboutPage: View {
         let diagnostics: String
         let onConfirmSend: () -> Void
 
-        private var hero: some View {
-            let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
-            return VStack(alignment: .leading, spacing: 6) {
+        private var reviewHeader: some View {
+            VStack(spacing: 2) {
                 Text("Review Report")
-                    .font(.title3.weight(.semibold))
+                    .font(.headline)
+
                 Text("Confirm what will be sent. You’ll receive an Event ID.")
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
-            .padding(14)
-            .background {
-                if #available(iOS 26.0, *) {
-                    shape
-                        .fill(Color.clear)
-                        .glassEffect(.regular, in: shape)
-                        .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
-                } else {
-                    shape
-                        .fill(.ultraThinMaterial)
-                        .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 1))
-                }
-            }
-            .clipShape(shape)
+            .multilineTextAlignment(.center)
+            .accessibilityElement(children: .combine)
         }
+
 
         private var summaryCard: some View {
             let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -13489,7 +13513,6 @@ struct AboutPage: View {
             NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        hero
                         summaryCard
 
                         Button {
@@ -13507,6 +13530,9 @@ struct AboutPage: View {
                 .navigationTitle("")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
+                    ToolbarItem(placement: .principal) {
+                        reviewHeader
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Cancel") { dismiss() }
                     }

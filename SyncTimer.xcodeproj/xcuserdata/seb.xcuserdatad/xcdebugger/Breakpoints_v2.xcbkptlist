@@ -8,15 +8,15 @@
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
             uuid = "64606CC7-74F0-4508-9A89-592BED0F6D29"
-            shouldBeEnabled = "Yes"
+            shouldBeEnabled = "No"
             ignoreCount = "0"
             continueAfterRunningActions = "No"
             filePath = "SyncTimer/SyncTimerApp.swift"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "15476"
-            endingLineNumber = "15476"
-            landmarkName = "currentWhatsNewEntry"
+            startingLineNumber = "15502"
+            endingLineNumber = "15502"
+            landmarkName = "innerBody"
             landmarkType = "24">
          </BreakpointContent>
       </BreakpointProxy>
