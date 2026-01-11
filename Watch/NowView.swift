@@ -6,10 +6,13 @@ struct WatchNowRenderModel {
     let phaseLabel: String
     let isStale: Bool
     let stopLine: String?
+    let stopDigits: String
+    let isStopActive: Bool
     let canStartStop: Bool
     let canReset: Bool
     let lockHint: String?
     let linkIconName: String?
+    let faceEvents: [WatchFaceEvent]
     let accent: Color
 }
 
@@ -47,6 +50,9 @@ struct NowView: View {
     @State private var preferHours: Bool = UserDefaults.standard.bool(forKey: "SyncTimerPreferHours")
 
     private var isCounting: Bool { phaseStr == "running" || phaseStr == "countdown" }
+    private var resolvedShowHours: Bool {
+        latestMessage?.showHours ?? preferHours
+    }
 
     var body: some View {
         let renderModel = makeRenderModel()
@@ -147,14 +153,17 @@ struct NowView: View {
         }()
 
         return WatchNowRenderModel(
-            formattedMain: formatWithCC(baseMain, preferHours: preferHours),
+            formattedMain: formatWithCC(baseMain, preferHours: resolvedShowHours),
             phaseLabel: phaseLabel,
             isStale: isStale,
             stopLine: stopLine,
+            stopDigits: formatWithCC(max(0, baseStop), preferHours: false),
+            isStopActive: stopActive,
             canStartStop: canStartStop,
             canReset: canReset,
             lockHint: lockHint,
             linkIconName: linkIconName(for: latestMessage),
+            faceEvents: makeFaceEvents(message: latestMessage),
             accent: appSettings.flashColor
         )
     }
@@ -176,11 +185,14 @@ struct NowView: View {
         WatchTimerProviders(
             nowUptimeProvider: { ProcessInfo.processInfo.systemUptime },
             formattedStringProvider: { nowUptime in
-                formatWithCC(currentMain(nowUptime: nowUptime), preferHours: preferHours)
+                formatWithCC(currentMain(nowUptime: nowUptime), preferHours: resolvedShowHours)
             },
             stopLineProvider: { nowUptime in
                 guard stopActive else { return nil }
                 return "Stop " + formatWithCC(currentStop(nowUptime: nowUptime), preferHours: false)
+            },
+            stopDigitsProvider: { nowUptime in
+                formatWithCC(currentStop(nowUptime: nowUptime), preferHours: false)
             }
         )
     }
@@ -236,6 +248,25 @@ struct NowView: View {
         let cues = (message.cueEvents ?? []).map { WatchEventDot(kind: .cue, time: $0.cueTime) }
         let restarts = (message.restartEvents ?? []).map { WatchEventDot(kind: .restart, time: $0.restartTime) }
         return (stops + cues + restarts).sorted { $0.time < $1.time }
+    }
+
+    private func makeFaceEvents(message: TimerMessage?) -> [WatchFaceEvent] {
+        guard let message else { return [] }
+        var events = [WatchFaceEvent]()
+        events.append(contentsOf: message.stopEvents.map { WatchFaceEvent(kind: .stop, time: $0.eventTime) })
+        events.append(contentsOf: (message.cueEvents ?? []).map { WatchFaceEvent(kind: .cue, time: $0.cueTime) })
+        events.append(contentsOf: (message.restartEvents ?? []).map { WatchFaceEvent(kind: .restart, time: $0.restartTime) })
+        if let display = message.display {
+            switch display.kind {
+            case .message:
+                events.append(WatchFaceEvent(kind: .message, time: message.timestamp))
+            case .image:
+                events.append(WatchFaceEvent(kind: .image, time: message.timestamp))
+            case .none:
+                break
+            }
+        }
+        return events.sorted { $0.time > $1.time }
     }
 
     private func currentMain(nowUptime: TimeInterval) -> TimeInterval {
