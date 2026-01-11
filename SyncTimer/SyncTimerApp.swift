@@ -5659,6 +5659,13 @@ struct MainScreen: View {
                         case .network:   return "network"
                         }
                     }()
+                    let roleStr: String = (syncSettings.role == .parent) ? "parent" : "child"
+                    let controlsEnabled = (syncSettings.role == .parent) && !(syncSettings.parentLockEnabled ?? false)
+                    let syncLamp: String = {
+                        if syncSettings.isEnabled && syncSettings.isEstablished { return "green" }
+                        if syncSettings.isEnabled { return "amber" }
+                        return "red"
+                    }()
                     
                     // Include live event snapshot so children stay in sync while running.
                     let snapshot = encodeCurrentEvents()
@@ -5673,13 +5680,13 @@ struct MainScreen: View {
                         isStopActive: stopActive,
                         stopRemainingActive: stopRemaining,
                         cueEvents: snapshot.cues,
-                        restartEvents: snapshot.restarts
-                        // If you extended TimerMessage with role/link/controlsEnabled/etc, you can also pass them here:
-                        // , role: (syncSettings.role == .parent ? "parent" : "child")
-                        // , link: linkStr
-                        // , controlsEnabled: (syncSettings.role == .parent && syncSettings.isEnabled && syncSettings.isEstablished && !(syncSettings.parentLockEnabled ?? false))
-                        // , syncLamp: (syncSettings.isEnabled && syncSettings.isEstablished ? "green" : (syncSettings.isEnabled ? "amber" : "red"))
-                        // , flashNow: flashZero
+                        restartEvents: snapshot.restarts,
+                        formattedMainTime: formatTimerString(displayMainTime(), alwaysShowHours: settings.showHours),
+                        role: roleStr,
+                        link: linkStr,
+                        controlsEnabled: controlsEnabled,
+                        syncLamp: syncLamp,
+                        flashNow: flashZero
                     )
                     
                     ConnectivityManager.shared.send(tm)

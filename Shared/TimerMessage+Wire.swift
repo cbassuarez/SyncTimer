@@ -61,11 +61,15 @@ public struct TimerMessage: Codable, Equatable {
         public var stopRemainingActive: TimeInterval?
     
     // ── NEW (all optional; safe for older builds) ─────────────────────
+        /// Formatted main timer string (matches TimerCard formatting)
+        public var formattedMainTime: String?
+        /// Optional secondary timer line, if provided by the parent
+        public var formattedSubTime: String?
         /// "parent" | "child"
         public var role: String?
         /// "bonjour" | "nearby" | "network" | "unreachable"
         public var link: String?
-        /// true iff role==parent AND link is connected AND not parentLockEnabled
+        /// true iff role==parent AND not parentLockEnabled
         public var controlsEnabled: Bool?
         /// "green" | "amber" | "red" — mirrors your Sync lamp
         public var syncLamp: String?
@@ -93,6 +97,8 @@ public struct TimerMessage: Codable, Equatable {
             restartEvents: [RestartEventWire]? = nil,
             sheetLabel: String? = nil,
             sheetID: String? = nil,
+                      formattedMainTime: String? = nil,
+                      formattedSubTime: String? = nil,
                       role: String? = nil,
                       link: String? = nil,
                       controlsEnabled: Bool? = nil,
@@ -118,6 +124,8 @@ public struct TimerMessage: Codable, Equatable {
                 self.restartEvents = restartEvents
         self.sheetLabel = sheetLabel
         self.sheetID = sheetID
+        self.formattedMainTime = formattedMainTime
+        self.formattedSubTime = formattedSubTime
         self.role              = role
                   self.link              = link
                   self.controlsEnabled   = controlsEnabled
