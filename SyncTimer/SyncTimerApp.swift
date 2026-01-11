@@ -14337,7 +14337,7 @@ struct AboutPage: View {
                     .accessibilityLabel("Send Report")
                     .accessibilityHint("Slide to confirm sending diagnostics and optional screenshot.")
                     .accessibilityValue(phase == .idle ? "Not sent" : phase == .sending ? "Sending" : "Sent")
-                    .accessibilityAction(.activate) {
+                    .accessibilityAction {
                         confirmSend(maxOffset: metrics.maxOffset)
                     }
                 }
