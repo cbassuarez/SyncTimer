@@ -121,10 +121,6 @@ extension ConnectivityManager: WCSessionDelegate {
     public func sessionDidDeactivate(_ session: WCSession)     { session.activate() }
     #endif
 
-    #if os(watchOS)
-    public func sessionDidBecomeInactive(_ session: WCSession) { session.activate() }
-    public func sessionDidDeactivate(_ session: WCSession)     { session.activate() }
-    #endif
 
     public func session(_ session: WCSession,
                         didReceiveApplicationContext applicationContext: [String : Any]) {
