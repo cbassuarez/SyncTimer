@@ -15121,7 +15121,7 @@ struct AboutPage: View {
                     HStack(spacing: 10) {
 
                         if #available(iOS 16.0, *) {
-                            ShareLink(item: URL(string: "https://apps.apple.com/app/id123456789")!) {
+                            ShareLink(item: URL(string: "https://apps.apple.com/app/id6747689247")!) {
                                 HStack(spacing: 8) {
                                     Image(systemName: "square.and.arrow.up")
                                         .font(.system(size: 14, weight: .semibold))
@@ -15140,7 +15140,7 @@ struct AboutPage: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         } else {
                             Button {
-                                UIApplication.shared.open(URL(string: "https://apps.apple.com/app/id123456789")!)
+                                UIApplication.shared.open(URL(string: "https://apps.apple.com/app/id6747689247")!)
                             } label: {
                                 HStack(spacing: 8) {
                                     Image(systemName: "square.and.arrow.up")
@@ -15161,7 +15161,7 @@ struct AboutPage: View {
                         }
 
                         Button {
-                            UIApplication.shared.open(URL(string: "itms-apps://itunes.apple.com/app/id123456789")!)
+                            UIApplication.shared.open(URL(string: "itms-apps://itunes.apple.com/app/id6747689247")!)
                         } label: {
                             HStack(spacing: 8) {
                                 Image(systemName: "star.fill")
@@ -16700,7 +16700,7 @@ innerBody
         .environmentObject(childRoomsStore)
     }
 
-    private static let appStoreURLString = "https://apps.apple.com/app/id0000000000"
+    private static let appStoreURLString = "https://apps.apple.com/app/id6747689247"
 
     private var currentWhatsNewEntry: WhatsNewVersionEntry? {
         whatsNewIndex?.entry(for: WhatsNewController.currentVersionString)
