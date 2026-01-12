@@ -30,6 +30,12 @@ enum WatchRole: String {
     }
 }
 
+enum WatchCueSheetIndexSource: String {
+    case phoneIndex
+    case cache
+    case none
+}
+
 struct WatchCueSheetSummary: Identifiable {
     let id: UUID
     let name: String
@@ -47,6 +53,9 @@ struct WatchCueSheetsModel {
     let sheets: [WatchCueSheetSummary]
     let selectedSheetID: UUID?
     let childCount: Int?
+    let cueSheetIndexSource: WatchCueSheetIndexSource
+    let activationStateLabel: String
+    let isReachable: Bool?
 }
 
 struct WatchTimerProviders {
@@ -595,6 +604,11 @@ struct WatchCueSheetsPage: View {
     let renderModel: WatchNowRenderModel
     let cueSheetsModel: WatchCueSheetsModel
     @Binding var selectedSheetID: UUID?
+    let requestCueSheetIndex: () -> Void
+
+    #if DEBUG
+    private static let showCueSheetDebugOverlay = false
+    #endif
 
     var body: some View {
         VStack(spacing: 10) {
@@ -604,6 +618,9 @@ struct WatchCueSheetsPage: View {
                     chipRow
                     primaryPanel
                     footerRow
+                    #if DEBUG
+                    cueSheetDebugOverlay
+                    #endif
                 }
                 .padding(.top, 4)
             }
@@ -656,6 +673,12 @@ struct WatchCueSheetsPage: View {
                 ConnectivityManager.shared.send(ControlRequest(.loadCueSheet, cueSheetID: summary.id))
             }
 
+            Button(action: requestCueSheetIndex) {
+                Text("Refresh List")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+
             if cueSheetsModel.loadedSheetName != nil {
                 Button(action: {
                     ConnectivityManager.shared.send(ControlRequest(.dismissCueSheet))
@@ -677,6 +700,12 @@ struct WatchCueSheetsPage: View {
             cueSheetList(allowsSelection: true, actionLabel: "Select") { summary in
                 selectedSheetID = summary.id
             }
+
+            Button(action: requestCueSheetIndex) {
+                Text("Refresh List")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
 
             Button(action: {
                 if let selectedSheetID {
@@ -759,6 +788,18 @@ struct WatchCueSheetsPage: View {
             .opacity(0.6)
         }
     }
+
+    #if DEBUG
+    @ViewBuilder
+    private var cueSheetDebugOverlay: some View {
+        if Self.showCueSheetDebugOverlay {
+            let reachableText = cueSheetsModel.isReachable.map { $0 ? "reachable" : "notReachable" } ?? "nil"
+            Text("sheets:\(cueSheetsModel.sheets.count) source:\(cueSheetsModel.cueSheetIndexSource.rawValue) wc:\(cueSheetsModel.activationStateLabel) reach:\(reachableText)")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+    }
+    #endif
 
     private var eventKinds: [WatchFaceEventKind] {
         let kinds = renderModel.faceEvents.prefix(5).map(\.kind)

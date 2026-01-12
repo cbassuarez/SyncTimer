@@ -16,6 +16,7 @@ public final class ConnectivityManager: NSObject, ObservableObject {
     private var lastTimerMessage: TimerMessage?
     #if os(watchOS)
     private var lastAppliedSeq: UInt64 = 0
+    private var lastCueSheetIndexRequestUptime: TimeInterval = -10
     #endif
 
     @Published public private(set) var incoming: TimerMessage?
@@ -106,6 +107,16 @@ public final class ConnectivityManager: NSObject, ObservableObject {
 
     public func requestSnapshot(origin: String = "watchOS") {
         send(ControlRequest(.requestSnapshot, origin: origin))
+    }
+
+    public func requestCueSheetIndex(origin: String = "watchOS") {
+        #if os(watchOS)
+        let now = ProcessInfo.processInfo.systemUptime
+        let cooldown: TimeInterval = 2.0
+        guard now - lastCueSheetIndexRequestUptime >= cooldown else { return }
+        lastCueSheetIndexRequestUptime = now
+        #endif
+        send(ControlRequest(.requestCueSheetIndex, origin: origin))
     }
 
     func sendSyncEnvelope(_ envelope: SyncEnvelope) {
