@@ -517,7 +517,15 @@ struct NowView: View {
 
     @ViewBuilder
     private func displayOverlay(nowUptime: TimeInterval) -> some View {
-        guard let displayState = resolvedDisplayState(from: latestMessage) else { EmptyView() }
+        Group {
+            if let displayState = resolvedDisplayState(from: latestMessage) {
+                overlayContent(for: displayState, nowUptime: nowUptime)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func overlayContent(for displayState: TimerMessage.DisplayState, nowUptime: TimeInterval) -> some View {
         switch displayState.kind {
         case .cueFlash:
             if isCueFlashActive(displayState: displayState, nowUptime: nowUptime) {
@@ -601,24 +609,21 @@ struct NowView: View {
     private func debugOverlay(nowUptime: TimeInterval) -> some View {
         let displayState = resolvedDisplayState(from: latestMessage)
         let eventKinds = latestMessage?.recentEventStamps?.map { $0.kind.rawValue }.joined(separator: ", ") ?? "none"
-        let assetStatus: String = {
-            guard let displayState,
-                  displayState.kind == .image,
-                  let assetID = displayState.assetID else {
-                return "asset: n/a"
-            }
-            let hit = WatchAssetCache.shared.image(for: assetID) != nil
-            let status = hit ? "hit" : "miss"
-            return "asset: \(status) \(assetID.uuidString.prefix(8))"
-        }()
+        let stateSeqLine = "stateSeq: \(latestMessage?.stateSeq.map(String.init) ?? "nil")"
+        let displayIDLine = "displayID: \(displayState?.displayID.map(String.init) ?? "nil")"
+        let displayKindLine = "displayKind: \(displayState?.kind.rawValue ?? "nil")"
+        let recentLine = "recent: \(eventKinds)"
+        let assetStatus = assetStatusLine(displayState: displayState)
+        let lastReqLine = "lastReq: \(lastRequestedAssetID?.uuidString.prefix(8) ?? "nil")"
+        let uptimeLine = String(format: "uptime: %.2f", nowUptime)
         return VStack(alignment: .leading, spacing: 4) {
-            Text("stateSeq: \(latestMessage?.stateSeq.map(String.init) ?? "nil")")
-            Text("displayID: \(displayState?.displayID.map(String.init) ?? "nil")")
-            Text("displayKind: \(displayState?.kind.rawValue ?? "nil")")
-            Text("recent: \(eventKinds)")
+            Text(stateSeqLine)
+            Text(displayIDLine)
+            Text(displayKindLine)
+            Text(recentLine)
             Text(assetStatus)
-            Text("lastReq: \(lastRequestedAssetID?.uuidString.prefix(8) ?? "nil")")
-            Text(String(format: "uptime: %.2f", nowUptime))
+            Text(lastReqLine)
+            Text(uptimeLine)
         }
         .font(.caption2.monospaced())
         .padding(6)
@@ -627,6 +632,17 @@ struct NowView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(.top, 6)
         .padding(.leading, 6)
+    }
+
+    private func assetStatusLine(displayState: TimerMessage.DisplayState?) -> String {
+        guard let displayState,
+              displayState.kind == .image,
+              let assetID = displayState.assetID else {
+            return "asset: n/a"
+        }
+        let hit = WatchAssetCache.shared.image(for: assetID) != nil
+        let status = hit ? "hit" : "miss"
+        return "asset: \(status) \(assetID.uuidString.prefix(8))"
     }
     #endif
 }
