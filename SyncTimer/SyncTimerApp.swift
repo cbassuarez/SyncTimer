@@ -4402,42 +4402,48 @@ struct MainScreen: View {
         }
     }
 
-    private func refreshWatchCueSheetSummaries() {
+    private func buildCueSheetIndex(completion: @escaping ([CueSheetSummaryWire]) -> Void) {
         let index = CueLibraryStore.shared.index
-        let recentIDs = Array(index.recents.prefix(3))
-        let recentSet = Set(recentIDs)
         let metas = Array(index.sheets.values)
         guard !metas.isEmpty else {
-            watchCueSheetSummaries = []
-            watchCueSheetIndexDirty = true
+            completion([])
             return
         }
         DispatchQueue.global(qos: .utility).async {
-            let makeSummary: (CueLibraryIndex.SheetMeta, Bool) -> TimerMessage.WatchCueSheetSummary = { meta, isRecent in
-                let sheet = CueLibraryStore.shared.sheets[meta.id] ?? (try? CueLibraryStore.shared.load(meta: meta))
-                let eventCount = sheet?.events.count ?? 0
-                let estDuration = sheet?.events.map { $0.at + ($0.holdSeconds ?? 0) }.max()
-                return TimerMessage.WatchCueSheetSummary(
-                    id: meta.id,
-                    title: meta.title,
-                    eventCount: eventCount,
-                    estDurationSec: estDuration,
-                    isRecent: isRecent
-                )
-            }
-            let recentSummaries = recentIDs.compactMap { id -> TimerMessage.WatchCueSheetSummary? in
-                guard let meta = index.sheets[id] else { return nil }
-                return makeSummary(meta, true)
-            }
-            let remainingSummaries = metas
-                .filter { !recentSet.contains($0.id) }
+            let summaries = metas
                 .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-                .map { makeSummary($0, false) }
-            let orderedSummaries = recentSummaries + remainingSummaries
+                .map { meta -> CueSheetSummaryWire in
+                    let sheet = CueLibraryStore.shared.sheets[meta.id] ?? (try? CueLibraryStore.shared.load(meta: meta))
+                    let eventCount = sheet?.events.count ?? 0
+                    return CueSheetSummaryWire(
+                        id: meta.id,
+                        title: meta.title,
+                        eventCount: eventCount,
+                        modifiedAt: meta.modified.timeIntervalSince1970
+                    )
+                }
             DispatchQueue.main.async {
-                watchCueSheetSummaries = orderedSummaries
-                watchCueSheetIndexDirty = true
+                completion(summaries)
             }
+        }
+    }
+
+    private func scheduleCueSheetIndexSend(origin: String) {
+        cueSheetIndexSendWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.sendCueSheetIndex(origin: origin)
+        }
+        cueSheetIndexSendWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: work)
+    }
+
+    private func sendCueSheetIndex(origin: String) {
+        buildCueSheetIndex { summaries in
+            let payload = CueSheetIndexWire(items: summaries)
+            ConnectivityManager.shared.send(payload)
+            #if DEBUG
+            print("[WC cue index] origin=\(origin) count=\(summaries.count)")
+            #endif
         }
     }
 
@@ -4489,15 +4495,6 @@ struct MainScreen: View {
             return resolved
         }()
         let activeCueSheetTitle = cueBadge.label ?? loadedCueSheet?.title ?? activeCueSheet?.title
-        let includeCueSheetIndex = watchCueSheetIndexDirty
-            || origin == "requestSnapshot"
-            || origin == "snapshotRequest"
-            || origin == "requestCueSheetIndex"
-            || origin == "page.4"
-        let cueSheetsPayload = includeCueSheetIndex ? watchCueSheetSummaries : nil
-        if includeCueSheetIndex {
-            watchCueSheetIndexDirty = false
-        }
         let childCount = isParent
             ? syncSettings.peers.filter { $0.role == .child }.count
             : nil
@@ -4529,7 +4526,6 @@ struct MainScreen: View {
             nextEventInterval: nextEventSnapshot.interval,
             nextEventKind: nextEventSnapshot.kind,
             nextEventStepped: false,
-            watchCueSheets: cueSheetsPayload,
             watchActiveCueSheetID: activeCueSheetIDPayload,
             watchActiveCueSheetTitle: activeCueSheetTitle,
             watchIsCueBroadcasting: cueBadge.broadcast,
@@ -4542,6 +4538,7 @@ struct MainScreen: View {
             // , flashNow: flashZero
         )
         tm.role = roleString
+        tm.connected = peerConnected
         tm.link = linkString
         #if DEBUG
         print("[WC snapshot] origin=\(origin) phase=\(phaseString) remaining=\(String(format: "%.2f", tm.remaining)) stopActive=\(tm.isStopActive ?? false) stopRemaining=\(String(format: "%.2f", tm.stopRemainingActive ?? 0)) stateSeq=\(seq)")
@@ -4664,8 +4661,7 @@ struct MainScreen: View {
     @State private var events: [Event] = []
     @StateObject private var cueDisplay = CueDisplayController()
     @EnvironmentObject private var cueBadge: CueBadgeState
-    @State private var watchCueSheetSummaries: [TimerMessage.WatchCueSheetSummary] = []
-    @State private var watchCueSheetIndexDirty: Bool = false
+    @State private var cueSheetIndexSendWork: DispatchWorkItem? = nil
     @State private var rawStops: [StopEvent] = []
     @State private var stopActive: Bool = false
     @State private var stopRemaining: TimeInterval = 0
@@ -5882,12 +5878,10 @@ struct MainScreen: View {
                             let unlocked = !(syncSettings.parentLockEnabled ?? false)
                             switch cmd.command {
                             case .requestSnapshot:
-                                watchCueSheetIndexDirty = true
                                 sendWatchSnapshot(origin: "requestSnapshot")
                                 return
                             case .requestCueSheetIndex:
-                                watchCueSheetIndexDirty = true
-                                sendWatchSnapshot(origin: "requestCueSheetIndex")
+                                sendCueSheetIndex(origin: "requestCueSheetIndex")
                                 return
                             case .start, .stop, .reset, .loadCueSheet, .dismissCueSheet, .setCueBroadcast:
                                 break
@@ -6037,7 +6031,12 @@ struct MainScreen: View {
                     mapEvents(from: sheet)
                 }
                 .onReceive(CueLibraryStore.shared.$index) { _ in
-                    refreshWatchCueSheetSummaries()
+                    scheduleCueSheetIndexSend(origin: "cueLibraryChanged")
+                }
+                .onReceive(ConnectivityManager.shared.$isReachable.removeDuplicates()) { reachable in
+                    if reachable {
+                        sendCueSheetIndex(origin: "watchReachable")
+                    }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .whatsNewOpenCueSheets)) { note in
                     if let shouldCreate = note.userInfo?["createBlank"] as? Bool, shouldCreate {
@@ -6081,7 +6080,7 @@ struct MainScreen: View {
                                 }
                 .onAppear {
                     syncPresentationState()
-                    refreshWatchCueSheetSummaries()
+                    scheduleCueSheetIndexSend(origin: "appLaunch")
                 }
                 .onChange(of: showCueSheets) { _ in
                     syncPresentationState()

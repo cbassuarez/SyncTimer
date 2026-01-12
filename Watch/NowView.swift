@@ -31,6 +31,7 @@ struct NowView: View {
     @EnvironmentObject private var appSettings: AppSettings
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+    @ObservedObject private var connectivity = ConnectivityManager.shared
 
     // Raw snapshot payload
     @State private var phaseStr: String = "idle"      // "idle" | "countdown" | "running" | "paused"
@@ -316,17 +317,19 @@ struct NowView: View {
     }
 
     private func makeCueSheetsModel() -> WatchCueSheetsModel {
-        let role = latestMessage?.role ?? "parent"
+        let role = latestMessage?.role?.lowercased() ?? "solo"
         let isChild = role == "child"
-        let isConnected = latestMessage?.watchPeerConnected ?? false
+        let isConnected = latestMessage?.connected ?? latestMessage?.watchPeerConnected ?? false
         let roleLabel: String = {
             switch role {
             case "child":
                 return "CHILD"
+            case "parent":
+                return "PARENT"
             case "solo":
                 return "SOLO"
             default:
-                return "PARENT"
+                return "SOLO"
             }
         }()
         return WatchCueSheetsModel(
@@ -338,7 +341,7 @@ struct NowView: View {
             isConnected: isConnected,
             activeSheetID: latestMessage?.watchActiveCueSheetID,
             activeSheetTitle: latestMessage?.watchActiveCueSheetTitle,
-            cueSheets: latestMessage?.watchCueSheets ?? [],
+            cueSheets: connectivity.cueSheetIndex,
             isBroadcasting: latestMessage?.watchIsCueBroadcasting ?? false,
             connectedChildrenCount: latestMessage?.watchConnectedChildrenCount
         )

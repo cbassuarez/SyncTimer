@@ -71,6 +71,8 @@ public struct TimerMessage: Codable, Equatable {
     // ── NEW (all optional; safe for older builds) ─────────────────────
         /// "parent" | "child"
         public var role: String?
+        /// true iff peer sync link established (parent/child)
+        public var connected: Bool?
         /// "bonjour" | "nearby" | "network" | "unreachable"
         public var link: String?
         /// true iff role==parent AND link is connected AND not parentLockEnabled
@@ -131,6 +133,7 @@ public struct TimerMessage: Codable, Equatable {
             sheetLabel: String? = nil,
             sheetID: String? = nil,
                       role: String? = nil,
+                      connected: Bool? = nil,
                       link: String? = nil,
                       controlsEnabled: Bool? = nil,
                       syncLamp: String? = nil,
@@ -176,6 +179,7 @@ public struct TimerMessage: Codable, Equatable {
         self.sheetLabel = sheetLabel
         self.sheetID = sheetID
         self.role              = role
+        self.connected         = connected
                   self.link              = link
                   self.controlsEnabled   = controlsEnabled
                   self.syncLamp          = syncLamp
