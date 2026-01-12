@@ -61,6 +61,7 @@ struct NowView: View {
     @State private var preferHours: Bool = UserDefaults.standard.bool(forKey: "SyncTimerPreferHours")
 
     private var isCounting: Bool { phaseStr == "running" || phaseStr == "countdown" }
+    private var isIntegratingMain: Bool { isCounting && !stopActive }
     private var resolvedShowHours: Bool {
         latestMessage?.showHours ?? preferHours
     }
@@ -127,17 +128,23 @@ struct NowView: View {
                 stopActive = msg.isStopActive ?? false
                 snapStop   = msg.stopRemainingActive ?? 0
 
+                let shouldIntegrateMain = isIntegratingMain
+
                 // Estimate main velocity from consecutive snapshots (local monotonic clock)
-                if prevSnapT > 0 {
-                    let dt  = now - prevSnapT
-                    let dv  = snapMain - prevSnapMain
-                    var v   = dt > 0 ? dv / dt : 0
-                    if abs(v) < 0.2 { // noisy/flat → fall back by phase
-                        v = (phaseStr == "countdown") ? -1.0 : (phaseStr == "running" ? 1.0 : 0.0)
+                if shouldIntegrateMain {
+                    if prevSnapT > 0 {
+                        let dt  = now - prevSnapT
+                        let dv  = snapMain - prevSnapMain
+                        var v   = dt > 0 ? dv / dt : 0
+                        if abs(v) < 0.2 { // noisy/flat → fall back by phase
+                            v = (phaseStr == "countdown") ? -1.0 : (phaseStr == "running" ? 1.0 : 0.0)
+                        }
+                        vMain = v.clamped(to: -1.05...1.05)
+                    } else {
+                        vMain = (phaseStr == "countdown") ? -1.0 : 1.0
                     }
-                    vMain = (phaseStr == "paused" || phaseStr == "idle") ? 0.0 : v.clamped(to: -1.05...1.05)
                 } else {
-                    vMain = (phaseStr == "countdown") ? -1.0 : (phaseStr == "running" ? 1.0 : 0.0)
+                    vMain = 0.0
                 }
 
                 // Stop velocity: count down if active
@@ -348,7 +355,8 @@ struct NowView: View {
     }
 
     private func currentMain(nowUptime: TimeInterval) -> TimeInterval {
-        baseMain + vMain * (nowUptime - baseT0)
+        guard isIntegratingMain else { return baseMain }
+        return baseMain + vMain * (nowUptime - baseT0)
     }
 
     private func currentStop(nowUptime: TimeInterval) -> TimeInterval {
