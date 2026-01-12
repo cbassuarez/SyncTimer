@@ -11,6 +11,7 @@
 		961396D22E0D503800B847F3 /* StopEventWire.swift in Resources */ = {isa = PBXBuildFile; fileRef = 961396B22E0D503800B847F3 /* StopEventWire.swift */; };
 		9636A7392E79193100A062B6 /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9640DBA32DF695F0002688A4 /* WatchConnectivity.framework */; };
 		9636A7622E791DBD00A062B6 /* SyncTimerWatch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 9636A7422E791DBB00A062B6 /* SyncTimerWatch Watch App.app */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		9647D64E2F14AAC0000BAE20 /* ConnectivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96F296122E793F130039B071 /* ConnectivityManager.swift */; };
 		967A69002F0DDD1F00FCD067 /* SyncTimerJoinClip.app in Embed App Clips */ = {isa = PBXBuildFile; fileRef = 967A68D92F0DDD1E00FCD067 /* SyncTimerJoinClip.app */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		968E1B0C2E79357500F79392 /* StopEventWire.swift in Sources */ = {isa = PBXBuildFile; fileRef = 961396B22E0D503800B847F3 /* StopEventWire.swift */; };
 		968E1B102E79389800F79392 /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9640DBA32DF695F0002688A4 /* WatchConnectivity.framework */; };
@@ -18,7 +19,6 @@
 		96DF202B2E79312800FFB580 /* TimerMessage+Wire.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96DF20292E79311700FFB580 /* TimerMessage+Wire.swift */; };
 		96F296442E793F130039B071 /* ConnectivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96F296122E793F130039B071 /* ConnectivityManager.swift */; };
 		96F296452E793F130039B071 /* ControlRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96F296132E793F130039B071 /* ControlRequest.swift */; };
-		96F2965D2E793F130039B071 /* ConnectivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96F296122E793F130039B071 /* ConnectivityManager.swift */; };
 		96F2965E2E793F130039B071 /* ControlRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96F296132E793F130039B071 /* ControlRequest.swift */; };
 		96F408E32F133BA3000045BB /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 96F408E22F133BA3000045BB /* Sentry */; };
 /* End PBXBuildFile section */
@@ -135,6 +135,13 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		9647D65A2F14AB2F000BAE20 /* Exceptions for "Watch" folder in "SyncTimer" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				WatchSyncTimerApp.swift,
+			);
+			target = 96DB420C2DE84D160027E9AA /* SyncTimer */;
+		};
 		967A69092F0DDD1F00FCD067 /* Exceptions for "SyncTimerJoinClip" folder in "SyncTimerJoinClip" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -152,18 +159,6 @@
 			);
 			target = 967A68D82F0DDD1E00FCD067 /* SyncTimerJoinClip */;
 		};
-		967A693D2F0DE50900FCD067 /* Exceptions for "Watch" folder in "SyncTimer" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				ExtendedRuntimeKeeper.swift,
-				NowView.swift,
-				WatchAssetCache.swift,
-				WatchNowPages.swift,
-				WatchStubs.swift,
-				WatchSyncTimerApp.swift,
-			);
-			target = 96DB420C2DE84D160027E9AA /* SyncTimer */;
-		};
 		967A693F2F0DE72B00FCD067 /* Exceptions for "SyncTimer" folder in "SyncTimerJoinClip" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -174,6 +169,12 @@
 		968E1B0A2E79329900F79392 /* Exceptions for "Watch" folder in "SyncTimerWatch Watch App" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				ExtendedRuntimeKeeper.swift,
+				NowView.swift,
+				WatchAssetCache.swift,
+				WatchNowPages.swift,
+				WatchStubs.swift,
+				WatchSyncTimerApp.swift,
 			);
 			target = 9636A7412E791DBB00A062B6 /* SyncTimerWatch Watch App */;
 		};
@@ -234,7 +235,7 @@
 		968E1B082E79328D00F79392 /* Watch */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				967A693D2F0DE50900FCD067 /* Exceptions for "Watch" folder in "SyncTimer" target */,
+				9647D65A2F14AB2F000BAE20 /* Exceptions for "Watch" folder in "SyncTimer" target */,
 				968E1B0A2E79329900F79392 /* Exceptions for "Watch" folder in "SyncTimerWatch Watch App" target */,
 			);
 			path = Watch;
@@ -766,7 +767,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				96F2965D2E793F130039B071 /* ConnectivityManager.swift in Sources */,
+				9647D64E2F14AAC0000BAE20 /* ConnectivityManager.swift in Sources */,
 				96F2965E2E793F130039B071 /* ControlRequest.swift in Sources */,
 				968E1B0C2E79357500F79392 /* StopEventWire.swift in Sources */,
 				96DF202B2E79312800FFB580 /* TimerMessage+Wire.swift in Sources */,
