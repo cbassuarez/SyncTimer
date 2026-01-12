@@ -3,6 +3,7 @@ import WatchConnectivity
 #if os(watchOS)
 import WatchKit
 #endif
+import Combine
 
 struct WatchNowRenderModel {
     let formattedMain: String
