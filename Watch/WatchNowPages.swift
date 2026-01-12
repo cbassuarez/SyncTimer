@@ -40,6 +40,7 @@ enum WatchNextEventKind: String {
 
 struct WatchNextEventDialModel {
     let accent: Color
+    let flashColorIsRed: Bool?
     let isStale: Bool
     let scheduleState: WatchScheduleState
     let nextEventKind: WatchNextEventKind
@@ -366,6 +367,7 @@ struct WatchFacePage: View {
             .controlSize(.mini)
             .disabled(!renderModel.canStartStop)
         }
+        .tint(renderModel.accent)
     }
 
     private var eventKinds: [WatchFaceEventKind] {
@@ -545,6 +547,7 @@ struct WatchControlsPage: View {
                             .multilineTextAlignment(.center)
                     }
                 }
+                .tint(renderModel.accent)
             }
         }
         .padding(.horizontal, 8)
@@ -565,14 +568,18 @@ struct WatchNextEventDialPage: View {
             let lineWidth = ringLineWidth(for: size)
             let trackColor = Color.secondary.opacity(0.18)
             let dimOpacity = (model.isStale || isLuminanceReduced) ? 0.6 : 1.0
-            let isFlashColorRed = isRedColor(model.accent)
+            let isFlashColorRed = model.flashColorIsRed ?? isRedColor(model.accent)
             let normalAccent = isFlashColorRed ? Color.white.opacity(0.85) : model.accent
             let stopRemaining = model.stopRemainingProvider(nowUptime)
             let stopInterval = model.stopInterval ?? 0
-            let isStopMode = model.isStopActive && stopInterval > 0 && stopRemaining >= 0
-            let stopProgress = isStopMode
-                ? (stopRemaining / stopInterval).clamped(to: 0...1)
-                : nil
+            let isStopMode = model.isStopActive && stopRemaining >= 0
+            let stopProgress: Double? = {
+                guard isStopMode else { return nil }
+                if stopInterval > 0 {
+                    return (stopRemaining / stopInterval).clamped(to: 0...1)
+                }
+                return 0.25
+            }()
             let rawProgress = isStopMode ? stopProgress : dialProgress(nowUptime: nowUptime)
             let displayProgress = isStopMode ? rawProgress : rawProgress.map { resolvedProgress($0) }
 
@@ -666,7 +673,7 @@ struct WatchNextEventDialPage: View {
 
     private var markerGlyph: some View {
         let name: String? = {
-            if model.isStopActive, (model.stopInterval ?? 0) > 0 {
+            if model.isStopActive {
                 return glyphName(for: .stop)
             }
             switch model.scheduleState {
@@ -711,7 +718,7 @@ struct WatchNextEventDialPage: View {
 
     private var accessibilityLabel: String {
         let freshness = model.isStale ? "stale" : "fresh"
-        if model.isStopActive, let interval = model.stopInterval, interval > 0 {
+        if model.isStopActive {
             let remaining = model.stopRemainingProvider(nowUptime)
             return "Stop hold \(formatDuration(remaining)), \(freshness)"
         }

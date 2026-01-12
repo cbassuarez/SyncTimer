@@ -67,6 +67,7 @@ struct NowView: View {
     @State private var cachedFlashDuration: TimeInterval = 0.25
     @State private var cachedFlashColor: Color = .red
     @State private var cachedFlashHapticsEnabled: Bool = false
+    @State private var flashColorIsRed: Bool? = nil
     @State private var scheduleState: WatchScheduleState = .none
     @State private var nextEventKind: WatchNextEventKind = .unknown
     @State private var nextEventInterval: TimeInterval?
@@ -260,7 +261,8 @@ struct NowView: View {
         let liveStop = currentStop(nowUptime: nowUptime)
         let stopLine = stopActive ? "Stop " + formatWithCC(liveStop, preferHours: false) : nil
         let isFlashingNow = nowUptime < flashUntilUptime
-        let flashColor = (latestMessage?.flashColorARGB != nil) ? cachedFlashColor : appSettings.flashColor
+        let hasFlashColor = (latestMessage?.flashRGBA != nil) || (latestMessage?.flashColorARGB != nil)
+        let flashColor = hasFlashColor ? cachedFlashColor : appSettings.flashColor
         let controlsEnabled = latestMessage?.controlsEnabled
         let canStartStop = !isStale && (controlsEnabled ?? true)
         let canReset = !isStale && !isCounting
@@ -301,11 +303,19 @@ struct NowView: View {
             let seconds = Double(durationMs) / 1000.0
             cachedFlashDuration = seconds.clamped(to: 0.05...1.0)
         }
-        if let argb = message.flashColorARGB {
-            cachedFlashColor = decodeARGBColor(argb)
+        if let rgba = message.flashRGBA, let color = decodeRGBAColor(rgba) {
+            cachedFlashColor = color
+            appSettings.flashColor = color
+        } else if let argb = message.flashColorARGB {
+            let color = decodeARGBColor(argb)
+            cachedFlashColor = color
+            appSettings.flashColor = color
         }
         if let hapticsEnabled = message.flashHapticsEnabled {
             cachedFlashHapticsEnabled = hapticsEnabled
+        }
+        if let isRed = message.flashColorIsRed {
+            flashColorIsRed = isRed
         }
     }
 
@@ -417,6 +427,15 @@ struct NowView: View {
         return Color(.sRGB, red: r, green: g, blue: b, opacity: a)
     }
 
+    private func decodeRGBAColor(_ rgba: [Double]) -> Color? {
+        guard rgba.count == 4 else { return nil }
+        return Color(.sRGB,
+                     red: rgba[0].clamped(to: 0...1),
+                     green: rgba[1].clamped(to: 0...1),
+                     blue: rgba[2].clamped(to: 0...1),
+                     opacity: rgba[3].clamped(to: 0...1))
+    }
+
     private func makeTimerProviders() -> WatchTimerProviders {
         WatchTimerProviders(
             mainValueProvider: { nowUptime in
@@ -447,6 +466,7 @@ struct NowView: View {
     private func makeNextEventDialModel() -> WatchNextEventDialModel {
         WatchNextEventDialModel(
             accent: appSettings.flashColor,
+            flashColorIsRed: flashColorIsRed,
             isStale: isStale,
             scheduleState: scheduleState,
             nextEventKind: nextEventKind,
