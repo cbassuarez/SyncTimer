@@ -19,6 +19,8 @@ struct WatchNowRenderModel {
 // MARK: - Drift-free NowView with .CC formatting (uses monotonic systemUptime)
 struct NowView: View {
     @EnvironmentObject private var appSettings: AppSettings
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
 
     // Raw snapshot payload
     @State private var phaseStr: String = "idle"      // "idle" | "countdown" | "running" | "paused"
@@ -38,13 +40,16 @@ struct NowView: View {
     @State private var prevSnapT   : TimeInterval = 0
     @State private var lastSnapUptime: TimeInterval = 0
     @State private var isStale     : Bool = true
+    @State private var lastSnapSeq: UInt64 = 0
 
     @State private var latestMessage: TimerMessage?
     @State private var pageSelection: Int = 0
     @State private var snapCounter: UInt64 = 0
+    @State private var tickBucket: Int = 0
+    @State private var tickN: Int = 0
+    @State private var lastPokeUptime: TimeInterval = -10
 
-    // Tickers
-    private let staleTick  = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
+    @StateObject private var runtimeKeeper = ExtendedRuntimeKeeper()
 
     // User preference: show hours when enabled; otherwise auto (>=1h shows hours)
     @State private var preferHours: Bool = UserDefaults.standard.bool(forKey: "SyncTimerPreferHours")
@@ -53,50 +58,63 @@ struct NowView: View {
     private var resolvedShowHours: Bool {
         latestMessage?.showHours ?? preferHours
     }
+    private var tickInterval: TimeInterval {
+        if isLuminanceReduced { return 0.2 }
+        if isCounting || stopActive { return 0.02 }
+        return 0.05
+    }
 
     var body: some View {
-        let renderModel = makeRenderModel()
-        let detailsModel = makeDetailsModel()
-        let timerProviders = makeTimerProviders()
+        TimelineView(.periodic(from: .now, by: tickInterval)) { context in
+            let nowUptime = ProcessInfo.processInfo.systemUptime
+            let renderModel = makeRenderModel(nowUptime: nowUptime)
+            let detailsModel = makeDetailsModel(nowUptime: nowUptime)
+            let timerProviders = makeTimerProviders()
 
-        TabView(selection: $pageSelection) {
-            WatchFacePage(
-                renderModel: renderModel,
-                timerProviders: timerProviders,
-                isLive: pageSelection == 0,
-                snapshotToken: snapCounter
-            )
-            #if DEBUG
-            .overlay(alignment: .topLeading) {
-                WatchDebugOverlay(lines: debugLines)
-            }
-            #endif
+            TabView(selection: $pageSelection) {
+                WatchFacePage(
+                    renderModel: renderModel,
+                    timerProviders: timerProviders,
+                    nowUptime: nowUptime,
+                    isLive: pageSelection == 0,
+                    snapshotToken: snapCounter
+                )
+                #if DEBUG
+                .overlay(alignment: .topLeading) {
+                    WatchDebugOverlay(lines: debugLines)
+                }
+                #endif
                 .tag(0)
-            WatchDetailsPage(
-                renderModel: renderModel,
-                detailsModel: detailsModel,
-                timerProviders: timerProviders,
-                isLive: pageSelection == 1
-            )
-            .tag(1)
-            WatchControlsPage(
-                renderModel: renderModel,
-                timerProviders: timerProviders,
-                isLive: pageSelection == 2,
-                startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
-                reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
-            )
-            .tag(2)
+                WatchDetailsPage(
+                    renderModel: renderModel,
+                    detailsModel: detailsModel,
+                    timerProviders: timerProviders,
+                    nowUptime: nowUptime,
+                    isLive: pageSelection == 1
+                )
+                .tag(1)
+                WatchControlsPage(
+                    renderModel: renderModel,
+                    timerProviders: timerProviders,
+                    nowUptime: nowUptime,
+                    isLive: pageSelection == 2,
+                    startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
+                    reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
+                )
+                .tag(2)
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .tint(appSettings.flashColor)
+            .onChange(of: context.date) { _ in
+                handleTimelineTick(nowUptime: nowUptime)
+            }
         }
-        .tabViewStyle(.page(indexDisplayMode: .never))
-        .tint(appSettings.flashColor)
 
         // Receive 4 Hz snapshots → update baseline + estimate velocity
         .onReceive(ConnectivityManager.shared.$incoming.compactMap { $0 }) { msg in
             Task { @MainActor in
                 let now = ProcessInfo.processInfo.systemUptime
                 lastSnapUptime = now
-                if isStale { isStale = false }
 
                 // Store raw values
                 phaseStr   = msg.phase
@@ -130,30 +148,42 @@ struct NowView: View {
                 prevSnapT    = now
 
                 latestMessage = msg
-                if let seq = msg.stateSeq ?? msg.actionSeq {
-                    snapCounter = seq
+                let seq = msg.stateSeq ?? msg.actionSeq
+                if let seq {
+                    lastSnapSeq = seq
                 } else {
-                    snapCounter &+= 1
+                    lastSnapSeq &+= 1
                 }
+                snapCounter = seq ?? (snapCounter &+ 1)
             }
         }
-
-        // Mark stale if no snapshot for an adaptive timeout
-        .onReceive(staleTick) { _ in
-            let age = ProcessInfo.processInfo.systemUptime - lastSnapUptime
-            let staleThreshold = 1.5
-            let freshThreshold = 0.7
-            if isStale {
-                if age < freshThreshold { isStale = false }
-            } else {
-                if age > staleThreshold { isStale = true }
+        .onChange(of: scenePhase) { _ in
+            updateExtendedRuntime()
+            if scenePhase == .active {
+                requestSnapshotIfNeeded(origin: "scenePhase.active")
             }
+        }
+        .onChange(of: phaseStr) { _ in
+            updateExtendedRuntime()
+        }
+        .onChange(of: stopActive) { _ in
+            updateExtendedRuntime()
+        }
+        .onChange(of: isLuminanceReduced) { reduced in
+            if !reduced {
+                requestSnapshotIfNeeded(origin: "luminance.full")
+            }
+        }
+        .onAppear {
+            updateExtendedRuntime()
         }
     }
 
-    private func makeRenderModel() -> WatchNowRenderModel {
+    private func makeRenderModel(nowUptime: TimeInterval) -> WatchNowRenderModel {
         let phaseLabel = phaseChip(phaseStr)
-        let stopLine = stopActive ? "Stop " + formatWithCC(max(0, baseStop), preferHours: false) : nil
+        let liveMain = currentMain(nowUptime: nowUptime)
+        let liveStop = currentStop(nowUptime: nowUptime)
+        let stopLine = stopActive ? "Stop " + formatWithCC(liveStop, preferHours: false) : nil
         let controlsEnabled = latestMessage?.controlsEnabled
         let canStartStop = !isStale && (controlsEnabled ?? true)
         let canReset = !isStale && !isCounting
@@ -165,11 +195,11 @@ struct NowView: View {
         }()
 
         return WatchNowRenderModel(
-            formattedMain: formatWithCC(baseMain, preferHours: resolvedShowHours),
+            formattedMain: formatWithCC(liveMain, preferHours: resolvedShowHours),
             phaseLabel: phaseLabel,
             isStale: isStale,
             stopLine: stopLine,
-            stopDigits: formatWithCC(max(0, baseStop), preferHours: false),
+            stopDigits: formatWithCC(liveStop, preferHours: false),
             isStopActive: stopActive,
             canStartStop: canStartStop,
             canReset: canReset,
@@ -180,9 +210,8 @@ struct NowView: View {
         )
     }
 
-    private func makeDetailsModel() -> WatchNowDetailsModel {
-        let now = ProcessInfo.processInfo.systemUptime
-        let age = lastSnapUptime > 0 ? max(0, now - lastSnapUptime) : 0
+    private func makeDetailsModel(nowUptime: TimeInterval) -> WatchNowDetailsModel {
+        let age = lastSnapUptime > 0 ? max(0, nowUptime - lastSnapUptime) : 0
         return WatchNowDetailsModel(
             isFresh: !isStale,
             age: age,
@@ -195,7 +224,6 @@ struct NowView: View {
 
     private func makeTimerProviders() -> WatchTimerProviders {
         WatchTimerProviders(
-            nowUptimeProvider: { ProcessInfo.processInfo.systemUptime },
             mainValueProvider: { nowUptime in
                 currentMain(nowUptime: nowUptime)
             },
@@ -294,6 +322,50 @@ struct NowView: View {
     private func currentStop(nowUptime: TimeInterval) -> TimeInterval {
         max(0, baseStop + vStop * (nowUptime - baseT0))
     }
+
+    private func handleTimelineTick(nowUptime: TimeInterval) {
+        updateStaleIfNeeded(nowUptime: nowUptime)
+        updateTickCounter(nowUptime: nowUptime)
+    }
+
+    private func updateStaleIfNeeded(nowUptime: TimeInterval) {
+        let age = lastSnapUptime > 0 ? max(0, nowUptime - lastSnapUptime) : .infinity
+        let staleThreshold = 4.0
+        let freshThreshold = 1.0
+        if isStale {
+            if age < freshThreshold {
+                isStale = false
+            }
+        } else {
+            if age > staleThreshold {
+                isStale = true
+                requestSnapshotIfNeeded(origin: "stale")
+            }
+        }
+    }
+
+    private func updateTickCounter(nowUptime: TimeInterval) {
+        let bucket = Int((nowUptime / 0.2).rounded(.down))
+        if bucket != tickBucket {
+            tickBucket = bucket
+            tickN += 1
+        }
+    }
+
+    private func updateExtendedRuntime() {
+        runtimeKeeper.update(
+            shouldRun: isCounting || stopActive,
+            scenePhase: scenePhase
+        )
+    }
+
+    private func requestSnapshotIfNeeded(origin: String) {
+        let now = ProcessInfo.processInfo.systemUptime
+        let cooldown: TimeInterval = 0.6
+        guard now - lastPokeUptime >= cooldown else { return }
+        lastPokeUptime = now
+        ConnectivityManager.shared.requestSnapshot(origin: origin)
+    }
 }
 
 #if DEBUG
@@ -322,18 +394,15 @@ private extension NowView {
         #if DEBUG
         let now = ProcessInfo.processInfo.systemUptime
         let ageMs = Int(max(0, now - lastSnapUptime) * 1000)
-        let inbound = ConnectivityManager.shared.lastInboundDiagnostic
-        let inboundAgeMs = inbound.map { Int(max(0, now - $0.arrivalUptime) * 1000) } ?? -1
-        let seqText = latestMessage?.stateSeq ?? latestMessage?.actionSeq ?? snapCounter
-        let stopCount = latestMessage?.stopEvents.count ?? 0
-        let cueCount = latestMessage?.cueEvents?.count ?? 0
-        let restartCount = latestMessage?.restartEvents?.count ?? 0
+        let session = ConnectivityManager.shared.session
+        let activation = session.map { String(describing: $0.activationState) } ?? "nil"
+        let reachable = session?.isReachable ?? false
+        let seqText = lastSnapSeq
         return [
-            "src:\(inbound?.source.rawValue ?? "n/a") seq:\(inbound?.stateSeq ?? inbound?.actionSeq ?? inbound?.derivedSeq ?? 0)",
-            "phase:\(inbound?.phase ?? phaseStr) rem:\(String(format: "%.2f", inbound?.remaining ?? snapMain)) age:\(inboundAgeMs)ms",
-            "seq:\(seqText) phase:\(phaseStr) rem:\(String(format: "%.2f", snapMain))",
-            "events s:\(stopCount) c:\(cueCount) r:\(restartCount) age:\(ageMs)ms",
-            "v:\(String(format: "%.2f", vMain)) base:\(String(format: "%.2f", baseMain)) live:\(pageSelection == 0)"
+            "scene:\(scenePhase) lum:\(isLuminanceReduced)",
+            "wc:\(activation) reach:\(reachable)",
+            "ageMs:\(ageMs) lastSnapSeq:\(seqText)",
+            "tickN:\(tickN) phase:\(phaseStr)"
         ]
         #else
         return []
