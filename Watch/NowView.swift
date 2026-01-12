@@ -31,6 +31,7 @@ struct NowView: View {
     @EnvironmentObject private var appSettings: AppSettings
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+    @ObservedObject private var connectivity = ConnectivityManager.shared
 
     // Raw snapshot payload
     @State private var phaseStr: String = "idle"      // "idle" | "countdown" | "running" | "paused"
