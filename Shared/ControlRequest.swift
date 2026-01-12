@@ -8,7 +8,7 @@
 import Foundation
 
 public struct ControlRequest: Codable, Equatable {
-    public enum Command: String, Codable { case start, stop, reset }
+    public enum Command: String, Codable { case start, stop, reset, requestSnapshot }
     public let command: Command
     public let origin : String   // "watchOS"
     public let ts     : TimeInterval

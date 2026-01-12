@@ -15,14 +15,17 @@ final class ExtendedRuntimeKeeper: NSObject, ObservableObject, WKExtendedRuntime
 #endif
     private var session: WKExtendedRuntimeSession?
     private var lastInvalidationUptime: TimeInterval = 0
+    private var stopTask: Task<Void, Never>?
+    private let graceInterval: TimeInterval = 12.0
 
-    func update(shouldRun: Bool, scenePhase: ScenePhase) {
-        let isActive = scenePhase == .active
-        if !isActive || !shouldRun {
-            invalidate()
-            return
+    func update(shouldRun: Bool) {
+        if shouldRun {
+            stopTask?.cancel()
+            stopTask = nil
+            startIfNeeded()
+        } else {
+            scheduleStopIfNeeded()
         }
-        startIfNeeded()
     }
 
     private func startIfNeeded() {
@@ -36,7 +39,18 @@ final class ExtendedRuntimeKeeper: NSObject, ObservableObject, WKExtendedRuntime
         session = newSession
     }
 
+    private func scheduleStopIfNeeded() {
+        guard session != nil else { return }
+        stopTask?.cancel()
+        stopTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(graceInterval * 1_000_000_000))
+            await self?.invalidate()
+        }
+    }
+
     private func invalidate() {
+        stopTask?.cancel()
+        stopTask = nil
         session?.invalidate()
         session = nil
     }
@@ -51,6 +65,8 @@ final class ExtendedRuntimeKeeper: NSObject, ObservableObject, WKExtendedRuntime
         if session === extendedRuntimeSession {
             session = nil
             lastInvalidationUptime = ProcessInfo.processInfo.systemUptime
+            stopTask?.cancel()
+            stopTask = nil
         }
     }
 
@@ -62,13 +78,15 @@ final class ExtendedRuntimeKeeper: NSObject, ObservableObject, WKExtendedRuntime
         if session === extendedRuntimeSession {
             session = nil
             lastInvalidationUptime = ProcessInfo.processInfo.systemUptime
+            stopTask?.cancel()
+            stopTask = nil
         }
     }
 }
 #else
 @MainActor
 final class ExtendedRuntimeKeeper: ObservableObject {
-    func update(shouldRun: Bool, scenePhase: ScenePhase) {
+    func update(shouldRun: Bool) {
     }
 }
 #endif
