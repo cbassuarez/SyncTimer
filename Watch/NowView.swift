@@ -66,6 +66,18 @@ struct NowView: View {
     @State private var cachedFlashDuration: TimeInterval = 0.25
     @State private var cachedFlashColor: Color = .red
     @State private var cachedFlashHapticsEnabled: Bool = false
+    @State private var scheduleState: WatchScheduleState = .none
+    @State private var nextEventKind: WatchNextEventKind = .unknown
+    @State private var nextEventInterval: TimeInterval?
+    @State private var nextEventStepped: Bool = false
+    @State private var baseNextRemaining: TimeInterval = 0
+    @State private var baseNextRemainingT0: TimeInterval = ProcessInfo.processInfo.systemUptime
+    @State private var vNextRemaining: Double = 0
+    @State private var nextEventResetToken: UInt64 = 0
+    @State private var lastNextRemaining: TimeInterval?
+    @State private var lastScheduleStateForBoost: WatchScheduleState = .none
+    @State private var lastScheduleStateForHaptic: WatchScheduleState = .none
+    @State private var lastCompleteHapticUptime: TimeInterval = 0
 
     @StateObject private var runtimeKeeper = ExtendedRuntimeKeeper()
 
@@ -85,6 +97,7 @@ struct NowView: View {
             let nowUptime = ProcessInfo.processInfo.systemUptime
             let renderModel = makeRenderModel(nowUptime: nowUptime)
             let timerProviders = makeTimerProviders()
+            let nextEventDialModel = makeNextEventDialModel()
 
             TabView(selection: $pageSelection) {
                 WatchFacePage(
@@ -115,6 +128,11 @@ struct NowView: View {
                     reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
                 )
                 .tag(2)
+                WatchNextEventDialPage(
+                    model: nextEventDialModel,
+                    nowUptime: nowUptime
+                )
+                .tag(3)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .tint(appSettings.flashColor)
@@ -172,6 +190,7 @@ struct NowView: View {
                 latestMessage = msg
                 applyFlashConfig(from: msg)
                 handleFlashTrigger(from: msg, nowUptime: now)
+                applyNextEventSnapshot(from: msg, nowUptime: now)
 
                 updateStaleIfNeeded(nowUptime: now)
 
@@ -315,6 +334,75 @@ struct NowView: View {
         }
     }
 
+    private func applyNextEventSnapshot(from message: TimerMessage, nowUptime: TimeInterval) {
+        // UI-only: next-event dial snapshot for watch; no timer semantics change.
+        var resolvedState = resolveScheduleState(from: message)
+        var remaining = message.nextEventRemaining
+        var interval = message.nextEventInterval
+
+        if resolvedState == .active {
+            if let intervalValue = interval, intervalValue > 0, let remainingValue = remaining {
+                interval = intervalValue
+                remaining = remainingValue
+            } else {
+                resolvedState = .none
+                remaining = nil
+                interval = nil
+            }
+        } else {
+            remaining = nil
+            interval = nil
+        }
+
+        let kind = WatchNextEventKind(rawValue: message.nextEventKind ?? "") ?? .unknown
+        let stepped = message.nextEventStepped ?? false
+        let stateChanged = resolvedState != scheduleState
+        let intervalChanged = interval != nextEventInterval
+        let remainingJumped = (remaining ?? 0) > (lastNextRemaining ?? 0) + 0.2
+
+        if stateChanged || intervalChanged || remainingJumped {
+            nextEventResetToken &+= 1
+        }
+
+        scheduleState = resolvedState
+        nextEventKind = kind
+        nextEventInterval = interval
+        nextEventStepped = stepped
+        lastNextRemaining = remaining
+
+        baseNextRemaining = max(0, remaining ?? 0)
+        baseNextRemainingT0 = nowUptime
+        vNextRemaining = (resolvedState == .active && phaseStr == "running") ? -1.0 : 0.0
+
+        if resolvedState != lastScheduleStateForBoost,
+           resolvedState == .active || resolvedState == .complete {
+            boostUntilUptime = nowUptime + 6.0
+            lastScheduleStateForBoost = resolvedState
+            updateExtendedRuntime()
+        }
+
+        if resolvedState == .complete && lastScheduleStateForHaptic != .complete {
+            let hapticCooldown: TimeInterval = 5.0
+            if isLuminanceReduced, (nowUptime - lastCompleteHapticUptime) > hapticCooldown {
+                lastCompleteHapticUptime = nowUptime
+                #if os(watchOS)
+                WKInterfaceDevice.current().play(.click)
+                #endif
+            }
+        }
+        lastScheduleStateForHaptic = resolvedState
+    }
+
+    private func resolveScheduleState(from message: TimerMessage) -> WatchScheduleState {
+        if let raw = message.scheduleState, let state = WatchScheduleState(rawValue: raw) {
+            return state
+        }
+        if message.nextEventRemaining != nil, message.nextEventInterval != nil {
+            return .active
+        }
+        return .none
+    }
+
     private func decodeARGBColor(_ argb: UInt32) -> Color {
         let a = Double((argb >> 24) & 0xFF) / 255.0
         let r = Double((argb >> 16) & 0xFF) / 255.0
@@ -346,6 +434,22 @@ struct NowView: View {
             },
             compactStopStringProvider: { nowUptime in
                 formatCompactWithCC(currentStop(nowUptime: nowUptime), showHours: resolvedShowHours)
+            }
+        )
+    }
+
+    private func makeNextEventDialModel() -> WatchNextEventDialModel {
+        WatchNextEventDialModel(
+            accent: appSettings.flashColor,
+            isStale: isStale,
+            scheduleState: scheduleState,
+            nextEventKind: nextEventKind,
+            nextEventInterval: nextEventInterval,
+            isStepped: nextEventStepped,
+            snapshotToken: snapshotToken,
+            resetToken: nextEventResetToken,
+            remainingProvider: { nowUptime in
+                currentNextEventRemaining(nowUptime: nowUptime)
             }
         )
     }
@@ -445,6 +549,11 @@ struct NowView: View {
 
     private func currentStop(nowUptime: TimeInterval) -> TimeInterval {
         max(0, baseStop + vStop * (nowUptime - baseT0))
+    }
+
+    private func currentNextEventRemaining(nowUptime: TimeInterval) -> TimeInterval? {
+        guard scheduleState == .active else { return nil }
+        return max(0, baseNextRemaining + vNextRemaining * (nowUptime - baseNextRemainingT0))
     }
 
     private func faceTickInterval(nowUptime: TimeInterval) -> TimeInterval {

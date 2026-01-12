@@ -86,6 +86,12 @@ public struct TimerMessage: Codable, Equatable {
         public var assetManifest: [CueAssetManifestItem]?
         public var assetRequests: [UUID]?
         public var assetChunks: [CueAssetChunk]?
+    // UI-only (optional): watch next-event dial snapshot; no timer semantics change.
+        public var scheduleState: String?
+        public var nextEventRemaining: TimeInterval?
+        public var nextEventInterval: TimeInterval?
+        public var nextEventKind: String?
+        public var nextEventStepped: Bool?
     /// Optional, only set by the **parent**. Mirrored read-only on children.
         var notesParent: String?
     public init(action: Action,
@@ -118,7 +124,12 @@ public struct TimerMessage: Codable, Equatable {
                       display: TimerDisplayWire? = nil,
                       assetManifest: [CueAssetManifestItem]? = nil,
                       assetRequests: [UUID]? = nil,
-                      assetChunks: [CueAssetChunk]? = nil) {
+                      assetChunks: [CueAssetChunk]? = nil,
+                      scheduleState: String? = nil,
+                      nextEventRemaining: TimeInterval? = nil,
+                      nextEventInterval: TimeInterval? = nil,
+                      nextEventKind: String? = nil,
+                      nextEventStepped: Bool? = nil) {
           self.action            = action
           self.actionSeq         = actionSeq
           self.stateSeq          = stateSeq
@@ -150,5 +161,10 @@ public struct TimerMessage: Codable, Equatable {
         self.assetManifest     = assetManifest
         self.assetRequests     = assetRequests
         self.assetChunks       = assetChunks
+        self.scheduleState     = scheduleState
+        self.nextEventRemaining = nextEventRemaining
+        self.nextEventInterval = nextEventInterval
+        self.nextEventKind     = nextEventKind
+        self.nextEventStepped  = nextEventStepped
       }
 }

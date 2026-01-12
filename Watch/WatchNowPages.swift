@@ -20,6 +20,33 @@ struct WatchTimerProviders {
     let compactStopStringProvider: (TimeInterval) -> String
 }
 
+enum WatchScheduleState: String {
+    case none
+    case active
+    case complete
+}
+
+enum WatchNextEventKind: String {
+    case cue
+    case restart
+    case stop
+    case message
+    case image
+    case unknown
+}
+
+struct WatchNextEventDialModel {
+    let accent: Color
+    let isStale: Bool
+    let scheduleState: WatchScheduleState
+    let nextEventKind: WatchNextEventKind
+    let nextEventInterval: TimeInterval?
+    let isStepped: Bool
+    let snapshotToken: UInt64
+    let resetToken: UInt64
+    let remainingProvider: (TimeInterval) -> TimeInterval?
+}
+
 struct WatchEventDot: Identifiable {
     enum Kind: String {
         case stop
@@ -519,6 +546,162 @@ struct WatchControlsPage: View {
     }
 }
 
+struct WatchNextEventDialPage: View {
+    let model: WatchNextEventDialModel
+    let nowUptime: TimeInterval
+
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+    @State private var lastQuantizedProgress: Double = 0
+
+    var body: some View {
+        GeometryReader { proxy in
+            let size = min(proxy.size.width, proxy.size.height)
+            let lineWidth = ringLineWidth(for: size)
+            let trackColor = Color.secondary.opacity(0.18)
+            let dimOpacity = (model.isStale || isLuminanceReduced) ? 0.6 : 1.0
+            let rawProgress = dialProgress(nowUptime: nowUptime)
+            let displayProgress = rawProgress.map { resolvedProgress($0) }
+
+            ZStack {
+                Circle()
+                    .stroke(trackColor, lineWidth: lineWidth)
+
+                if let displayProgress {
+                    Circle()
+                        .trim(from: 0, to: displayProgress == 0 ? 0.001 : displayProgress)
+                        .stroke(
+                            model.accent,
+                            style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                        .shadow(color: model.accent.opacity(0.25), radius: 2, x: 0, y: 0)
+                        .id(model.snapshotToken)
+
+                    if displayProgress > 0.02 {
+                        Circle()
+                            .fill(model.accent.opacity(0.9))
+                            .frame(width: lineWidth * 0.45, height: lineWidth * 0.45)
+                            .offset(y: -size / 2)
+                            .rotationEffect(.degrees(displayProgress * 360.0))
+                    }
+                }
+
+                markerGlyph
+                    .offset(y: -size / 2 + lineWidth * 0.2)
+            }
+            .opacity(dimOpacity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .padding(12)
+            .onChange(of: model.resetToken) { _ in
+                lastQuantizedProgress = 0
+            }
+            .onChange(of: displayProgress ?? 0) { newValue in
+                if model.scheduleState == .active {
+                    lastQuantizedProgress = max(lastQuantizedProgress, newValue)
+                } else {
+                    lastQuantizedProgress = 0
+                }
+            }
+        }
+        .accessibilityLabel(Text(accessibilityLabel))
+    }
+
+    private func ringLineWidth(for size: CGFloat) -> CGFloat {
+        max(6, min(9, size * 0.055))
+    }
+
+    private func dialProgress(nowUptime: TimeInterval) -> Double? {
+        switch model.scheduleState {
+        case .none:
+            return nil
+        case .complete:
+            return 1
+        case .active:
+            guard let interval = model.nextEventInterval, interval > 0,
+                  var remaining = model.remainingProvider(nowUptime) else { return nil }
+            remaining = max(0, remaining)
+            if model.isStepped {
+                let stepSeconds: TimeInterval = 0.1
+                remaining = (remaining / stepSeconds).rounded(.down) * stepSeconds
+            }
+            let ratio = (remaining / interval).clamped(to: 0...1)
+            return 1.0 - ratio
+        }
+    }
+
+    private func resolvedProgress(_ raw: Double) -> Double {
+        if model.scheduleState == .active {
+            return max(lastQuantizedProgress, raw)
+        }
+        return raw
+    }
+
+    private var markerGlyph: some View {
+        let name: String? = {
+            switch model.scheduleState {
+            case .none:
+                return "minus"
+            case .complete:
+                return "checkmark"
+            case .active:
+                return glyphName(for: model.nextEventKind)
+            }
+        }()
+        return Group {
+            if let name {
+                Image(systemName: name)
+                    .font(.caption2.weight(.semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(Color.secondary)
+            } else {
+                Circle()
+                    .fill(Color.secondary.opacity(0.6))
+                    .frame(width: 3, height: 3)
+            }
+        }
+    }
+
+    private func glyphName(for kind: WatchNextEventKind) -> String? {
+        switch kind {
+        case .cue:
+            return "bolt.fill"
+        case .restart:
+            return "arrow.counterclockwise"
+        case .stop:
+            return "playpause"
+        case .message:
+            return "text.quote"
+        case .image:
+            return "mountain.2"
+        case .unknown:
+            return "line.3.horizontal"
+        }
+    }
+
+    private var accessibilityLabel: String {
+        let freshness = model.isStale ? "stale" : "fresh"
+        switch model.scheduleState {
+        case .none:
+            return "No cue sheet loaded, \(freshness)"
+        case .complete:
+            return "Cue sheet complete, \(freshness)"
+        case .active:
+            if let remaining = model.remainingProvider(nowUptime) {
+                return "Next event in \(formatDuration(remaining)), \(freshness)"
+            }
+            return "Next event, \(freshness)"
+        }
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = seconds >= 3600 ? [.hour, .minute, .second] : [.minute, .second]
+        formatter.unitsStyle = .full
+        formatter.zeroFormattingBehavior = .pad
+        return formatter.string(from: max(0, seconds)) ?? "0 seconds"
+    }
+}
+
 private struct WatchFaceEventsRow: View, Equatable {
     let eventKinds: [WatchFaceEventKind]
     let phaseLabel: String
@@ -765,6 +948,12 @@ private struct WatchFaceEventSubtleCircle: View {
         case .empty:
             EmptyView()
         }
+    }
+}
+
+private extension Comparable {
+    func clamped(to r: ClosedRange<Self>) -> Self {
+        min(max(self, r.lowerBound), r.upperBound)
     }
 }
 
