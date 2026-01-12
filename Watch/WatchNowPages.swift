@@ -116,6 +116,7 @@ struct WatchTimerHeader: View {
     let isLive: Bool
     let timerProviders: WatchTimerProviders
     let nowUptime: TimeInterval
+    let snapshotToken: UInt64?
 
     var body: some View {
         headerStack
@@ -131,7 +132,8 @@ struct WatchTimerHeader: View {
                         nowUptime: nowUptime,
                         timeProvider: timerProviders.mainValueProvider,
                         formattedProvider: timerProviders.formattedStringProvider,
-                        fallback: formattedMain
+                        fallback: formattedMain,
+                        snapshotToken: snapshotToken
                     )
                 } else {
                     Text(formattedMain)
@@ -151,7 +153,8 @@ struct WatchTimerHeader: View {
                         formattedProvider: { nowUptime in
                             timerProviders.stopLineProvider(nowUptime) ?? ""
                         },
-                        fallback: stopLine ?? ""
+                        fallback: stopLine ?? "",
+                        snapshotToken: snapshotToken
                         )
                     } else if let stopLine {
                         Text(stopLine)
@@ -170,6 +173,7 @@ struct WatchFacePage: View {
     let timerProviders: WatchTimerProviders
     let nowUptime: TimeInterval
     let isLive: Bool
+    let snapshotToken: UInt64
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -185,7 +189,8 @@ struct WatchFacePage: View {
                         size: 40,
                         isLive: isLive,
                         timerProviders: timerProviders,
-                        nowUptime: nowUptime
+                        nowUptime: nowUptime,
+                        snapshotToken: snapshotToken
                     )
                     chipRow
                     faceEventsRow
@@ -228,7 +233,8 @@ struct WatchFacePage: View {
             accent: renderModel.accent,
             isLive: isLive,
             nowUptime: nowUptime,
-            timerProviders: timerProviders
+            timerProviders: timerProviders,
+            snapshotToken: snapshotToken
         )
     }
 
@@ -257,7 +263,8 @@ struct WatchDetailsPage: View {
                     size: 32,
                     isLive: isLive,
                     timerProviders: timerProviders,
-                    nowUptime: nowUptime
+                    nowUptime: nowUptime,
+                    snapshotToken: nil
                 )
             }
 
@@ -316,6 +323,33 @@ struct WatchDetailsPage: View {
     }
 }
 
+struct WatchFaceTimelinePage: View {
+    let interval: TimeInterval
+    let snapshotToken: UInt64
+    let isLive: Bool
+    let onTick: (TimeInterval) -> Void
+    let renderModelProvider: (TimeInterval) -> WatchNowRenderModel
+    let timerProviders: WatchTimerProviders
+
+    var body: some View {
+        // Single periodic timeline for the face so digits update together.
+        TimelineView(.periodic(from: .now, by: interval)) { context in
+            let nowUptime = ProcessInfo.processInfo.systemUptime
+            let renderModel = renderModelProvider(nowUptime)
+            WatchFacePage(
+                renderModel: renderModel,
+                timerProviders: timerProviders,
+                nowUptime: nowUptime,
+                isLive: isLive,
+                snapshotToken: snapshotToken
+            )
+            .onChange(of: context.date) { _ in
+                onTick(nowUptime)
+            }
+        }
+    }
+}
+
 struct WatchControlsPage: View {
     let renderModel: WatchNowRenderModel
     let timerProviders: WatchTimerProviders
@@ -335,7 +369,8 @@ struct WatchControlsPage: View {
                     size: 30,
                     isLive: isLive,
                     timerProviders: timerProviders,
-                    nowUptime: nowUptime
+                    nowUptime: nowUptime,
+                    snapshotToken: nil
                 )
             }
 
@@ -378,12 +413,14 @@ private struct WatchFaceEventsRow: View, Equatable {
     let isLive: Bool
     let nowUptime: TimeInterval
     let timerProviders: WatchTimerProviders
+    let snapshotToken: UInt64
 
     static func == (lhs: WatchFaceEventsRow, rhs: WatchFaceEventsRow) -> Bool {
         lhs.eventKinds == rhs.eventKinds &&
         lhs.phaseLabel == rhs.phaseLabel &&
         lhs.isStopActive == rhs.isStopActive &&
-        lhs.stopDigits == rhs.stopDigits
+        lhs.stopDigits == rhs.stopDigits &&
+        lhs.snapshotToken == rhs.snapshotToken
     }
 
     var body: some View {
@@ -400,7 +437,8 @@ private struct WatchFaceEventsRow: View, Equatable {
                         nowUptime: nowUptime,
                         timeProvider: timerProviders.stopValueProvider,
                         formattedProvider: timerProviders.stopDigitsProvider,
-                        fallback: stopDigits
+                        fallback: stopDigits,
+                        snapshotToken: snapshotToken
                     )
                 } else {
                     Text(stopDigits)
@@ -420,10 +458,12 @@ private struct WatchTimerLiveText: View {
     let timeProvider: (TimeInterval) -> TimeInterval
     let formattedProvider: (TimeInterval) -> String
     let fallback: String
+    let snapshotToken: UInt64?
 
     var body: some View {
         let text = formattedProvider(nowUptime)
         return Text(text.isEmpty ? fallback : text)
+            .id(snapshotToken ?? 0)
     }
 }
 
@@ -571,6 +611,7 @@ private struct WatchFaceEventCircle: View {
             stopDigitsProvider: { _ in "00:10.00" }
         ),
         nowUptime: 0,
-        isLive: false
+        isLive: false,
+        snapshotToken: 0
     )
 }

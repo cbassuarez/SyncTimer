@@ -105,7 +105,7 @@ public final class ConnectivityManager: NSObject, ObservableObject {
     }
 
     public func requestSnapshot(origin: String = "watchOS") {
-        send(SnapshotRequest(origin: origin))
+        send(ControlRequest(.requestSnapshot, origin: origin))
     }
 
     func sendSyncEnvelope(_ envelope: SyncEnvelope) {
