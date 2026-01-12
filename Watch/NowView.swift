@@ -98,198 +98,220 @@ struct NowView: View {
     }
 
     var body: some View {
-        let timelineInterval = faceTickInterval(nowUptime: ProcessInfo.processInfo.systemUptime)
+        timelineViewWithHandlers
+    }
 
-        TimelineView(.periodic(from: .now, by: timelineInterval)) { context in
-            let nowUptime = ProcessInfo.processInfo.systemUptime
-            let renderModel = makeRenderModel(nowUptime: nowUptime)
-            let timerProviders = makeTimerProviders()
-            let nextEventDialModel = makeNextEventDialModel()
-            let cueSheetsModel = makeCueSheetsModel()
+    private var timelineViewWithHandlers: some View {
+        timelineView
+            // Receive 4 Hz snapshots → update baseline + estimate velocity
+            .onReceive(ConnectivityManager.shared.$incoming.compactMap { $0 }) { msg in
+                Task { @MainActor in
+                    let now = ProcessInfo.processInfo.systemUptime
+                    let wasStale = isStale
+                    let previousPhase = phaseStr
+                    let seq = msg.stateSeq ?? msg.actionSeq ?? 0
+                    lastSnapUptime = now
 
-            TabView(selection: $pageSelection) {
-                WatchFacePage(
-                    renderModel: renderModel,
-                    timerProviders: timerProviders,
-                    nowUptime: nowUptime,
-                    isLive: pageSelection == 0,
-                    snapshotToken: snapshotToken,
-                    startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
-                    reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
-                )
-                .tag(0)
-                WatchTimerFocusPage(
-                    renderModel: renderModel,
-                    timerProviders: timerProviders,
-                    nowUptime: nowUptime,
-                    isLive: pageSelection == 1,
-                    snapshotToken: snapshotToken
-                )
-                .tag(1)
-                WatchControlsPage(
-                    renderModel: renderModel,
-                    timerProviders: timerProviders,
-                    nowUptime: nowUptime,
-                    isLive: pageSelection == 2,
-                    snapshotToken: snapshotToken,
-                    startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
-                    reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
-                )
-                .tag(2)
-                WatchNextEventDialPage(
-                    model: nextEventDialModel,
-                    nowUptime: nowUptime
-                )
-                .tag(3)
-                WatchCueSheetsPage(
-                    renderModel: renderModel,
-                    cueSheetsModel: cueSheetsModel,
-                    selectedSheetID: $selectedCueSheetID,
-                    requestCueSheetIndex: { ConnectivityManager.shared.requestCueSheetIndex(origin: "watch.cueSheets.refresh") }
-                )
-                .tag(4)
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .tint(appSettings.flashColor)
-            .onChange(of: context.date) { _ in
-                handleTimelineTick(nowUptime: nowUptime)
-            }
-        }
-
-        // Receive 4 Hz snapshots → update baseline + estimate velocity
-        .onReceive(ConnectivityManager.shared.$incoming.compactMap { $0 }) { msg in
-            Task { @MainActor in
-                let now = ProcessInfo.processInfo.systemUptime
-                let wasStale = isStale
-                let previousPhase = phaseStr
-                let seq = msg.stateSeq ?? msg.actionSeq ?? 0
-                lastSnapUptime = now
-
-                // Store raw values
-                phaseStr   = msg.phase
-                snapMain   = msg.remaining
-                stopActive = msg.isStopActive ?? false
-                snapStop   = msg.stopRemainingActive ?? 0
-                if stopActive {
-                    stopIntervalActive = msg.stopIntervalActive ?? stopIntervalActive
-                } else {
-                    stopIntervalActive = 0
-                }
-
-                let shouldIntegrateMain = isIntegratingMain
-
-                // Estimate main velocity from consecutive snapshots (local monotonic clock)
-                if shouldIntegrateMain {
-                    if prevSnapT > 0 {
-                        let dt  = now - prevSnapT
-                        let dv  = snapMain - prevSnapMain
-                        var v   = dt > 0 ? dv / dt : 0
-                        if abs(v) < 0.2 { // noisy/flat → fall back by phase
-                            v = (phaseStr == "countdown") ? -1.0 : (phaseStr == "running" ? 1.0 : 0.0)
-                        }
-                        vMain = v.clamped(to: -1.05...1.05)
+                    // Store raw values
+                    phaseStr   = msg.phase
+                    snapMain   = msg.remaining
+                    stopActive = msg.isStopActive ?? false
+                    snapStop   = msg.stopRemainingActive ?? 0
+                    if stopActive {
+                        stopIntervalActive = msg.stopIntervalActive ?? stopIntervalActive
                     } else {
-                        vMain = (phaseStr == "countdown") ? -1.0 : 1.0
+                        stopIntervalActive = 0
                     }
+
+                    let shouldIntegrateMain = isIntegratingMain
+
+                    // Estimate main velocity from consecutive snapshots (local monotonic clock)
+                    if shouldIntegrateMain {
+                        if prevSnapT > 0 {
+                            let dt  = now - prevSnapT
+                            let dv  = snapMain - prevSnapMain
+                            var v   = dt > 0 ? dv / dt : 0
+                            if abs(v) < 0.2 { // noisy/flat → fall back by phase
+                                v = (phaseStr == "countdown") ? -1.0 : (phaseStr == "running" ? 1.0 : 0.0)
+                            }
+                            vMain = v.clamped(to: -1.05...1.05)
+                        } else {
+                            vMain = (phaseStr == "countdown") ? -1.0 : 1.0
+                        }
+                    } else {
+                        vMain = 0.0
+                    }
+
+                    // Stop velocity: count down if active
+                    vStop = stopActive ? -1.0 : 0.0
+
+                    // Set new integration baseline
+                    baseMain = snapMain
+                    baseStop = snapStop
+                    baseT0   = now
+
+                    // Save for next velocity estimate
+                    prevSnapMain = snapMain
+                    prevSnapT    = now
+
+                    latestMessage = msg
+                    applyFlashConfig(from: msg)
+                    handleFlashTrigger(from: msg, nowUptime: now)
+                    applyNextEventSnapshot(from: msg, nowUptime: now)
+
+                    updateStaleIfNeeded(nowUptime: now)
+
+                    let phaseChanged = msg.phase != lastPhaseForBoost
+                    let seqJumped = seq > lastSeqForBoost
+                    let freshRecovered = wasStale && !isStale
+                    if phaseChanged || seqJumped || freshRecovered {
+                        boostUntilUptime = now + 6.0
+                        lastPhaseForBoost = msg.phase
+                        lastSeqForBoost = seq
+                        updateExtendedRuntime()
+                    }
+
+                    // Force an immediate face digit refresh on snapshot arrival.
+                    snapshotToken &+= 1
+
+                    let wasCounting = previousPhase == "running" || previousPhase == "countdown"
+                    let isCountingNow = msg.phase == "running" || msg.phase == "countdown"
+                    if isLuminanceReduced && !wasCounting && isCountingNow {
+                        let hapticCooldown: TimeInterval = 3.0
+                        if now - lastHapticUptime > hapticCooldown {
+                            lastHapticUptime = now
+                            #if os(watchOS)
+                            WKInterfaceDevice.current().play(.click)
+                            #endif
+                        }
+                    }
+                }
+            }
+            .onReceive(ConnectivityManager.shared.$incomingSyncEnvelope.compactMap { $0 }) { envelope in
+                if case let .cueSheetIndexSummary(summary) = envelope.message {
+                    handleCueSheetIndex(summary, source: .phoneIndex)
+                }
+            }
+            .onReceive(ConnectivityManager.shared.$incomingCueSheetIndexSummary.compactMap { $0 }) { summary in
+                handleCueSheetIndex(summary, source: .applicationContext)
+            }
+            .onChange(of: scenePhase) { _ in
+                updateExtendedRuntime()
+                if scenePhase == .active {
+                    requestSnapshotIfNeeded(origin: "scenePhase.active")
+                    ConnectivityManager.shared.requestCueSheetIndexIfNeeded(origin: "scenePhase.active")
+                }
+            }
+            .onChange(of: phaseStr) { _ in
+                updateExtendedRuntime()
+            }
+            .onChange(of: stopActive) { _ in
+                updateExtendedRuntime()
+            }
+            .onChange(of: isLuminanceReduced) { reduced in
+                if !reduced {
+                    requestSnapshotIfNeeded(origin: "luminance.full")
+                }
+            }
+            .onChange(of: pageSelection) { selection in
+                boostUntilUptime = ProcessInfo.processInfo.systemUptime + 6.0
+                updateExtendedRuntime()
+                let origin = selection == 0 ? "face.page" : "page.\(selection)"
+                requestSnapshotIfNeeded(origin: origin)
+                if selection == 4 {
+                    ConnectivityManager.shared.requestCueSheetIndex(origin: "page.cueSheets")
+                }
+            }
+            .onAppear {
+                updateExtendedRuntime()
+                if let cached = loadCueSheetIndexCache() {
+                    cueSheetIndexSummary = cached
+                    lastCueSheetIndexSeq = cached.seq
+                    cueSheetIndexSource = cached.items.isEmpty ? .none : .cache
                 } else {
-                    vMain = 0.0
+                    cueSheetIndexSource = .none
                 }
-
-                // Stop velocity: count down if active
-                vStop = stopActive ? -1.0 : 0.0
-
-                // Set new integration baseline
-                baseMain = snapMain
-                baseStop = snapStop
-                baseT0   = now
-
-                // Save for next velocity estimate
-                prevSnapMain = snapMain
-                prevSnapT    = now
-
-                latestMessage = msg
-                applyFlashConfig(from: msg)
-                handleFlashTrigger(from: msg, nowUptime: now)
-                applyNextEventSnapshot(from: msg, nowUptime: now)
-
-                updateStaleIfNeeded(nowUptime: now)
-
-                let phaseChanged = msg.phase != lastPhaseForBoost
-                let seqJumped = seq > lastSeqForBoost
-                let freshRecovered = wasStale && !isStale
-                if phaseChanged || seqJumped || freshRecovered {
-                    boostUntilUptime = now + 6.0
-                    lastPhaseForBoost = msg.phase
-                    lastSeqForBoost = seq
-                    updateExtendedRuntime()
-                }
-
-                // Force an immediate face digit refresh on snapshot arrival.
-                snapshotToken &+= 1
-
-                let wasCounting = previousPhase == "running" || previousPhase == "countdown"
-                let isCountingNow = msg.phase == "running" || msg.phase == "countdown"
-                if isLuminanceReduced && !wasCounting && isCountingNow {
-                    let hapticCooldown: TimeInterval = 3.0
-                    if now - lastHapticUptime > hapticCooldown {
-                        lastHapticUptime = now
-                        #if os(watchOS)
-                        WKInterfaceDevice.current().play(.click)
-                        #endif
-                    }
-                }
+                ConnectivityManager.shared.requestCueSheetIndex(origin: "onAppear")
             }
+    }
+
+    private var timelineView: some View {
+        let timelineInterval: TimeInterval = faceTickInterval(nowUptime: ProcessInfo.processInfo.systemUptime)
+
+        return TimelineView(.periodic(from: .now, by: timelineInterval)) { context in
+            let nowUptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+            let renderModel: WatchNowRenderModel = makeRenderModel(nowUptime: nowUptime)
+            let timerProviders: WatchTimerProviders = makeTimerProviders()
+            let nextEventDialModel: WatchNextEventDialModel = makeNextEventDialModel()
+            let cueSheetsModel: WatchCueSheetsModel = makeCueSheetsModel()
+
+            timelineTabView(
+                renderModel: renderModel,
+                timerProviders: timerProviders,
+                nextEventDialModel: nextEventDialModel,
+                cueSheetsModel: cueSheetsModel,
+                nowUptime: nowUptime,
+                contextDate: context.date
+            )
         }
-        .onReceive(ConnectivityManager.shared.$incomingSyncEnvelope.compactMap { $0 }) { envelope in
-            if case let .cueSheetIndexSummary(summary) = envelope.message {
-                handleCueSheetIndex(summary, source: .phoneIndex)
-            }
+    }
+
+    @ViewBuilder
+    private func timelineTabView(
+        renderModel: WatchNowRenderModel,
+        timerProviders: WatchTimerProviders,
+        nextEventDialModel: WatchNextEventDialModel,
+        cueSheetsModel: WatchCueSheetsModel,
+        nowUptime: TimeInterval,
+        contextDate: Date
+    ) -> some View {
+        TabView(selection: $pageSelection) {
+            WatchFacePage(
+                renderModel: renderModel,
+                timerProviders: timerProviders,
+                nowUptime: nowUptime,
+                isLive: pageSelection == 0,
+                snapshotToken: snapshotToken,
+                startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
+                reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
+            )
+            .tag(0)
+
+            WatchTimerFocusPage(
+                renderModel: renderModel,
+                timerProviders: timerProviders,
+                nowUptime: nowUptime,
+                isLive: pageSelection == 1,
+                snapshotToken: snapshotToken
+            )
+            .tag(1)
+
+            WatchControlsPage(
+                renderModel: renderModel,
+                timerProviders: timerProviders,
+                nowUptime: nowUptime,
+                isLive: pageSelection == 2,
+                snapshotToken: snapshotToken,
+                startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
+                reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
+            )
+            .tag(2)
+
+            WatchNextEventDialPage(model: nextEventDialModel, nowUptime: nowUptime)
+                .tag(3)
+
+            WatchCueSheetsPage(
+                renderModel: renderModel,
+                cueSheetsModel: cueSheetsModel,
+                selectedSheetID: $selectedCueSheetID,
+                requestCueSheetIndex: { ConnectivityManager.shared.requestCueSheetIndex(origin: "watch.cueSheets.auto") }
+            )
+            .tag(4)
         }
-        .onReceive(ConnectivityManager.shared.$incomingCueSheetIndexSummary.compactMap { $0 }) { summary in
-            handleCueSheetIndex(summary, source: .applicationContext)
-        }
-        #if DEBUG
-        .onReceive(ConnectivityManager.shared.$lastCueSheetIndexContextDebug.compactMap { $0 }) { debug in
-            cueSheetIndexContextDebug = debug
-        }
-        #endif
-        .onChange(of: scenePhase) { _ in
-            updateExtendedRuntime()
-            if scenePhase == .active {
-                requestSnapshotIfNeeded(origin: "scenePhase.active")
-                ConnectivityManager.shared.requestCueSheetIndexIfNeeded(origin: "scenePhase.active")
-            }
-        }
-        .onChange(of: phaseStr) { _ in
-            updateExtendedRuntime()
-        }
-        .onChange(of: stopActive) { _ in
-            updateExtendedRuntime()
-        }
-        .onChange(of: isLuminanceReduced) { reduced in
-            if !reduced {
-                requestSnapshotIfNeeded(origin: "luminance.full")
-            }
-        }
-        .onChange(of: pageSelection) { selection in
-            boostUntilUptime = ProcessInfo.processInfo.systemUptime + 6.0
-            updateExtendedRuntime()
-            let origin = selection == 0 ? "face.page" : "page.\(selection)"
-            requestSnapshotIfNeeded(origin: origin)
-            if selection == 4 {
-                ConnectivityManager.shared.requestCueSheetIndex(origin: "page.cueSheets")
-            }
-        }
-        .onAppear {
-            updateExtendedRuntime()
-            if let cached = loadCueSheetIndexCache() {
-                cueSheetIndexSummary = cached
-                lastCueSheetIndexSeq = cached.seq
-                cueSheetIndexSource = cached.items.isEmpty ? .none : .cache
-            } else {
-                cueSheetIndexSource = .none
-            }
-            ConnectivityManager.shared.requestCueSheetIndex(origin: "onAppear")
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .tint(appSettings.flashColor)
+        .onChange(of: contextDate) { _ in
+            handleTimelineTick(nowUptime: nowUptime)
         }
     }
 
