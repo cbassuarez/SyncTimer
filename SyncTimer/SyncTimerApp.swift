@@ -4336,6 +4336,45 @@ struct MainScreen: View {
         return (a << 24) | (r << 16) | (g << 8) | b
     }
 
+    private func makeNextEventSnapshot() -> (state: String, remaining: TimeInterval?, interval: TimeInterval?, kind: String?) {
+        guard let sheet = activeCueSheet else {
+            return (state: "none", remaining: nil, interval: nil, kind: nil)
+        }
+        let sorted = sheet.events.sorted { $0.at < $1.at }
+        guard !sorted.isEmpty else {
+            return (state: "none", remaining: nil, interval: nil, kind: nil)
+        }
+        if let next = sorted.first(where: { $0.at > elapsed }) {
+            let previousTime = sorted.last(where: { $0.at <= elapsed })?.at ?? 0
+            let interval = max(0.01, next.at - previousTime)
+            let remaining = max(0, next.at - elapsed)
+            return (
+                state: "active",
+                remaining: remaining,
+                interval: interval,
+                kind: nextEventKindString(for: next.kind)
+            )
+        }
+        return (state: "complete", remaining: nil, interval: nil, kind: nil)
+    }
+
+    private func nextEventKindString(for kind: CueSheet.Event.Kind) -> String {
+        switch kind {
+        case .cue:
+            return "cue"
+        case .restart:
+            return "restart"
+        case .stop:
+            return "stop"
+        case .message:
+            return "message"
+        case .image:
+            return "image"
+        default:
+            return "unknown"
+        }
+    }
+
     private func sendWatchSnapshot(origin: String = "tick") {
         // Snapshot checklist:
         // - Cadence is still driven by wcTick (4 Hz).
@@ -4347,6 +4386,7 @@ struct MainScreen: View {
         // - vibrateOnFlash controls whether iOS plays a haptic on flash.
         let now = Date().timeIntervalSince1970
         let seq = UInt64((now * 1000.0).rounded())
+        let nextEventSnapshot = makeNextEventSnapshot()
         let phaseString: String = {
             switch phase {
             case .idle: return "idle"
@@ -4376,7 +4416,13 @@ struct MainScreen: View {
             flashColorARGB: flashColorARGB(from: settings.flashColor),
             flashSeq: flashSeqCounter,
             flashHapticsEnabled: settings.vibrateOnFlash,
-            showHours: settings.showHours
+            showHours: settings.showHours,
+            // UI-only: optional next-event dial snapshot for watch; no timer semantics change.
+            scheduleState: nextEventSnapshot.state,
+            nextEventRemaining: nextEventSnapshot.remaining,
+            nextEventInterval: nextEventSnapshot.interval,
+            nextEventKind: nextEventSnapshot.kind,
+            nextEventStepped: false
             // If you extended TimerMessage with role/link/controlsEnabled/etc, you can also pass them here:
             // , role: (syncSettings.role == .parent ? "parent" : "child")
             // , controlsEnabled: (syncSettings.role == .parent && syncSettings.isEnabled && syncSettings.isEstablished && !(syncSettings.parentLockEnabled ?? false))
