@@ -101,8 +101,8 @@ struct NowView: View {
         timelineViewWithHandlers
     }
 
-    private var timelineViewWithHandlers: some View {
-        timelineView
+    private var timelineViewWithHandlers: AnyView {
+        AnyView(timelineView
             // Receive 4 Hz snapshots → update baseline + estimate velocity
             .onReceive(ConnectivityManager.shared.$incoming.compactMap { $0 }) { msg in
                 Task { @MainActor in
@@ -232,7 +232,7 @@ struct NowView: View {
                     cueSheetIndexSource = .none
                 }
                 ConnectivityManager.shared.requestCueSheetIndex(origin: "onAppear")
-            }
+            })
     }
 
     private var timelineView: some View {
