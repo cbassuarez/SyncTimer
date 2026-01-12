@@ -22,6 +22,9 @@ public final class ConnectivityManager: NSObject, ObservableObject {
     @Published private(set) var incomingSyncEnvelope: SyncEnvelope?
     public let commands = PassthroughSubject<ControlRequest, Never>()
     public let snapshotRequests = PassthroughSubject<SnapshotRequest, Never>()
+    #if os(watchOS)
+    public let assetUpdates = PassthroughSubject<UUID, Never>()
+    #endif
     #if DEBUG
     @Published private(set) var lastInboundDiagnostic: InboundDiagnostic?
     #endif
@@ -104,6 +107,14 @@ public final class ConnectivityManager: NSObject, ObservableObject {
         send(ControlRequest(cmd))
     }
 
+    public func sendAssetRequest(_ assetID: UUID, origin: String = "watchOS") {
+        send(ControlRequest(.requestAsset, origin: origin, assetID: assetID))
+    }
+
+    public func sendWatchAck(_ ack: WatchAck) {
+        send(ack)
+    }
+
     public func requestSnapshot(origin: String = "watchOS") {
         send(ControlRequest(.requestSnapshot, origin: origin))
     }
@@ -144,6 +155,22 @@ extension ConnectivityManager: WCSessionDelegate {
         decodeAndPublish(data, source: .messageData)
     }
 
+    public func session(_ session: WCSession, didReceive file: WCSessionFile) {
+        #if os(watchOS)
+        guard let meta = file.metadata,
+              let assetIDString = meta["assetID"] as? String,
+              let assetID = UUID(uuidString: assetIDString),
+              let data = try? Data(contentsOf: file.fileURL) else {
+            return
+        }
+        _ = WatchAssetCache.shared.store(data: data, id: assetID)
+        try? FileManager.default.removeItem(at: file.fileURL)
+        DispatchQueue.main.async {
+            self.assetUpdates.send(assetID)
+        }
+        #endif
+    }
+
     private func decodeAndPublish(_ data: Data, source: InboundSource) {
         let dec = JSONDecoder()
         if let msg = try? dec.decode(TimerMessage.self, from: data) {
@@ -165,6 +192,14 @@ extension ConnectivityManager: WCSessionDelegate {
             Task { @MainActor in
                 self.snapshotRequests.send(request)
             }
+            return
+        }
+        if let ack = try? dec.decode(WatchAck.self, from: data) {
+            #if os(iOS)
+            #if DEBUG
+            print("🐞 [WC] Watch ack: displayID=\(ack.displayID.map(String.init) ?? "nil") stateSeq=\(ack.stateSeq.map(String.init) ?? "nil") lastEvent=\(ack.lastEventIDSeen.map(String.init) ?? "nil") assets+=\(ack.assetIDsCachedDelta ?? [])")
+            #endif
+            #endif
             return
         }
         print("⚠️ [WC] unknown payload")

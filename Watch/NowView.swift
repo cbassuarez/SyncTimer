@@ -54,6 +54,14 @@ struct NowView: View {
     @State private var lastPhaseForBoost: String = ""
     @State private var lastSeqForBoost: UInt64 = 0
     @State private var lastHapticUptime: TimeInterval = 0
+    @State private var assetCacheToken: UInt64 = 0
+    @State private var lastRequestedAssetID: UUID?
+    @State private var lastAssetRequestUptime: TimeInterval = 0
+    @State private var lastAckedStateSeq: UInt64 = 0
+    @State private var lastAckedDisplayID: UInt64 = 0
+    #if DEBUG
+    @State private var showDebugOverlay: Bool = false
+    #endif
 
     @StateObject private var runtimeKeeper = ExtendedRuntimeKeeper()
 
@@ -75,38 +83,48 @@ struct NowView: View {
             let detailsModel = makeDetailsModel(nowUptime: nowUptime)
             let timerProviders = makeTimerProviders()
 
-            TabView(selection: $pageSelection) {
-                WatchFacePage(
-                    renderModel: renderModel,
-                    timerProviders: timerProviders,
-                    nowUptime: nowUptime,
-                    isLive: pageSelection == 0,
-                    snapshotToken: snapshotToken,
-                    startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
-                    reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
-                )
-                .tag(0)
-                WatchDetailsPage(
-                    renderModel: renderModel,
-                    detailsModel: detailsModel,
-                    timerProviders: timerProviders,
-                    nowUptime: nowUptime,
-                    isLive: pageSelection == 1,
-                    snapshotToken: snapshotToken
-                )
-                .tag(1)
-                WatchControlsPage(
-                    renderModel: renderModel,
-                    timerProviders: timerProviders,
-                    nowUptime: nowUptime,
-                    isLive: pageSelection == 2,
-                    snapshotToken: snapshotToken,
-                    startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
-                    reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
-                )
-                .tag(2)
+            ZStack {
+                TabView(selection: $pageSelection) {
+                    WatchFacePage(
+                        renderModel: renderModel,
+                        timerProviders: timerProviders,
+                        nowUptime: nowUptime,
+                        isLive: pageSelection == 0,
+                        snapshotToken: snapshotToken,
+                        startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
+                        reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
+                    )
+                    .tag(0)
+                    WatchDetailsPage(
+                        renderModel: renderModel,
+                        detailsModel: detailsModel,
+                        timerProviders: timerProviders,
+                        nowUptime: nowUptime,
+                        isLive: pageSelection == 1,
+                        snapshotToken: snapshotToken
+                    )
+                    .tag(1)
+                    WatchControlsPage(
+                        renderModel: renderModel,
+                        timerProviders: timerProviders,
+                        nowUptime: nowUptime,
+                        isLive: pageSelection == 2,
+                        snapshotToken: snapshotToken,
+                        startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
+                        reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
+                    )
+                    .tag(2)
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+
+                displayOverlay(nowUptime: nowUptime)
+                #if DEBUG
+                if showDebugOverlay {
+                    debugOverlay(nowUptime: nowUptime)
+                        .transition(.opacity)
+                }
+                #endif
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
             .tint(appSettings.flashColor)
             .onChange(of: context.date) { _ in
                 handleTimelineTick(nowUptime: nowUptime)
@@ -187,8 +205,24 @@ struct NowView: View {
                         #endif
                     }
                 }
+
+                handleDisplayStateUpdate(message: msg, nowUptime: now)
             }
         }
+        #if os(watchOS)
+        .onReceive(ConnectivityManager.shared.assetUpdates) { assetID in
+            assetCacheToken &+= 1
+            if let message = latestMessage {
+                let ack = WatchAck(
+                    stateSeq: message.stateSeq,
+                    displayID: message.displayState?.displayID,
+                    lastEventIDSeen: message.recentEventStamps?.first?.id,
+                    assetIDsCachedDelta: [assetID]
+                )
+                ConnectivityManager.shared.sendWatchAck(ack)
+            }
+        }
+        #endif
         .onChange(of: scenePhase) { _ in
             updateExtendedRuntime()
             if scenePhase == .active {
@@ -215,6 +249,11 @@ struct NowView: View {
         .onAppear {
             updateExtendedRuntime()
         }
+        #if DEBUG
+        .onTapGesture(count: 2) {
+            showDebugOverlay.toggle()
+        }
+        #endif
     }
 
     private func makeRenderModel(nowUptime: TimeInterval) -> WatchNowRenderModel {
@@ -337,6 +376,13 @@ struct NowView: View {
 
     private func makeFaceEvents(message: TimerMessage?) -> [WatchFaceEvent] {
         guard let message else { return [] }
+        if let stamps = message.recentEventStamps, !stamps.isEmpty {
+            let events = stamps.compactMap { stamp -> WatchFaceEvent? in
+                guard let kind = faceEventKind(from: stamp.kind) else { return nil }
+                return WatchFaceEvent(kind: kind, time: stamp.time)
+            }
+            return events.sorted { $0.time > $1.time }
+        }
         var events = [WatchFaceEvent]()
         events.append(contentsOf: message.stopEvents.map { WatchFaceEvent(kind: .stop, time: $0.eventTime) })
         events.append(contentsOf: (message.cueEvents ?? []).map { WatchFaceEvent(kind: .cue, time: $0.cueTime) })
@@ -352,6 +398,17 @@ struct NowView: View {
             }
         }
         return events.sorted { $0.time > $1.time }
+    }
+
+    private func faceEventKind(from kind: TimerMessage.EventStamp.Kind) -> WatchFaceEventKind? {
+        switch kind {
+        case .stop: return .stop
+        case .cue: return .cue
+        case .restart: return .restart
+        case .message: return .message
+        case .image: return .image
+        case .unknown: return nil
+        }
     }
 
     private func currentMain(nowUptime: TimeInterval) -> TimeInterval {
@@ -372,6 +429,30 @@ struct NowView: View {
 
     private func handleTimelineTick(nowUptime: TimeInterval) {
         updateStaleIfNeeded(nowUptime: nowUptime)
+    }
+
+    private func handleDisplayStateUpdate(message: TimerMessage, nowUptime: TimeInterval) {
+        if let displayState = resolvedDisplayState(from: message),
+           displayState.kind == .image,
+           let assetID = displayState.assetID {
+            requestAssetIfNeeded(assetID, nowUptime: nowUptime)
+        }
+        sendWatchAckIfNeeded(message: message)
+    }
+
+    private func sendWatchAckIfNeeded(message: TimerMessage) {
+        let stateSeq = message.stateSeq ?? message.actionSeq ?? 0
+        let displayID = message.displayState?.displayID ?? 0
+        let shouldAck = stateSeq != lastAckedStateSeq || displayID != lastAckedDisplayID
+        guard shouldAck else { return }
+        lastAckedStateSeq = stateSeq
+        lastAckedDisplayID = displayID
+        let ack = WatchAck(
+            stateSeq: message.stateSeq,
+            displayID: message.displayState?.displayID,
+            lastEventIDSeen: message.recentEventStamps?.first?.id
+        )
+        ConnectivityManager.shared.sendWatchAck(ack)
     }
 
     private func updateStaleIfNeeded(nowUptime: TimeInterval) {
@@ -405,6 +486,149 @@ struct NowView: View {
         lastPokeUptime = now
         ConnectivityManager.shared.requestSnapshot(origin: origin)
     }
+
+    private func requestAssetIfNeeded(_ assetID: UUID, nowUptime: TimeInterval) {
+        if WatchAssetCache.shared.image(for: assetID) != nil { return }
+        let cooldown: TimeInterval = 2.0
+        if lastRequestedAssetID == assetID && (nowUptime - lastAssetRequestUptime) < cooldown {
+            return
+        }
+        lastRequestedAssetID = assetID
+        lastAssetRequestUptime = nowUptime
+        ConnectivityManager.shared.sendAssetRequest(assetID, origin: "displayState.image")
+    }
+
+    private func resolvedDisplayState(from message: TimerMessage?) -> TimerMessage.DisplayState? {
+        if let displayState = message?.displayState {
+            return displayState
+        }
+        if let legacy = message?.display {
+            switch legacy.kind {
+            case .message:
+                return TimerMessage.DisplayState(displayID: 0, kind: .message, text: legacy.text)
+            case .image:
+                return TimerMessage.DisplayState(displayID: 0, kind: .image, assetID: legacy.assetID)
+            case .none:
+                return TimerMessage.DisplayState(displayID: 0, kind: .none)
+            }
+        }
+        return nil
+    }
+
+    @ViewBuilder
+    private func displayOverlay(nowUptime: TimeInterval) -> some View {
+        guard let displayState = resolvedDisplayState(from: latestMessage) else { EmptyView() }
+        switch displayState.kind {
+        case .cueFlash:
+            if isCueFlashActive(displayState: displayState, nowUptime: nowUptime) {
+                appSettings.flashColor
+                    .opacity(0.35)
+                    .ignoresSafeArea()
+            }
+        case .message:
+            let text = displayState.text
+            let rehearsal = displayState.rehearsalMark
+            if text != nil || (rehearsal?.isEmpty == false) {
+                VStack {
+                    WatchGlassCard(tint: appSettings.flashColor) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            if let text {
+                                Text(text)
+                                    .font(.footnote.weight(.semibold))
+                                    .multilineTextAlignment(.leading)
+                            }
+                            if let rehearsal, !rehearsal.isEmpty {
+                                Text(rehearsal)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.top, 8)
+                    Spacer()
+                }
+                .transition(.opacity)
+            }
+        case .image:
+            if let assetID = displayState.assetID {
+                VStack {
+                    WatchGlassCard(tint: appSettings.flashColor) {
+                        Group {
+                            if let image = WatchAssetCache.shared.image(for: assetID) {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(maxWidth: .infinity, maxHeight: 120)
+                            } else {
+                                VStack(spacing: 6) {
+                                    Image(systemName: "photo")
+                                        .font(.title3)
+                                        .foregroundStyle(.secondary)
+                                    Text("Loading image…")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 80)
+                            }
+                        }
+                        .id(assetCacheToken)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.top, 8)
+                    Spacer()
+                }
+                .transition(.opacity)
+            }
+        case .none, .unknown:
+            EmptyView()
+        }
+    }
+
+    private func isCueFlashActive(displayState: TimerMessage.DisplayState, nowUptime: TimeInterval) -> Bool {
+        guard displayState.kind == .cueFlash,
+              let startNs = displayState.flashStartUptimeNs,
+              let durationMs = displayState.flashDurationMs else {
+            return false
+        }
+        let nowNs = UInt64((nowUptime * 1_000_000_000).rounded())
+        let endNs = startNs &+ UInt64(durationMs) * 1_000_000
+        return nowNs >= startNs && nowNs <= endNs
+    }
+
+    #if DEBUG
+    private func debugOverlay(nowUptime: TimeInterval) -> some View {
+        let displayState = resolvedDisplayState(from: latestMessage)
+        let eventKinds = latestMessage?.recentEventStamps?.map { $0.kind.rawValue }.joined(separator: ", ") ?? "none"
+        let assetStatus: String = {
+            guard let displayState,
+                  displayState.kind == .image,
+                  let assetID = displayState.assetID else {
+                return "asset: n/a"
+            }
+            let hit = WatchAssetCache.shared.image(for: assetID) != nil
+            let status = hit ? "hit" : "miss"
+            return "asset: \(status) \(assetID.uuidString.prefix(8))"
+        }()
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("stateSeq: \(latestMessage?.stateSeq.map(String.init) ?? "nil")")
+            Text("displayID: \(displayState?.displayID.map(String.init) ?? "nil")")
+            Text("displayKind: \(displayState?.kind.rawValue ?? "nil")")
+            Text("recent: \(eventKinds)")
+            Text(assetStatus)
+            Text("lastReq: \(lastRequestedAssetID?.uuidString.prefix(8) ?? "nil")")
+            Text(String(format: "uptime: %.2f", nowUptime))
+        }
+        .font(.caption2.monospaced())
+        .padding(6)
+        .background(Color.black.opacity(0.65))
+        .cornerRadius(8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.top, 6)
+        .padding(.leading, 6)
+    }
+    #endif
 }
 
 // MARK: - Tiny clamp helper

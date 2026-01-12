@@ -316,3 +316,34 @@ final class CueDisplayController: ObservableObject {
         return result
     }
 }
+
+#if DEBUG
+extension CueDisplayController {
+    func debugSetMessage(_ payload: CueSheet.MessagePayload?) {
+        messagePayload = payload
+        if let payload {
+            slot = .message(payload)
+        } else if let image = image {
+            slot = .image(image)
+        } else {
+            slot = .none
+        }
+    }
+
+    func debugSetImage(_ payload: CueSheet.ImagePayload?) {
+        image = payload
+        if let payload {
+            slot = .image(payload)
+        } else if let message = messagePayload {
+            slot = .message(message)
+        } else {
+            slot = .none
+        }
+    }
+
+    func debugSetRehearsalMark(_ text: String?) {
+        rehearsalMarkText = text
+        settledRehearsalMarkText = text
+    }
+}
+#endif
