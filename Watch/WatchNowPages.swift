@@ -174,6 +174,8 @@ struct WatchFacePage: View {
     let nowUptime: TimeInterval
     let isLive: Bool
     let snapshotToken: UInt64
+    let startStop: () -> Void
+    let reset: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -192,8 +194,29 @@ struct WatchFacePage: View {
                         nowUptime: nowUptime,
                         snapshotToken: snapshotToken
                     )
+                    if renderModel.isStopActive {
+                        Group {
+                            if isLive {
+                                WatchTimerLiveText(
+                                    nowUptime: nowUptime,
+                                    timeProvider: timerProviders.stopValueProvider,
+                                    formattedProvider: timerProviders.stopDigitsProvider,
+                                    fallback: renderModel.stopDigits,
+                                    snapshotToken: snapshotToken
+                                )
+                            } else {
+                                Text(renderModel.stopDigits)
+                            }
+                        }
+                        .font(.footnote.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(renderModel.accent)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    }
                     chipRow
                     faceEventsRow
+                    controlsRow
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 6)
@@ -236,6 +259,26 @@ struct WatchFacePage: View {
             timerProviders: timerProviders,
             snapshotToken: snapshotToken
         )
+    }
+
+    private var controlsRow: some View {
+        HStack(spacing: 8) {
+            Button(action: startStop) {
+                Text(renderModel.isCounting ? "Stop" : "Start")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.mini)
+            .disabled(!renderModel.canStartStop)
+
+            Button(action: reset) {
+                Text("Reset")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .disabled(!renderModel.canReset)
+        }
     }
 
     private var eventKinds: [WatchFaceEventKind] {
@@ -330,6 +373,8 @@ struct WatchFaceTimelinePage: View {
     let onTick: (TimeInterval) -> Void
     let renderModelProvider: (TimeInterval) -> WatchNowRenderModel
     let timerProviders: WatchTimerProviders
+    let startStop: () -> Void
+    let reset: () -> Void
 
     var body: some View {
         // Single periodic timeline for the face so digits update together.
@@ -341,7 +386,9 @@ struct WatchFaceTimelinePage: View {
                 timerProviders: timerProviders,
                 nowUptime: nowUptime,
                 isLive: isLive,
-                snapshotToken: snapshotToken
+                snapshotToken: snapshotToken,
+                startStop: startStop,
+                reset: reset
             )
             .onChange(of: context.date) { _ in
                 onTick(nowUptime)
@@ -366,18 +413,21 @@ struct WatchControlsPage: View {
                     stopLine: renderModel.stopLine,
                     accent: renderModel.accent,
                     isStale: renderModel.isStale,
-                    size: 30,
+                    size: 38,
                     isLive: isLive,
                     timerProviders: timerProviders,
                     nowUptime: nowUptime,
                     snapshotToken: nil
                 )
+                .padding(.vertical, -2)
             }
 
             WatchGlassCard(tint: renderModel.accent) {
                 VStack(spacing: 10) {
-                    Button(action: startStop) {
-                        Text(renderModel.phaseLabel == "RUNNING" || renderModel.phaseLabel == "COUNTDOWN" ? "Stop" : "Start")
+                    Button {
+                        ConnectivityManager.shared.sendCommand(renderModel.isCounting ? .stop : .start)
+                    } label: {
+                        Text(renderModel.isCounting ? "Stop" : "Start")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
@@ -592,6 +642,7 @@ private struct WatchFaceEventCircle: View {
             stopLine: nil,
             stopDigits: "00:10.00",
             isStopActive: true,
+            isCounting: true,
             canStartStop: true,
             canReset: false,
             lockHint: "Reset available when stopped",
@@ -612,6 +663,8 @@ private struct WatchFaceEventCircle: View {
         ),
         nowUptime: 0,
         isLive: false,
-        snapshotToken: 0
+        snapshotToken: 0,
+        startStop: {},
+        reset: {}
     )
 }

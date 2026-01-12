@@ -12,6 +12,7 @@ struct WatchNowRenderModel {
     let stopLine: String?
     let stopDigits: String
     let isStopActive: Bool
+    let isCounting: Bool
     let canStartStop: Bool
     let canReset: Bool
     let lockHint: String?
@@ -81,7 +82,9 @@ struct NowView: View {
                 renderModelProvider: { uptime in
                     makeRenderModel(nowUptime: uptime)
                 },
-                timerProviders: timerProviders
+                timerProviders: timerProviders,
+                startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
+                reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
             )
             .tag(0)
             WatchDetailsPage(
@@ -226,6 +229,7 @@ struct NowView: View {
             stopLine: stopLine,
             stopDigits: formatWithCC(liveStop, preferHours: false),
             isStopActive: stopActive,
+            isCounting: isCounting,
             canStartStop: canStartStop,
             canReset: canReset,
             lockHint: lockHint,
