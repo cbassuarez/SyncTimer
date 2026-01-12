@@ -155,6 +155,11 @@
 		967A693D2F0DE50900FCD067 /* Exceptions for "Watch" folder in "SyncTimer" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				ExtendedRuntimeKeeper.swift,
+				NowView.swift,
+				WatchAssetCache.swift,
+				WatchNowPages.swift,
+				WatchStubs.swift,
 				WatchSyncTimerApp.swift,
 			);
 			target = 96DB420C2DE84D160027E9AA /* SyncTimer */;
@@ -169,12 +174,6 @@
 		968E1B0A2E79329900F79392 /* Exceptions for "Watch" folder in "SyncTimerWatch Watch App" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				ExtendedRuntimeKeeper.swift,
-				NowView.swift,
-				WatchAssetCache.swift,
-				WatchNowPages.swift,
-				WatchStubs.swift,
-				WatchSyncTimerApp.swift,
 			);
 			target = 9636A7412E791DBB00A062B6 /* SyncTimerWatch Watch App */;
 		};
