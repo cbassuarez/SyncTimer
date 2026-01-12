@@ -4440,6 +4440,7 @@ struct MainScreen: View {
             seq: Int(Date().timeIntervalSince1970 * 1000),
             message: .cueSheetIndexSummary(summary)
         )
+        ConnectivityManager.shared.pushCueSheetIndexSummaryToWatch(summary, origin: origin)
         ConnectivityManager.shared.sendSyncEnvelope(envelope)
         #if DEBUG
         print("[WC cue sheets] origin=\(origin) count=\(items.count) seq=\(summary.seq)")
@@ -5822,6 +5823,7 @@ struct MainScreen: View {
                                                Preset(name: "Cue +0:10",       kind: .cueRelative,  seconds: 10, icon: "flag.fill")
                                            ])
                                        }
+                    sendCueSheetIndexSummary(origin: "watchSession.startup")
                     ConnectivityManager.shared.commands
                         .receive(on: DispatchQueue.main)
                         .sink { cmd in
