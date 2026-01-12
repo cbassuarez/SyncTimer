@@ -1,5 +1,4 @@
 import SwiftUI
-import Combine
 import WatchConnectivity
 #if os(watchOS)
 import WatchKit
