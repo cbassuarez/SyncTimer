@@ -19,6 +19,9 @@ struct WatchNowRenderModel {
     let linkIconName: String?
     let faceEvents: [WatchFaceEvent]
     let accent: Color
+    let isFlashingNow: Bool
+    let flashStyle: WatchFlashStyle
+    let flashColor: Color
 }
 
 // MARK: - Drift-free NowView with .CC formatting (uses monotonic systemUptime)
@@ -54,6 +57,13 @@ struct NowView: View {
     @State private var lastPhaseForBoost: String = ""
     @State private var lastSeqForBoost: UInt64 = 0
     @State private var lastHapticUptime: TimeInterval = 0
+    @State private var lastSeenFlashSeq: UInt64 = 0
+    @State private var lastFlashNowSeq: UInt64 = 0
+    @State private var flashUntilUptime: TimeInterval = 0
+    @State private var cachedFlashStyle: WatchFlashStyle = .off
+    @State private var cachedFlashDuration: TimeInterval = 0.25
+    @State private var cachedFlashColor: Color = .red
+    @State private var cachedFlashHapticsEnabled: Bool = false
 
     @StateObject private var runtimeKeeper = ExtendedRuntimeKeeper()
 
@@ -160,6 +170,8 @@ struct NowView: View {
                 prevSnapT    = now
 
                 latestMessage = msg
+                applyFlashConfig(from: msg)
+                handleFlashTrigger(from: msg, nowUptime: now)
 
                 updateStaleIfNeeded(nowUptime: now)
 
@@ -222,6 +234,8 @@ struct NowView: View {
         let liveMain = currentMain(nowUptime: nowUptime)
         let liveStop = currentStop(nowUptime: nowUptime)
         let stopLine = stopActive ? "Stop " + formatWithCC(liveStop, preferHours: false) : nil
+        let isFlashingNow = nowUptime < flashUntilUptime
+        let flashColor = (latestMessage?.flashColorARGB != nil) ? cachedFlashColor : appSettings.flashColor
         let controlsEnabled = latestMessage?.controlsEnabled
         let canStartStop = !isStale && (controlsEnabled ?? true)
         let canReset = !isStale && !isCounting
@@ -245,8 +259,66 @@ struct NowView: View {
             lockHint: lockHint,
             linkIconName: linkIconName(for: latestMessage),
             faceEvents: makeFaceEvents(message: latestMessage),
-            accent: appSettings.flashColor
+            accent: appSettings.flashColor,
+            isFlashingNow: isFlashingNow,
+            flashStyle: cachedFlashStyle,
+            flashColor: flashColor
         )
+    }
+
+    private func applyFlashConfig(from message: TimerMessage) {
+        if let style = message.flashStyle {
+            cachedFlashStyle = WatchFlashStyle.fromWire(style)
+        }
+        if let durationMs = message.flashDurationMs {
+            let seconds = Double(durationMs) / 1000.0
+            cachedFlashDuration = seconds.clamped(to: 0.05...1.0)
+        }
+        if let argb = message.flashColorARGB {
+            cachedFlashColor = decodeARGBColor(argb)
+        }
+        if let hapticsEnabled = message.flashHapticsEnabled {
+            cachedFlashHapticsEnabled = hapticsEnabled
+        }
+    }
+
+    private func handleFlashTrigger(from message: TimerMessage, nowUptime: TimeInterval) {
+        var shouldFlash = false
+        if let flashSeq = message.flashSeq, flashSeq > lastSeenFlashSeq {
+            lastSeenFlashSeq = flashSeq
+            shouldFlash = true
+        } else if message.flashNow == true {
+            let seq = message.stateSeq ?? message.actionSeq ?? 0
+            if seq > lastFlashNowSeq {
+                lastFlashNowSeq = seq
+                shouldFlash = true
+            }
+        }
+        guard shouldFlash else { return }
+        let duration = cachedFlashDuration.clamped(to: 0.05...1.0)
+        flashUntilUptime = nowUptime + duration
+        #if DEBUG
+        let argb = message.flashColorARGB.map { String(format: "0x%08X", $0) } ?? "nil"
+        print("[watch] flash trigger seq=\(message.flashSeq ?? 0) style=\(cachedFlashStyle.rawValue) durationMs=\(Int(duration * 1000)) color=\(argb) phase=\(message.phase) luminanceReduced=\(isLuminanceReduced)")
+        #endif
+
+        if cachedFlashHapticsEnabled && (isLuminanceReduced || scenePhase == .active) {
+            let hapticCooldown: TimeInterval = 0.6
+            if nowUptime - lastHapticUptime > hapticCooldown {
+                lastHapticUptime = nowUptime
+                #if os(watchOS)
+                WKInterfaceDevice.current().play(.click)
+                #endif
+            }
+        }
+    }
+
+    private func decodeARGBColor(_ argb: UInt32) -> Color {
+        let a = Double((argb >> 24) & 0xFF) / 255.0
+        let r = Double((argb >> 16) & 0xFF) / 255.0
+        let g = Double((argb >> 8) & 0xFF) / 255.0
+        let b = Double(argb & 0xFF) / 255.0
+        return Color(.sRGB, red: r, green: g, blue: b, opacity: a)
     }
 
     private func makeDetailsModel(nowUptime: TimeInterval) -> WatchNowDetailsModel {

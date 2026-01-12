@@ -71,6 +71,16 @@ public struct TimerMessage: Codable, Equatable {
         public var syncLamp: String?
         /// one-shot edge for cue/zero-flash haptic (optional)
         public var flashNow: Bool?
+        /// flash style identifier (e.g., "fullTimer", "dot", "tint")
+        public var flashStyle: String?
+        /// flash duration in milliseconds
+        public var flashDurationMs: Int?
+        /// flash color in ARGB (0xAARRGGBB)
+        public var flashColorARGB: UInt32?
+        /// monotonic flash sequence for edge detection
+        public var flashSeq: UInt64?
+        /// haptic enabled for flash, mirrors iOS setting
+        public var flashHapticsEnabled: Bool?
         public var showHours: Bool?
         public var display: TimerDisplayWire?
         public var assetManifest: [CueAssetManifestItem]?
@@ -99,6 +109,11 @@ public struct TimerMessage: Codable, Equatable {
                       controlsEnabled: Bool? = nil,
                       syncLamp: String? = nil,
                       flashNow: Bool? = nil,
+                      flashStyle: String? = nil,
+                      flashDurationMs: Int? = nil,
+                      flashColorARGB: UInt32? = nil,
+                      flashSeq: UInt64? = nil,
+                      flashHapticsEnabled: Bool? = nil,
                       showHours: Bool? = nil,
                       display: TimerDisplayWire? = nil,
                       assetManifest: [CueAssetManifestItem]? = nil,
@@ -125,6 +140,11 @@ public struct TimerMessage: Codable, Equatable {
                   self.controlsEnabled   = controlsEnabled
                   self.syncLamp          = syncLamp
                   self.flashNow          = flashNow
+        self.flashStyle        = flashStyle
+        self.flashDurationMs   = flashDurationMs
+        self.flashColorARGB    = flashColorARGB
+        self.flashSeq          = flashSeq
+        self.flashHapticsEnabled = flashHapticsEnabled
         self.showHours         = showHours
         self.display           = display
         self.assetManifest     = assetManifest
