@@ -1,12 +1,18 @@
 import Foundation
 import SwiftUI
+#if canImport(Combine)
+import Combine
+#endif
 #if canImport(WatchKit)
 import WatchKit
 #endif
 
 #if canImport(WatchKit)
 @MainActor
-final class ExtendedRuntimeKeeper: NSObject, WKExtendedRuntimeSessionDelegate, ObservableObject {
+final class ExtendedRuntimeKeeper: NSObject, ObservableObject, WKExtendedRuntimeSessionDelegate {
+#if canImport(Combine)
+    let objectWillChange = ObservableObjectPublisher()
+#endif
     private var session: WKExtendedRuntimeSession?
     private var lastInvalidationUptime: TimeInterval = 0
 
@@ -42,6 +48,17 @@ final class ExtendedRuntimeKeeper: NSObject, WKExtendedRuntimeSessionDelegate, O
     }
 
     func extendedRuntimeSessionDidInvalidate(_ extendedRuntimeSession: WKExtendedRuntimeSession) {
+        if session === extendedRuntimeSession {
+            session = nil
+            lastInvalidationUptime = ProcessInfo.processInfo.systemUptime
+        }
+    }
+
+    func extendedRuntimeSession(
+        _ extendedRuntimeSession: WKExtendedRuntimeSession,
+        didInvalidateWith reason: WKExtendedRuntimeSessionInvalidationReason,
+        error: Error?
+    ) {
         if session === extendedRuntimeSession {
             session = nil
             lastInvalidationUptime = ProcessInfo.processInfo.systemUptime
