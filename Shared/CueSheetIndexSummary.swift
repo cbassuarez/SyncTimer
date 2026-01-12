@@ -7,16 +7,26 @@
 
 import Foundation
 
-public struct CueSheetIndexSummary: Codable, Identifiable, Equatable {
-    public let id: UUID
-    public let title: String
-    public let cueCount: Int?
-    public let modifiedAt: Date?
+public struct CueSheetIndexSummary: Codable, Equatable {
+    public struct Item: Codable, Equatable, Identifiable {
+        public let id: UUID
+        public let name: String
+        public let cueCount: Int?
+        public let modifiedAt: Double?
 
-    public init(id: UUID, title: String, cueCount: Int?, modifiedAt: Date?) {
-        self.id = id
-        self.title = title
-        self.cueCount = cueCount
-        self.modifiedAt = modifiedAt
+        public init(id: UUID, name: String, cueCount: Int?, modifiedAt: Double?) {
+            self.id = id
+            self.name = name
+            self.cueCount = cueCount
+            self.modifiedAt = modifiedAt
+        }
+    }
+
+    public let items: [Item]
+    public let seq: UInt64
+
+    public init(items: [Item], seq: UInt64) {
+        self.items = items
+        self.seq = seq
     }
 }

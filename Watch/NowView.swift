@@ -81,9 +81,10 @@ struct NowView: View {
     @State private var lastScheduleStateForBoost: WatchScheduleState = .none
     @State private var lastScheduleStateForHaptic: WatchScheduleState = .none
     @State private var lastCompleteHapticUptime: TimeInterval = 0
-    @State private var cueSheetIndex: [CueSheetIndexSummary] = []
+    @State private var cueSheetIndexSummary: CueSheetIndexSummary?
+    @State private var cueSheetIndexSource: WatchCueSheetIndexSource = .none
+    @State private var lastCueSheetIndexSeq: UInt64 = 0
     @State private var selectedCueSheetID: UUID? = nil
-    @State private var lastCueSheetIndexRequestUptime: TimeInterval = -10
 
     @StateObject private var runtimeKeeper = ExtendedRuntimeKeeper()
 
@@ -143,7 +144,8 @@ struct NowView: View {
                 WatchCueSheetsPage(
                     renderModel: renderModel,
                     cueSheetsModel: cueSheetsModel,
-                    selectedSheetID: $selectedCueSheetID
+                    selectedSheetID: $selectedCueSheetID,
+                    requestCueSheetIndex: { ConnectivityManager.shared.requestCueSheetIndex(origin: "watch.cueSheets.refresh") }
                 )
                 .tag(4)
             }
@@ -239,8 +241,8 @@ struct NowView: View {
             }
         }
         .onReceive(ConnectivityManager.shared.$incomingSyncEnvelope.compactMap { $0 }) { envelope in
-            if case let .cueSheetIndex(index) = envelope.message {
-                handleCueSheetIndex(index)
+            if case let .cueSheetIndexSummary(summary) = envelope.message {
+                handleCueSheetIndex(summary, source: .phoneIndex)
             }
         }
         .onChange(of: scenePhase) { _ in
@@ -266,13 +268,19 @@ struct NowView: View {
             let origin = selection == 0 ? "face.page" : "page.\(selection)"
             requestSnapshotIfNeeded(origin: origin)
             if selection == 4 {
-                requestCueSheetIndexIfNeeded(origin: "page.cueSheets")
+                ConnectivityManager.shared.requestCueSheetIndex(origin: "page.cueSheets")
             }
         }
         .onAppear {
             updateExtendedRuntime()
-            cueSheetIndex = loadCueSheetIndexCache()
-            requestCueSheetIndexIfNeeded(origin: "onAppear")
+            if let cached = loadCueSheetIndexCache() {
+                cueSheetIndexSummary = cached
+                lastCueSheetIndexSeq = cached.seq
+                cueSheetIndexSource = cached.items.isEmpty ? .none : .cache
+            } else {
+                cueSheetIndexSource = .none
+            }
+            ConnectivityManager.shared.requestCueSheetIndex(origin: "onAppear")
         }
     }
 
@@ -653,17 +661,20 @@ struct NowView: View {
             label: latestMessage?.sheetLabel,
             sheetID: loadedSheetID
         )
-        let sheets = cueSheetIndex.map {
+        let items = cueSheetIndexSummary?.items ?? []
+        let sheets = items.map {
             WatchCueSheetSummary(
                 id: $0.id,
-                name: $0.title,
+                name: $0.name,
                 cueCount: $0.cueCount,
-                modifiedAt: $0.modifiedAt
+                modifiedAt: $0.modifiedAt.map { Date(timeIntervalSince1970: $0) }
             )
         }
         let selection = selectedCueSheetID.flatMap { id in
             sheets.contains(where: { $0.id == id }) ? id : nil
         }
+        let activationStateLabel = activationStateDescription()
+        let isReachable = ConnectivityManager.shared.session?.isReachable
 
         return WatchCueSheetsModel(
             role: role,
@@ -674,8 +685,31 @@ struct NowView: View {
             isLockedFromParent: role == .child && isConnected,
             sheets: sheets,
             selectedSheetID: selection,
-            childCount: nil
+            childCount: nil,
+            cueSheetIndexSource: cueSheetIndexSource,
+            activationStateLabel: activationStateLabel,
+            isReachable: isReachable
         )
+    }
+
+    private func activationStateDescription() -> String {
+        #if canImport(WatchConnectivity)
+        guard let state = ConnectivityManager.shared.session?.activationState else {
+            return "unknown"
+        }
+        switch state {
+        case .activated:
+            return "activated"
+        case .inactive:
+            return "inactive"
+        case .notActivated:
+            return "notActivated"
+        @unknown default:
+            return "unknown"
+        }
+        #else
+        return "unsupported"
+        #endif
     }
 
     private func resolveLoadedSheetName(label: String?, sheetID: UUID?) -> String? {
@@ -683,8 +717,8 @@ struct NowView: View {
             return label
         }
         if let sheetID,
-           let match = cueSheetIndex.first(where: { $0.id == sheetID }) {
-            return match.title
+           let match = cueSheetIndexSummary?.items.first(where: { $0.id == sheetID }) {
+            return match.name
         }
         return nil
     }
@@ -700,32 +734,29 @@ struct NowView: View {
         return link != "unreachable"
     }
 
-    private func handleCueSheetIndex(_ index: [CueSheetIndexSummary]) {
-        cueSheetIndex = index
-        storeCueSheetIndexCache(index)
+    private func handleCueSheetIndex(_ summary: CueSheetIndexSummary, source: WatchCueSheetIndexSource) {
+        if summary.seq > 0, summary.seq < lastCueSheetIndexSeq {
+            return
+        }
+        lastCueSheetIndexSeq = max(lastCueSheetIndexSeq, summary.seq)
+        cueSheetIndexSummary = summary
+        cueSheetIndexSource = source
+        storeCueSheetIndexCache(summary)
         if let selectedCueSheetID,
-           !index.contains(where: { $0.id == selectedCueSheetID }) {
+           !summary.items.contains(where: { $0.id == selectedCueSheetID }) {
             self.selectedCueSheetID = nil
         }
     }
 
-    private func requestCueSheetIndexIfNeeded(origin: String) {
-        let now = ProcessInfo.processInfo.systemUptime
-        let cooldown: TimeInterval = 10.0
-        guard now - lastCueSheetIndexRequestUptime >= cooldown else { return }
-        lastCueSheetIndexRequestUptime = now
-        ConnectivityManager.shared.send(ControlRequest(.requestCueSheetIndex, origin: origin))
+    private func loadCueSheetIndexCache() -> CueSheetIndexSummary? {
+        let key = "CueSheetIndexSummaryCache"
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(CueSheetIndexSummary.self, from: data)
     }
 
-    private func loadCueSheetIndexCache() -> [CueSheetIndexSummary] {
-        let key = "watchCueSheetIndex"
-        guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
-        return (try? JSONDecoder().decode([CueSheetIndexSummary].self, from: data)) ?? []
-    }
-
-    private func storeCueSheetIndexCache(_ index: [CueSheetIndexSummary]) {
-        let key = "watchCueSheetIndex"
-        guard let data = try? JSONEncoder().encode(index) else { return }
+    private func storeCueSheetIndexCache(_ summary: CueSheetIndexSummary) {
+        let key = "CueSheetIndexSummaryCache"
+        guard let data = try? JSONEncoder().encode(summary) else { return }
         UserDefaults.standard.set(data, forKey: key)
     }
 
