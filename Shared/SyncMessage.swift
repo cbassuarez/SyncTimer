@@ -4,6 +4,7 @@ public enum SyncMessage: Codable {
     case sheetSnapshot(CueSheet)
     case playbackState(PlaybackState)
     case cueEvent(CueEvent)
+    case cueSheetIndex([CueSheetIndexSummary])
 }
 
 public struct SyncEnvelope: Codable {

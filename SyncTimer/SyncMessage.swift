@@ -14,18 +14,21 @@ enum SyncMessage: Codable {
     case sheetSnapshot(CueSheet)
     case playbackState(PlaybackState)
     case cueEvent(CueEvent)
+    case cueSheetIndex([CueSheetIndexSummary])
 
     private enum CodingKeys: String, CodingKey {
         case type
         case sheetSnapshot
         case playbackState
         case cueEvent
+        case cueSheetIndex
     }
 
     private enum MessageType: String, Codable {
         case sheetSnapshot
         case playbackState
         case cueEvent
+        case cueSheetIndex
     }
 
     private static func encodeSheetSnapshot(_ sheet: CueSheet) throws -> String {
@@ -66,6 +69,9 @@ enum SyncMessage: Codable {
         case .cueEvent:
             let event = try container.decode(CueEvent.self, forKey: .cueEvent)
             self = .cueEvent(event)
+        case .cueSheetIndex:
+            let index = try container.decode([CueSheetIndexSummary].self, forKey: .cueSheetIndex)
+            self = .cueSheetIndex(index)
         }
     }
 
@@ -82,6 +88,9 @@ enum SyncMessage: Codable {
         case .cueEvent(let event):
             try container.encode(MessageType.cueEvent, forKey: .type)
             try container.encode(event, forKey: .cueEvent)
+        case .cueSheetIndex(let index):
+            try container.encode(MessageType.cueSheetIndex, forKey: .type)
+            try container.encode(index, forKey: .cueSheetIndex)
         }
     }
 }
