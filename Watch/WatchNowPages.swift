@@ -33,6 +33,33 @@ struct WatchEventDot: Identifiable {
     }
 }
 
+enum WatchFlashStyle: String {
+    case off
+    case fullTimer
+    case delimiters
+    case numbers
+    case dot
+    case tint
+
+    static func fromWire(_ value: String?) -> WatchFlashStyle {
+        guard let value else { return .off }
+        switch value.lowercased() {
+        case "fulltimer":
+            return .fullTimer
+        case "delimiters":
+            return .delimiters
+        case "numbers":
+            return .numbers
+        case "dot":
+            return .dot
+        case "tint":
+            return .tint
+        default:
+            return .off
+        }
+    }
+}
+
 enum WatchFaceEventKind: Equatable {
     case stop
     case cue
@@ -49,10 +76,12 @@ struct WatchFaceEvent {
 
 struct WatchGlassCard<Content: View>: View {
     let tint: Color?
+    let flashOverlay: Color?
     let content: Content
 
-    init(tint: Color? = nil, @ViewBuilder content: () -> Content) {
+    init(tint: Color? = nil, flashOverlay: Color? = nil, @ViewBuilder content: () -> Content) {
         self.tint = tint
+        self.flashOverlay = flashOverlay
         self.content = content()
     }
 
@@ -61,7 +90,14 @@ struct WatchGlassCard<Content: View>: View {
         content
             .padding(12)
             .frame(maxWidth: .infinity)
-            .background(glassBackground(in: shape))
+            .background(
+                ZStack {
+                    glassBackground(in: shape)
+                    if let flashOverlay {
+                        shape.fill(flashOverlay)
+                    }
+                }
+            )
             .overlay(shape.stroke(rimColor, lineWidth: 0.6))
             .shadow(color: Color.black.opacity(0.12), radius: 1, x: 0, y: 0.5)
     }
@@ -119,6 +155,9 @@ struct WatchTimerHeader: View {
     let timerProviders: WatchTimerProviders
     let nowUptime: TimeInterval
     let snapshotToken: UInt64?
+    let isFlashingNow: Bool
+    let flashStyle: WatchFlashStyle
+    let flashColor: Color
 
     var body: some View {
         headerStack
@@ -129,17 +168,16 @@ struct WatchTimerHeader: View {
     private var headerStack: some View {
         VStack(alignment: alignment, spacing: 4) {
             Group {
-                if isLive {
-                    WatchTimerLiveText(
-                        nowUptime: nowUptime,
-                        timeProvider: timerProviders.mainValueProvider,
-                        formattedProvider: timerProviders.formattedStringProvider,
-                        fallback: formattedMain,
-                        snapshotToken: snapshotToken
-                    )
-                } else {
-                    Text(formattedMain)
-                }
+                WatchTimerFlashText(
+                    nowUptime: nowUptime,
+                    isLive: isLive,
+                    formattedProvider: timerProviders.formattedStringProvider,
+                    fallback: formattedMain,
+                    snapshotToken: snapshotToken,
+                    isFlashingNow: isFlashingNow,
+                    flashStyle: flashStyle,
+                    flashColor: flashColor
+                )
             }
             .font(.system(size: size, weight: .semibold, design: .rounded))
             .monospacedDigit()
@@ -184,7 +222,12 @@ struct WatchFacePage: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            WatchGlassCard(tint: renderModel.accent) {
+            WatchGlassCard(
+                tint: renderModel.accent,
+                flashOverlay: (renderModel.isFlashingNow && renderModel.flashStyle == .tint)
+                    ? renderModel.flashColor.opacity(0.18)
+                    : nil
+            ) {
                 VStack(alignment: .center, spacing: 8) {
                     WatchTimerHeader(
                         formattedMain: renderModel.formattedMain,
@@ -197,7 +240,10 @@ struct WatchFacePage: View {
                         frameAlignment: .center,
                         timerProviders: timerProviders,
                         nowUptime: nowUptime,
-                        snapshotToken: snapshotToken
+                        snapshotToken: snapshotToken,
+                        isFlashingNow: renderModel.isFlashingNow,
+                        flashStyle: renderModel.flashStyle,
+                        flashColor: renderModel.flashColor
                     )
                     if renderModel.isStopActive {
                         Group {
@@ -304,7 +350,12 @@ struct WatchDetailsPage: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            WatchGlassCard(tint: renderModel.accent) {
+            WatchGlassCard(
+                tint: renderModel.accent,
+                flashOverlay: (renderModel.isFlashingNow && renderModel.flashStyle == .tint)
+                    ? renderModel.flashColor.opacity(0.18)
+                    : nil
+            ) {
                 WatchTimerHeader(
                     formattedMain: renderModel.formattedMain,
                     stopLine: renderModel.stopLine,
@@ -316,7 +367,10 @@ struct WatchDetailsPage: View {
                     frameAlignment: .leading,
                     timerProviders: timerProviders,
                     nowUptime: nowUptime,
-                    snapshotToken: snapshotToken
+                    snapshotToken: snapshotToken,
+                    isFlashingNow: renderModel.isFlashingNow,
+                    flashStyle: renderModel.flashStyle,
+                    flashColor: renderModel.flashColor
                 )
             }
 
@@ -386,7 +440,12 @@ struct WatchControlsPage: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            WatchGlassCard(tint: renderModel.accent) {
+            WatchGlassCard(
+                tint: renderModel.accent,
+                flashOverlay: (renderModel.isFlashingNow && renderModel.flashStyle == .tint)
+                    ? renderModel.flashColor.opacity(0.18)
+                    : nil
+            ) {
                 WatchTimerHeader(
                     formattedMain: renderModel.formattedMain,
                     stopLine: renderModel.stopLine,
@@ -398,7 +457,10 @@ struct WatchControlsPage: View {
                     frameAlignment: .leading,
                     timerProviders: timerProviders,
                     nowUptime: nowUptime,
-                    snapshotToken: snapshotToken
+                    snapshotToken: snapshotToken,
+                    isFlashingNow: renderModel.isFlashingNow,
+                    flashStyle: renderModel.flashStyle,
+                    flashColor: renderModel.flashColor
                 )
                 .padding(.vertical, -2)
             }
@@ -501,6 +563,66 @@ private struct WatchTimerLiveText: View {
         let text = formattedProvider(nowUptime)
         return Text(text.isEmpty ? fallback : text)
             .id(snapshotToken ?? 0)
+    }
+}
+
+private struct WatchTimerFlashText: View {
+    let nowUptime: TimeInterval
+    let isLive: Bool
+    let formattedProvider: (TimeInterval) -> String
+    let fallback: String
+    let snapshotToken: UInt64?
+    let isFlashingNow: Bool
+    let flashStyle: WatchFlashStyle
+    let flashColor: Color
+
+    var body: some View {
+        let text = isLive ? formattedProvider(nowUptime) : fallback
+        let display = text.isEmpty ? fallback : text
+        return ZStack(alignment: .topTrailing) {
+            if isFlashingNow, (flashStyle == .numbers || flashStyle == .delimiters) {
+                Text(flashAttributedString(for: display))
+            } else {
+                Text(display)
+                    .foregroundStyle(flashForeground)
+            }
+            if isFlashingNow, flashStyle == .dot {
+                Circle()
+                    .fill(flashColor)
+                    .frame(width: 8, height: 8)
+                    .offset(x: 6, y: -6)
+            }
+        }
+        .id(snapshotToken ?? 0)
+    }
+
+    private var flashForeground: Color {
+        guard isFlashingNow else { return .primary }
+        switch flashStyle {
+        case .fullTimer, .tint:
+            return flashColor
+        default:
+            return .primary
+        }
+    }
+
+    private func flashAttributedString(for text: String) -> AttributedString {
+        var attributed = AttributedString(text)
+        for index in attributed.characters.indices {
+            let ch = attributed.characters[index]
+            let isDelimiter = ch == ":" || ch == "."
+            let shouldFlash: Bool
+            switch flashStyle {
+            case .delimiters:
+                shouldFlash = isDelimiter
+            case .numbers:
+                shouldFlash = !isDelimiter
+            default:
+                shouldFlash = false
+            }
+            attributed[index...index].foregroundColor = shouldFlash ? flashColor : .primary
+        }
+        return attributed
     }
 }
 
@@ -639,7 +761,10 @@ private struct WatchFaceEventCircle: View {
                 WatchFaceEvent(kind: .cue, time: 8),
                 WatchFaceEvent(kind: .restart, time: 5)
             ],
-            accent: .red
+            accent: .red,
+            isFlashingNow: true,
+            flashStyle: .fullTimer,
+            flashColor: .red
         ),
         timerProviders: WatchTimerProviders(
             mainValueProvider: { _ in 0 },

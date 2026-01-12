@@ -4315,11 +4315,36 @@ struct MainScreen: View {
             return (stops, cues, restarts, label)
         }
 
+    private func recordFlashTrigger() {
+        flashSeqCounter &+= 1
+    }
+
+    private func flashColorARGB(from color: Color) -> UInt32 {
+        let uiColor = UIColor(color)
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        if !uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) {
+            let fallback = UIColor.red
+            fallback.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        }
+        let a = UInt32((alpha * 255).rounded())
+        let r = UInt32((red * 255).rounded())
+        let g = UInt32((green * 255).rounded())
+        let b = UInt32((blue * 255).rounded())
+        return (a << 24) | (r << 16) | (g << 8) | b
+    }
+
     private func sendWatchSnapshot(origin: String = "tick") {
         // Snapshot checklist:
         // - Cadence is still driven by wcTick (4 Hz).
         // - Phase mapping, lock rules, and timer math are unchanged.
         // - Snapshot wire payload stays optional/compatible with older builds.
+        // iOS cue flash semantics (watch mirror reference):
+        // - flashZero fires for countdown reaching zero and cue events.
+        // - flashStyle/flashColor/flashDurationOption define the look + duration.
+        // - vibrateOnFlash controls whether iOS plays a haptic on flash.
         let now = Date().timeIntervalSince1970
         let seq = UInt64((now * 1000.0).rounded())
         let phaseString: String = {
@@ -4346,6 +4371,11 @@ struct MainScreen: View {
             stopRemainingActive: stopRemaining,
             cueEvents: snapshot.cues,
             restartEvents: snapshot.restarts,
+            flashStyle: settings.flashStyle.rawValue,
+            flashDurationMs: settings.flashDurationOption,
+            flashColorARGB: flashColorARGB(from: settings.flashColor),
+            flashSeq: flashSeqCounter,
+            flashHapticsEnabled: settings.vibrateOnFlash,
             showHours: settings.showHours
             // If you extended TimerMessage with role/link/controlsEnabled/etc, you can also pass them here:
             // , role: (syncSettings.role == .parent ? "parent" : "child")
@@ -4394,6 +4424,7 @@ struct MainScreen: View {
 
     @State var phase: Phase = .idle
     @State private var flashZero: Bool = false
+    @State private var flashSeqCounter: UInt64 = 0
     @State var countdownDigits: [Int] = []
     @State private var countdownDuration: TimeInterval = 0
     @State var countdownRemaining: TimeInterval = 0
@@ -7505,6 +7536,7 @@ struct MainScreen: View {
             phase = .running
             startDate = Date()
             flashZero = true
+            recordFlashTrigger()
             if settings.vibrateOnFlash {
                 // vibrate the device when the flash fires
                 AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
@@ -7597,6 +7629,7 @@ struct MainScreen: View {
 
                 case .cue(let c):
                     flashZero = true
+                    recordFlashTrigger()
                     let flashSec = Double(settings.flashDurationOption) / 1000.0
                     DispatchQueue.main.asyncAfter(deadline: .now() + flashSec) {
                         flashZero = false
@@ -8542,6 +8575,7 @@ struct MainScreen: View {
                     // If parent sent an immediate flash edge (cue), mirror it
                                 if msg.flashNow == true {
                                     flashZero = true
+                                    recordFlashTrigger()
                                     let flashSec = Double(settings.flashDurationOption) / 1000.0
                                     DispatchQueue.main.asyncAfter(deadline: .now() + flashSec) { flashZero = false }
                                 }
