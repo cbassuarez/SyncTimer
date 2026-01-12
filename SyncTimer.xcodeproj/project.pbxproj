@@ -171,6 +171,7 @@
 			membershipExceptions = (
 				ExtendedRuntimeKeeper.swift,
 				NowView.swift,
+				WatchAssetCache.swift,
 				WatchNowPages.swift,
 				WatchStubs.swift,
 				WatchSyncTimerApp.swift,
