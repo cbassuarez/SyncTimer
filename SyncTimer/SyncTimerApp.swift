@@ -4315,11 +4315,13 @@ struct MainScreen: View {
             return (stops, cues, restarts, label)
         }
 
-    private func sendWatchSnapshot() {
+    private func sendWatchSnapshot(origin: String = "tick") {
         // Snapshot checklist:
         // - Cadence is still driven by wcTick (4 Hz).
         // - Phase mapping, lock rules, and timer math are unchanged.
         // - Snapshot wire payload stays optional/compatible with older builds.
+        let now = Date().timeIntervalSince1970
+        let seq = UInt64((now * 1000.0).rounded())
         let phaseString: String = {
             switch phase {
             case .idle: return "idle"
@@ -4333,7 +4335,8 @@ struct MainScreen: View {
         let snapshot = encodeCurrentEvents()
         let tm = TimerMessage(
             action: .update,
-            timestamp: Date().timeIntervalSince1970,
+            stateSeq: seq,
+            timestamp: now,
             phase: phaseString,
             remaining: displayMainTime(),
             stopEvents: snapshot.stops,
@@ -4350,6 +4353,9 @@ struct MainScreen: View {
             // , syncLamp: (syncSettings.isEnabled && syncSettings.isEstablished ? "green" : (syncSettings.isEnabled ? "amber" : "red"))
             // , flashNow: flashZero
         )
+        #if DEBUG
+        print("[WC snapshot] origin=\(origin) phase=\(phaseString) remaining=\(String(format: "%.2f", tm.remaining)) stopActive=\(tm.isStopActive ?? false) stopRemaining=\(String(format: "%.2f", tm.stopRemainingActive ?? 0)) stateSeq=\(seq)")
+        #endif
 
         ConnectivityManager.shared.send(tm)
         if syncSettings.role == .parent && syncSettings.isEnabled {
@@ -5667,7 +5673,7 @@ struct MainScreen: View {
                     ConnectivityManager.shared.snapshotRequests
                         .receive(on: DispatchQueue.main)
                         .sink { _ in
-                            sendWatchSnapshot()
+                            sendWatchSnapshot(origin: "snapshotRequest")
                         }
                         .store(in: &wcCancellables)
                 }
@@ -5693,7 +5699,7 @@ struct MainScreen: View {
             
             // 2) Push TimerMessage snapshots at 4 Hz
                 .onReceive(wcTick) { _ in
-                    sendWatchSnapshot()
+                    sendWatchSnapshot(origin: "tick")
 
                     if syncSettings.role == .parent,
                        syncSettings.isEnabled,
@@ -7924,7 +7930,7 @@ struct MainScreen: View {
     
     //──────────────────── toggleStart / resetAll ─────────────────────────
     private func toggleStart() {
-        defer { sendWatchSnapshot() }
+        defer { sendWatchSnapshot(origin: "toggleStart") }
         switch phase {
         case .idle:
             // If we previously finished a countdown and the user then edited digits,
@@ -8160,7 +8166,7 @@ struct MainScreen: View {
     // MARK: – Reset everything (called by your “Reset” button)
     private func resetAll() {
         guard phase == .idle || phase == .paused else { return }
-        defer { sendWatchSnapshot() }
+        defer { sendWatchSnapshot(origin: "resetAll") }
         ticker?.cancel()
         phase = .idle
         clearPlaybackStopAnchor()

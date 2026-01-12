@@ -322,11 +322,15 @@ private extension NowView {
         #if DEBUG
         let now = ProcessInfo.processInfo.systemUptime
         let ageMs = Int(max(0, now - lastSnapUptime) * 1000)
+        let inbound = ConnectivityManager.shared.lastInboundDiagnostic
+        let inboundAgeMs = inbound.map { Int(max(0, now - $0.arrivalUptime) * 1000) } ?? -1
         let seqText = latestMessage?.stateSeq ?? latestMessage?.actionSeq ?? snapCounter
         let stopCount = latestMessage?.stopEvents.count ?? 0
         let cueCount = latestMessage?.cueEvents?.count ?? 0
         let restartCount = latestMessage?.restartEvents?.count ?? 0
         return [
+            "src:\(inbound?.source.rawValue ?? "n/a") seq:\(inbound?.stateSeq ?? inbound?.actionSeq ?? inbound?.derivedSeq ?? 0)",
+            "phase:\(inbound?.phase ?? phaseStr) rem:\(String(format: "%.2f", inbound?.remaining ?? snapMain)) age:\(inboundAgeMs)ms",
             "seq:\(seqText) phase:\(phaseStr) rem:\(String(format: "%.2f", snapMain))",
             "events s:\(stopCount) c:\(cueCount) r:\(restartCount) age:\(ageMs)ms",
             "v:\(String(format: "%.2f", vMain)) base:\(String(format: "%.2f", baseMain)) live:\(pageSelection == 0)"

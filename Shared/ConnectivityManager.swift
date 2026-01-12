@@ -14,11 +14,17 @@ public final class ConnectivityManager: NSObject, ObservableObject {
 
     private(set) var session: WCSession? = nil
     private var lastTimerMessage: TimerMessage?
+    #if os(watchOS)
+    private var lastAppliedSeq: UInt64 = 0
+    #endif
 
     @Published public private(set) var incoming: TimerMessage?
     @Published private(set) var incomingSyncEnvelope: SyncEnvelope?
     public let commands = PassthroughSubject<ControlRequest, Never>()
     public let snapshotRequests = PassthroughSubject<SnapshotRequest, Never>()
+    #if DEBUG
+    @Published private(set) var lastInboundDiagnostic: InboundDiagnostic?
+    #endif
     /// Convenience: only returns session when supported **and** activated.
         private var activatedSession: WCSession? {
             #if canImport(WatchConnectivity)
@@ -129,27 +135,99 @@ extension ConnectivityManager: WCSessionDelegate {
 
     public func session(_ session: WCSession,
                         didReceiveApplicationContext applicationContext: [String : Any]) {
-        if let data = applicationContext["timer"] as? Data { decodeAndPublish(data) }
+        if let data = applicationContext["timer"] as? Data {
+            decodeAndPublish(data, source: .appContext)
+        }
     }
 
     public func session(_ session: WCSession, didReceiveMessageData data: Data) {
-        decodeAndPublish(data)
+        decodeAndPublish(data, source: .messageData)
     }
 
-    private func decodeAndPublish(_ data: Data) {
+    private func decodeAndPublish(_ data: Data, source: InboundSource) {
         let dec = JSONDecoder()
         if let msg = try? dec.decode(TimerMessage.self, from: data) {
-            DispatchQueue.main.async { self.incoming = msg }; return
+            handleTimerMessage(msg, source: source); return
         }
         if let env = try? dec.decode(SyncEnvelope.self, from: data) {
-            DispatchQueue.main.async { self.incomingSyncEnvelope = env }; return
+            Task { @MainActor in
+                self.incomingSyncEnvelope = env
+            }
+            return
         }
         if let cmd = try? dec.decode(ControlRequest.self, from: data) {
-            DispatchQueue.main.async { self.commands.send(cmd) }; return
+            Task { @MainActor in
+                self.commands.send(cmd)
+            }
+            return
         }
         if let request = try? dec.decode(SnapshotRequest.self, from: data) {
-            DispatchQueue.main.async { self.snapshotRequests.send(request) }; return
+            Task { @MainActor in
+                self.snapshotRequests.send(request)
+            }
+            return
         }
         print("⚠️ [WC] unknown payload")
     }
+
+    private func handleTimerMessage(_ msg: TimerMessage, source: InboundSource) {
+        let uptime = ProcessInfo.processInfo.systemUptime
+        let sequence = sequenceToken(for: msg)
+        Task { @MainActor in
+            #if DEBUG
+            self.lastInboundDiagnostic = InboundDiagnostic(
+                source: source,
+                phase: msg.phase,
+                remaining: msg.remaining,
+                isStopActive: msg.isStopActive,
+                stopRemainingActive: msg.stopRemainingActive,
+                stateSeq: msg.stateSeq,
+                actionSeq: msg.actionSeq,
+                derivedSeq: sequence.value,
+                arrivalUptime: uptime
+            )
+            #endif
+            #if os(watchOS)
+            if sequence.value < self.lastAppliedSeq {
+                return
+            }
+            self.lastAppliedSeq = sequence.value
+            #endif
+            self.incoming = msg
+        }
+    }
+
+    private func sequenceToken(for msg: TimerMessage) -> SequenceToken {
+        if let stateSeq = msg.stateSeq {
+            return SequenceToken(value: stateSeq)
+        }
+        if let actionSeq = msg.actionSeq {
+            return SequenceToken(value: actionSeq)
+        }
+        let derived = UInt64((msg.timestamp * 1000.0).rounded())
+        return SequenceToken(value: derived)
+    }
 }
+
+private struct SequenceToken {
+    let value: UInt64
+}
+
+enum InboundSource: String {
+    case messageData
+    case appContext
+}
+
+#if DEBUG
+struct InboundDiagnostic: Equatable {
+    let source: InboundSource
+    let phase: String
+    let remaining: TimeInterval
+    let isStopActive: Bool?
+    let stopRemainingActive: TimeInterval?
+    let stateSeq: UInt64?
+    let actionSeq: UInt64?
+    let derivedSeq: UInt64?
+    let arrivalUptime: TimeInterval
+}
+#endif
