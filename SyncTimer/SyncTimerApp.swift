@@ -5662,11 +5662,20 @@ struct MainScreen: View {
                         .sink { cmd in
                             let isParent = (syncSettings.role == .parent)
                             let unlocked = !(syncSettings.parentLockEnabled ?? false)
+                            switch cmd.command {
+                            case .requestSnapshot:
+                                sendWatchSnapshot(origin: "requestSnapshot")
+                                return
+                            case .start, .stop, .reset:
+                                break
+                            }
                             guard isParent && unlocked else { return }
                             switch cmd.command {
                             case .start: if !isCounting { toggleStart() }
                             case .stop:  if  isCounting { toggleStart() }
                             case .reset: if !isCounting { resetAll() }
+                            case .requestSnapshot:
+                                break
                             }
                         }
                         .store(in: &wcCancellables)

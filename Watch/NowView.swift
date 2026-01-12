@@ -1,6 +1,9 @@
 import SwiftUI
 import Combine
 import WatchConnectivity
+#if os(watchOS)
+import WatchKit
+#endif
 
 struct WatchNowRenderModel {
     let formattedMain: String
@@ -44,6 +47,12 @@ struct NowView: View {
     @State private var latestMessage: TimerMessage?
     @State private var pageSelection: Int = 0
     @State private var lastPokeUptime: TimeInterval = -10
+    // Incremented on snapshot arrival to force a face digit refresh even if the timeline is throttled.
+    @State private var snapshotToken: UInt64 = 0
+    @State private var boostUntilUptime: TimeInterval = 0
+    @State private var lastPhaseForBoost: String = ""
+    @State private var lastSeqForBoost: UInt64 = 0
+    @State private var lastHapticUptime: TimeInterval = 0
 
     @StateObject private var runtimeKeeper = ExtendedRuntimeKeeper()
 
@@ -54,56 +63,55 @@ struct NowView: View {
     private var resolvedShowHours: Bool {
         latestMessage?.showHours ?? preferHours
     }
-    private var tickInterval: TimeInterval {
-        if isLuminanceReduced { return 0.2 }
-        if isCounting || stopActive { return 0.02 }
-        return 0.05
-    }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: tickInterval)) { context in
-            let nowUptime = ProcessInfo.processInfo.systemUptime
-            let renderModel = makeRenderModel(nowUptime: nowUptime)
-            let detailsModel = makeDetailsModel(nowUptime: nowUptime)
-            let timerProviders = makeTimerProviders()
+        let nowUptime = ProcessInfo.processInfo.systemUptime
+        let renderModel = makeRenderModel(nowUptime: nowUptime)
+        let detailsModel = makeDetailsModel(nowUptime: nowUptime)
+        let timerProviders = makeTimerProviders()
 
-            TabView(selection: $pageSelection) {
-                WatchFacePage(
-                    renderModel: renderModel,
-                    timerProviders: timerProviders,
-                    nowUptime: nowUptime,
-                    isLive: pageSelection == 0
-                )
-                .tag(0)
-                WatchDetailsPage(
-                    renderModel: renderModel,
-                    detailsModel: detailsModel,
-                    timerProviders: timerProviders,
-                    nowUptime: nowUptime,
-                    isLive: pageSelection == 1
-                )
-                .tag(1)
-                WatchControlsPage(
-                    renderModel: renderModel,
-                    timerProviders: timerProviders,
-                    nowUptime: nowUptime,
-                    isLive: pageSelection == 2,
-                    startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
-                    reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
-                )
-                .tag(2)
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .tint(appSettings.flashColor)
-            .onChange(of: context.date) { _ in
-                handleTimelineTick(nowUptime: nowUptime)
-            }
+        TabView(selection: $pageSelection) {
+            WatchFaceTimelinePage(
+                interval: faceTickInterval(nowUptime: nowUptime),
+                snapshotToken: snapshotToken,
+                isLive: pageSelection == 0,
+                onTick: { tickUptime in
+                    handleTimelineTick(nowUptime: tickUptime)
+                },
+                renderModelProvider: { uptime in
+                    makeRenderModel(nowUptime: uptime)
+                },
+                timerProviders: timerProviders
+            )
+            .tag(0)
+            WatchDetailsPage(
+                renderModel: renderModel,
+                detailsModel: detailsModel,
+                timerProviders: timerProviders,
+                nowUptime: nowUptime,
+                isLive: pageSelection == 1
+            )
+            .tag(1)
+            WatchControlsPage(
+                renderModel: renderModel,
+                timerProviders: timerProviders,
+                nowUptime: nowUptime,
+                isLive: pageSelection == 2,
+                startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
+                reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
+            )
+            .tag(2)
         }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .tint(appSettings.flashColor)
 
         // Receive 4 Hz snapshots → update baseline + estimate velocity
         .onReceive(ConnectivityManager.shared.$incoming.compactMap { $0 }) { msg in
             Task { @MainActor in
                 let now = ProcessInfo.processInfo.systemUptime
+                let wasStale = isStale
+                let previousPhase = phaseStr
+                let seq = msg.stateSeq ?? msg.actionSeq ?? 0
                 lastSnapUptime = now
 
                 // Store raw values
@@ -138,6 +146,33 @@ struct NowView: View {
                 prevSnapT    = now
 
                 latestMessage = msg
+
+                updateStaleIfNeeded(nowUptime: now)
+
+                let phaseChanged = msg.phase != lastPhaseForBoost
+                let seqJumped = seq > lastSeqForBoost
+                let freshRecovered = wasStale && !isStale
+                if phaseChanged || seqJumped || freshRecovered {
+                    boostUntilUptime = now + 6.0
+                    lastPhaseForBoost = msg.phase
+                    lastSeqForBoost = seq
+                    updateExtendedRuntime()
+                }
+
+                // Force an immediate face digit refresh on snapshot arrival.
+                snapshotToken &+= 1
+
+                let wasCounting = previousPhase == "running" || previousPhase == "countdown"
+                let isCountingNow = msg.phase == "running" || msg.phase == "countdown"
+                if isLuminanceReduced && !wasCounting && isCountingNow {
+                    let hapticCooldown: TimeInterval = 3.0
+                    if now - lastHapticUptime > hapticCooldown {
+                        lastHapticUptime = now
+                        #if os(watchOS)
+                        WKInterfaceDevice.current().play(.click)
+                        #endif
+                    }
+                }
             }
         }
         .onChange(of: scenePhase) { _ in
@@ -155,6 +190,13 @@ struct NowView: View {
         .onChange(of: isLuminanceReduced) { reduced in
             if !reduced {
                 requestSnapshotIfNeeded(origin: "luminance.full")
+            }
+        }
+        .onChange(of: pageSelection) { selection in
+            if selection == 0 {
+                boostUntilUptime = ProcessInfo.processInfo.systemUptime + 6.0
+                updateExtendedRuntime()
+                requestSnapshotIfNeeded(origin: "face.page")
             }
         }
         .onAppear {
@@ -306,6 +348,13 @@ struct NowView: View {
         max(0, baseStop + vStop * (nowUptime - baseT0))
     }
 
+    private func faceTickInterval(nowUptime: TimeInterval) -> TimeInterval {
+        if scenePhase == .active && nowUptime < boostUntilUptime { return 0.02 }
+        if isLuminanceReduced { return 0.2 }
+        if isCounting { return 0.02 }
+        return 0.05
+    }
+
     private func handleTimelineTick(nowUptime: TimeInterval) {
         updateStaleIfNeeded(nowUptime: nowUptime)
     }
@@ -314,23 +363,24 @@ struct NowView: View {
         let age = lastSnapUptime > 0 ? max(0, nowUptime - lastSnapUptime) : .infinity
         let staleThreshold = 4.0
         let freshThreshold = 1.0
+        let nextStale: Bool
         if isStale {
-            if age < freshThreshold {
-                isStale = false
-            }
+            nextStale = age >= freshThreshold
         } else {
-            if age > staleThreshold {
-                isStale = true
+            nextStale = age > staleThreshold
+        }
+        if nextStale != isStale {
+            isStale = nextStale
+            if nextStale {
                 requestSnapshotIfNeeded(origin: "stale")
             }
         }
     }
 
     private func updateExtendedRuntime() {
-        runtimeKeeper.update(
-            shouldRun: isCounting || stopActive,
-            scenePhase: scenePhase
-        )
+        let nowUptime = ProcessInfo.processInfo.systemUptime
+        let shouldRun = scenePhase == .active && (isCounting || nowUptime < boostUntilUptime)
+        runtimeKeeper.update(shouldRun: shouldRun)
     }
 
     private func requestSnapshotIfNeeded(origin: String) {
