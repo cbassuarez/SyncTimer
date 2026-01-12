@@ -7,6 +7,12 @@ import UIKit
 import WatchKit
 #endif
 
+enum WatchHapticKind {
+    case click
+    case success
+    case failure
+}
+
 struct WatchNowDetailsModel {
     let isFresh: Bool
     let age: TimeInterval
@@ -1111,9 +1117,19 @@ struct WatchCueSheetsPage: View {
         playHaptic(.success)
     }
 
-    private func playHaptic(_ type: WKHapticType) {
+    private func playHaptic(_ type: WatchHapticKind) {
         #if os(watchOS)
-        WKInterfaceDevice.current().play(type)
+        let resolved: WKHapticType = {
+            switch type {
+            case .click:
+                return .click
+            case .success:
+                return .success
+            case .failure:
+                return .failure
+            }
+        }()
+        WKInterfaceDevice.current().play(resolved)
         #endif
     }
 }
