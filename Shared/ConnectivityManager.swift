@@ -19,6 +19,8 @@ public final class ConnectivityManager: NSObject, ObservableObject {
     #endif
 
     @Published public private(set) var incoming: TimerMessage?
+    @Published public private(set) var cueSheetIndex: [CueSheetSummaryWire] = []
+    @Published public private(set) var isReachable: Bool = false
     @Published private(set) var incomingSyncEnvelope: SyncEnvelope?
     public let commands = PassthroughSubject<ControlRequest, Never>()
     public let snapshotRequests = PassthroughSubject<SnapshotRequest, Never>()
@@ -121,6 +123,11 @@ extension ConnectivityManager: WCSessionDelegate {
         if let e = error { print("❌ [WC] activation error: \(e.localizedDescription)"); return }
         print("✅ [WC] didActivate=\(activationState.rawValue)")
         #if os(iOS)
+        Task { @MainActor in
+            self.isReachable = session.isReachable
+        }
+        #endif
+        #if os(iOS)
         if let tm = lastTimerMessage, let data = try? JSONEncoder().encode(tm) {
             try? session.updateApplicationContext(["timer": data])
         }
@@ -144,10 +151,24 @@ extension ConnectivityManager: WCSessionDelegate {
         decodeAndPublish(data, source: .messageData)
     }
 
+    public func sessionReachabilityDidChange(_ session: WCSession) {
+        #if os(iOS)
+        Task { @MainActor in
+            self.isReachable = session.isReachable
+        }
+        #endif
+    }
+
     private func decodeAndPublish(_ data: Data, source: InboundSource) {
         let dec = JSONDecoder()
         if let msg = try? dec.decode(TimerMessage.self, from: data) {
             handleTimerMessage(msg, source: source); return
+        }
+        if let index = try? dec.decode(CueSheetIndexWire.self, from: data) {
+            Task { @MainActor in
+                self.cueSheetIndex = index.items
+            }
+            return
         }
         if let env = try? dec.decode(SyncEnvelope.self, from: data) {
             Task { @MainActor in

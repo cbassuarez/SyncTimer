@@ -63,7 +63,7 @@ struct WatchNextEventDialModel {
     let stopRemainingProvider: (TimeInterval) -> TimeInterval
 }
 
-typealias WatchCueSheetSummary = TimerMessage.WatchCueSheetSummary
+typealias WatchCueSheetSummary = CueSheetSummaryWire
 
 struct WatchCueSheetsModel: Equatable {
     let isStale: Bool
@@ -802,6 +802,8 @@ struct WatchCueSheetsPage: View {
     let requestResync: () -> Void
 
     @State private var showLibraryPicker = false
+    @State private var didRequestIndex = false
+    @State private var lastBroadcastHapticUptime: TimeInterval = 0
 
     var body: some View {
         Group {
@@ -815,6 +817,12 @@ struct WatchCueSheetsPage: View {
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .id(model.snapshotToken)
+        .onAppear {
+            requestIndexIfNeeded()
+        }
+        .onChange(of: model.cueSheets.isEmpty) { _ in
+            requestIndexIfNeeded()
+        }
     }
 
     private var contentView: some View {
@@ -844,25 +852,12 @@ struct WatchCueSheetsPage: View {
         VStack(alignment: .leading, spacing: 8) {
             headerStrip
             if let title = model.activeSheetTitle {
-                activePill(title: title)
-                    .contextMenu {
-                        Button("Dismiss") {
-                            dismissSheet()
-                        }
-                    }
+                activePill(title: title, canDismiss: !model.isBroadcasting)
             }
             if model.cueSheets.isEmpty {
                 emptyLibraryView
             } else {
                 libraryList
-            }
-            if model.activeSheetTitle != nil {
-                Button("Dismiss") {
-                    dismissSheet()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
-                .tint(model.accent)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -870,6 +865,7 @@ struct WatchCueSheetsPage: View {
 
     private var broadcastControlView: some View {
         VStack(spacing: 10) {
+            headerStrip
             activeSheetHeader
             broadcastRing
             actionRow
@@ -885,6 +881,7 @@ struct WatchCueSheetsPage: View {
 
     private var lockedView: some View {
         VStack(spacing: 6) {
+            headerStrip
             Text(model.activeSheetTitle ?? "No cue sheet")
                 .font(.title3.weight(.semibold))
                 .multilineTextAlignment(.center)
@@ -912,47 +909,35 @@ struct WatchCueSheetsPage: View {
         HStack {
             WatchChip(text: model.roleLabel, tint: model.accent)
             Spacer(minLength: 0)
-            Text("NOT CONNECTED")
+            Text(model.isConnected ? "CONNECTED" : "NOT CONNECTED")
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(model.isConnected ? model.accent : .secondary)
         }
     }
 
-    private func activePill(title: String) -> some View {
-        HStack(spacing: 6) {
-            Text("▣ \(title)")
-                .font(.footnote.weight(.semibold))
-                .lineLimit(1)
+    private func activePill(title: String, canDismiss: Bool) -> some View {
+        HStack(spacing: 8) {
             Circle()
                 .fill(model.accent)
                 .frame(width: 6, height: 6)
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            dismissButton(canDismiss: canDismiss)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
         .background(Capsule().fill(model.accent.opacity(0.15)))
     }
 
     private var libraryList: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 8) {
-                if !recentSheets.isEmpty {
-                    Text("Recents")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    ForEach(recentSheets) { sheet in
-                        libraryRow(for: sheet)
-                    }
-                }
-                Text("All")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.top, recentSheets.isEmpty ? 0 : 4)
-                ForEach(allSheets) { sheet in
-                    libraryRow(for: sheet)
-                }
+        List {
+            ForEach(model.cueSheets) { sheet in
+                libraryRow(for: sheet)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .listStyle(.plain)
     }
 
     private var libraryPickerList: some View {
@@ -991,26 +976,24 @@ struct WatchCueSheetsPage: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 2) {
+                    Text(sheet.title)
+                        .font(.body.weight(.semibold))
+                        .lineLimit(1)
                     HStack(spacing: 6) {
-                        Text(sheet.title)
-                            .font(.body.weight(.semibold))
-                            .lineLimit(1)
+                        Text(eventLine(for: sheet))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                         if sheet.id == model.activeSheetID {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.caption2)
+                            Circle()
+                                .fill(model.accent)
+                                .frame(width: 5, height: 5)
+                            Text("LOADED")
+                                .font(.caption2.weight(.semibold))
                                 .foregroundStyle(model.accent)
                         }
                     }
-                    Text(eventLine(for: sheet))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
-                if sheet.id == model.activeSheetID {
-                    Circle()
-                        .fill(model.accent)
-                        .frame(width: 6, height: 6)
-                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 4)
@@ -1058,7 +1041,7 @@ struct WatchCueSheetsPage: View {
             .frame(width: 92, height: 92)
         }
         .buttonStyle(.plain)
-        .disabled(model.activeSheetTitle == nil)
+        .opacity(model.activeSheetTitle == nil ? 0.4 : 1)
     }
 
     private var actionRow: some View {
@@ -1072,39 +1055,13 @@ struct WatchCueSheetsPage: View {
             .buttonStyle(.bordered)
             .controlSize(.mini)
 
-            Button("Dismiss") {
-                dismissSheet()
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-            .disabled(model.activeSheetTitle == nil || model.isBroadcasting)
+            dismissButton(canDismiss: model.activeSheetTitle != nil && !model.isBroadcasting)
         }
         .tint(model.accent)
     }
 
-    private var recentSheets: [WatchCueSheetSummary] {
-        model.cueSheets.filter { $0.isRecent == true }.prefix(3).map { $0 }
-    }
-
-    private var allSheets: [WatchCueSheetSummary] {
-        let recentIDs = Set(recentSheets.map(\.id))
-        return model.cueSheets.filter { !recentIDs.contains($0.id) }
-    }
-
     private func eventLine(for sheet: WatchCueSheetSummary) -> String {
-        var line = "\(sheet.eventCount) events"
-        if let duration = sheet.estDurationSec {
-            line += " • \(formatDuration(duration))"
-        }
-        return line
-    }
-
-    private func formatDuration(_ seconds: TimeInterval) -> String {
-        let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = seconds >= 3600 ? [.hour, .minute, .second] : [.minute, .second]
-        formatter.unitsStyle = .abbreviated
-        formatter.zeroFormattingBehavior = .pad
-        return formatter.string(from: max(0, seconds)) ?? "0:00"
+        "\(sheet.eventCount) events"
     }
 
     private func handleLoad(_ sheet: WatchCueSheetSummary) {
@@ -1113,8 +1070,42 @@ struct WatchCueSheetsPage: View {
     }
 
     private func handleBroadcastToggle() {
+        guard model.activeSheetTitle != nil else {
+            playHaptic(.failure)
+            return
+        }
         setBroadcast(!model.isBroadcasting)
-        playHaptic(.success)
+        let now = ProcessInfo.processInfo.systemUptime
+        if now - lastBroadcastHapticUptime > 0.35 {
+            playHaptic(.success)
+            lastBroadcastHapticUptime = now
+        }
+    }
+
+    private func dismissButton(canDismiss: Bool) -> some View {
+        Button {
+            handleDismiss(canDismiss: canDismiss)
+        } label: {
+            Label("Dismiss", systemImage: "xmark")
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+        .tint(model.accent)
+        .opacity(canDismiss ? 1 : 0.5)
+    }
+
+    private func handleDismiss(canDismiss: Bool) {
+        guard canDismiss else {
+            playHaptic(.failure)
+            return
+        }
+        dismissSheet()
+        playHaptic(.click)
     }
 
     private func playHaptic(_ type: WatchHapticKind) {
@@ -1131,6 +1122,16 @@ struct WatchCueSheetsPage: View {
         }()
         WKInterfaceDevice.current().play(resolved)
         #endif
+    }
+
+    private func requestIndexIfNeeded() {
+        guard model.cueSheets.isEmpty else {
+            didRequestIndex = true
+            return
+        }
+        guard !didRequestIndex else { return }
+        didRequestIndex = true
+        requestResync()
     }
 }
 
