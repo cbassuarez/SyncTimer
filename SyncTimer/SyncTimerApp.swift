@@ -4336,6 +4336,33 @@ struct MainScreen: View {
         return (a << 24) | (r << 16) | (g << 8) | b
     }
 
+    private func flashColorRGBA(from color: Color) -> [Double] {
+        let uiColor = UIColor(color)
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        if !uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) {
+            let fallback = UIColor.red
+            fallback.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        }
+        return [Double(red), Double(green), Double(blue), Double(alpha)]
+    }
+
+    private func flashColorIsRed(from color: Color) -> Bool {
+        let uiColor = UIColor(color)
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        if !uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) {
+            let fallback = UIColor.red
+            fallback.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        }
+        let tolerance: CGFloat = 0.2
+        return red > 0.8 && green < tolerance && blue < tolerance && alpha > 0.4
+    }
+
     private func makeNextEventSnapshot() -> (state: String, remaining: TimeInterval?, interval: TimeInterval?, kind: String?) {
         guard let sheet = activeCueSheet else {
             return (state: "none", remaining: nil, interval: nil, kind: nil)
@@ -4415,6 +4442,8 @@ struct MainScreen: View {
             flashStyle: settings.flashStyle.rawValue,
             flashDurationMs: settings.flashDurationOption,
             flashColorARGB: flashColorARGB(from: settings.flashColor),
+            flashRGBA: flashColorRGBA(from: settings.flashColor),
+            flashColorIsRed: flashColorIsRed(from: settings.flashColor),
             flashSeq: flashSeqCounter,
             flashHapticsEnabled: settings.vibrateOnFlash,
             showHours: settings.showHours,

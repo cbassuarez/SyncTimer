@@ -78,6 +78,10 @@ public struct TimerMessage: Codable, Equatable {
         public var flashDurationMs: Int?
         /// flash color in ARGB (0xAARRGGBB)
         public var flashColorARGB: UInt32?
+        /// flash color in RGBA components (r,g,b,a in 0...1)
+        public var flashRGBA: [Double]?
+        /// true iff flashColor is perceptually red (computed on phone)
+        public var flashColorIsRed: Bool?
         /// monotonic flash sequence for edge detection
         public var flashSeq: UInt64?
         /// haptic enabled for flash, mirrors iOS setting
@@ -120,6 +124,8 @@ public struct TimerMessage: Codable, Equatable {
                       flashStyle: String? = nil,
                       flashDurationMs: Int? = nil,
                       flashColorARGB: UInt32? = nil,
+                      flashRGBA: [Double]? = nil,
+                      flashColorIsRed: Bool? = nil,
                       flashSeq: UInt64? = nil,
                       flashHapticsEnabled: Bool? = nil,
                       showHours: Bool? = nil,
@@ -157,6 +163,8 @@ public struct TimerMessage: Codable, Equatable {
         self.flashStyle        = flashStyle
         self.flashDurationMs   = flashDurationMs
         self.flashColorARGB    = flashColorARGB
+        self.flashRGBA         = flashRGBA
+        self.flashColorIsRed   = flashColorIsRed
         self.flashSeq          = flashSeq
         self.flashHapticsEnabled = flashHapticsEnabled
         self.showHours         = showHours
