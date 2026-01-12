@@ -3,6 +3,9 @@ import SwiftUI
 #if canImport(UIKit)
 import UIKit
 #endif
+#if os(watchOS)
+import WatchKit
+#endif
 
 struct WatchNowDetailsModel {
     let isFresh: Bool
@@ -52,6 +55,22 @@ struct WatchNextEventDialModel {
     let stopInterval: TimeInterval?
     let remainingProvider: (TimeInterval) -> TimeInterval?
     let stopRemainingProvider: (TimeInterval) -> TimeInterval
+}
+
+typealias WatchCueSheetSummary = TimerMessage.WatchCueSheetSummary
+
+struct WatchCueSheetsModel: Equatable {
+    let isStale: Bool
+    let accent: Color
+    let snapshotToken: UInt64
+    let roleLabel: String
+    let isChild: Bool
+    let isConnected: Bool
+    let activeSheetID: UUID?
+    let activeSheetTitle: String?
+    let cueSheets: [WatchCueSheetSummary]
+    let isBroadcasting: Bool
+    let connectedChildrenCount: Int?
 }
 
 struct WatchEventDot: Identifiable {
@@ -766,6 +785,361 @@ struct WatchNextEventDialPage: View {
         #else
         return false
         #endif
+    }
+}
+
+struct WatchCueSheetsPage: View {
+    let model: WatchCueSheetsModel
+    let loadSheet: (UUID) -> Void
+    let dismissSheet: () -> Void
+    let setBroadcast: (Bool) -> Void
+    let requestResync: () -> Void
+
+    @State private var showLibraryPicker = false
+
+    var body: some View {
+        Group {
+            if model.isStale {
+                staleView
+            } else {
+                contentView
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .id(model.snapshotToken)
+    }
+
+    private var contentView: some View {
+        Group {
+            if model.isChild && model.isConnected {
+                lockedView
+            } else if !model.isChild && model.isConnected {
+                broadcastControlView
+            } else {
+                libraryView
+            }
+        }
+    }
+
+    private var staleView: some View {
+        VStack(spacing: 6) {
+            Spacer(minLength: 0)
+            Text("Waiting for sync")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .opacity(0.6)
+    }
+
+    private var libraryView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            headerStrip
+            if let title = model.activeSheetTitle {
+                activePill(title: title)
+                    .contextMenu {
+                        Button("Dismiss") {
+                            dismissSheet()
+                        }
+                    }
+            }
+            if model.cueSheets.isEmpty {
+                emptyLibraryView
+            } else {
+                libraryList
+            }
+            if model.activeSheetTitle != nil {
+                Button("Dismiss") {
+                    dismissSheet()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .tint(model.accent)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var broadcastControlView: some View {
+        VStack(spacing: 10) {
+            activeSheetHeader
+            broadcastRing
+            actionRow
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .sheet(isPresented: $showLibraryPicker) {
+            NavigationStack {
+                libraryPickerList
+                    .navigationTitle("Cue Sheets")
+            }
+        }
+    }
+
+    private var lockedView: some View {
+        VStack(spacing: 6) {
+            Text(model.activeSheetTitle ?? "No cue sheet")
+                .font(.title3.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity)
+            HStack(spacing: 6) {
+                Text("From Parent")
+                Image(systemName: "lock.fill")
+            }
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contextMenu {
+            Button("Request resync") {
+                requestResync()
+            }
+        }
+        .onTapGesture {
+            playHaptic(.failure)
+        }
+    }
+
+    private var headerStrip: some View {
+        HStack {
+            WatchChip(text: model.roleLabel, tint: model.accent)
+            Spacer(minLength: 0)
+            Text("NOT CONNECTED")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func activePill(title: String) -> some View {
+        HStack(spacing: 6) {
+            Text("▣ \(title)")
+                .font(.footnote.weight(.semibold))
+                .lineLimit(1)
+            Circle()
+                .fill(model.accent)
+                .frame(width: 6, height: 6)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(model.accent.opacity(0.15)))
+    }
+
+    private var libraryList: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                if !recentSheets.isEmpty {
+                    Text("Recents")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(recentSheets) { sheet in
+                        libraryRow(for: sheet)
+                    }
+                }
+                Text("All")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, recentSheets.isEmpty ? 0 : 4)
+                ForEach(allSheets) { sheet in
+                    libraryRow(for: sheet)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var libraryPickerList: some View {
+        List {
+            ForEach(model.cueSheets) { sheet in
+                Button {
+                    handleLoad(sheet)
+                    showLibraryPicker = false
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(sheet.title)
+                                .font(.body.weight(.semibold))
+                            Text(eventLine(for: sheet))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        if sheet.id == model.activeSheetID {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(model.accent)
+                        }
+                    }
+                }
+            }
+        }
+        .listStyle(.plain)
+    }
+
+    private func libraryRow(for sheet: WatchCueSheetSummary) -> some View {
+        Button {
+            handleLoad(sheet)
+        } label: {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "doc.text")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(sheet.title)
+                            .font(.body.weight(.semibold))
+                            .lineLimit(1)
+                        if sheet.id == model.activeSheetID {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(model.accent)
+                        }
+                    }
+                    Text(eventLine(for: sheet))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                if sheet.id == model.activeSheetID {
+                    Circle()
+                        .fill(model.accent)
+                        .frame(width: 6, height: 6)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var emptyLibraryView: some View {
+        VStack(spacing: 6) {
+            Spacer(minLength: 0)
+            Image(systemName: "iphone")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text("No cue sheets")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var activeSheetHeader: some View {
+        VStack(spacing: 4) {
+            Text(model.activeSheetTitle ?? "No cue sheet loaded")
+                .font(.title3.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity)
+            if let count = model.connectedChildrenCount {
+                Text("Children: \(count)")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var broadcastRing: some View {
+        Button {
+            handleBroadcastToggle()
+        } label: {
+            WatchBroadcastRing(
+                accent: model.accent,
+                isOn: model.isBroadcasting
+            )
+            .frame(width: 92, height: 92)
+        }
+        .buttonStyle(.plain)
+        .disabled(model.activeSheetTitle == nil)
+    }
+
+    private var actionRow: some View {
+        HStack(spacing: 8) {
+            Button("Change Sheet") {
+                if model.isBroadcasting {
+                    setBroadcast(false)
+                }
+                showLibraryPicker = true
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+
+            Button("Dismiss") {
+                dismissSheet()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .disabled(model.activeSheetTitle == nil || model.isBroadcasting)
+        }
+        .tint(model.accent)
+    }
+
+    private var recentSheets: [WatchCueSheetSummary] {
+        model.cueSheets.filter { $0.isRecent == true }.prefix(3).map { $0 }
+    }
+
+    private var allSheets: [WatchCueSheetSummary] {
+        let recentIDs = Set(recentSheets.map(\.id))
+        return model.cueSheets.filter { !recentIDs.contains($0.id) }
+    }
+
+    private func eventLine(for sheet: WatchCueSheetSummary) -> String {
+        var line = "\(sheet.eventCount) events"
+        if let duration = sheet.estDurationSec {
+            line += " • \(formatDuration(duration))"
+        }
+        return line
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = seconds >= 3600 ? [.hour, .minute, .second] : [.minute, .second]
+        formatter.unitsStyle = .abbreviated
+        formatter.zeroFormattingBehavior = .pad
+        return formatter.string(from: max(0, seconds)) ?? "0:00"
+    }
+
+    private func handleLoad(_ sheet: WatchCueSheetSummary) {
+        loadSheet(sheet.id)
+        playHaptic(.click)
+    }
+
+    private func handleBroadcastToggle() {
+        setBroadcast(!model.isBroadcasting)
+        playHaptic(.success)
+    }
+
+    private func playHaptic(_ type: WKHapticType) {
+        #if os(watchOS)
+        WKInterfaceDevice.current().play(type)
+        #endif
+    }
+}
+
+private struct WatchBroadcastRing: View {
+    let accent: Color
+    let isOn: Bool
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.secondary.opacity(0.25), lineWidth: 4)
+            if isOn {
+                Circle()
+                    .trim(from: 0, to: 1)
+                    .stroke(
+                        accent,
+                        style: StrokeStyle(lineWidth: 4, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                    .animation(.snappy(duration: 0.2), value: isOn)
+            }
+            Image(systemName: "antenna.radiowaves.left.and.right")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(isOn ? accent : .secondary)
+        }
     }
 }
 
