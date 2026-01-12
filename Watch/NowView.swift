@@ -84,7 +84,11 @@ struct NowView: View {
     @State private var cueSheetIndexSummary: CueSheetIndexSummary?
     @State private var cueSheetIndexSource: WatchCueSheetIndexSource = .none
     @State private var lastCueSheetIndexSeq: UInt64 = 0
+    @State private var lastCueSheetIndexUpdateDate: Date?
     @State private var selectedCueSheetID: UUID? = nil
+    #if DEBUG
+    @State private var cueSheetIndexContextDebug: CueSheetIndexContextDebug?
+    #endif
 
     @StateObject private var runtimeKeeper = ExtendedRuntimeKeeper()
 
@@ -245,10 +249,19 @@ struct NowView: View {
                 handleCueSheetIndex(summary, source: .phoneIndex)
             }
         }
+        .onReceive(ConnectivityManager.shared.$incomingCueSheetIndexSummary.compactMap { $0 }) { summary in
+            handleCueSheetIndex(summary, source: .applicationContext)
+        }
+        #if DEBUG
+        .onReceive(ConnectivityManager.shared.$lastCueSheetIndexContextDebug.compactMap { $0 }) { debug in
+            cueSheetIndexContextDebug = debug
+        }
+        #endif
         .onChange(of: scenePhase) { _ in
             updateExtendedRuntime()
             if scenePhase == .active {
                 requestSnapshotIfNeeded(origin: "scenePhase.active")
+                ConnectivityManager.shared.requestCueSheetIndexIfNeeded(origin: "scenePhase.active")
             }
         }
         .onChange(of: phaseStr) { _ in
@@ -268,7 +281,7 @@ struct NowView: View {
             let origin = selection == 0 ? "face.page" : "page.\(selection)"
             requestSnapshotIfNeeded(origin: origin)
             if selection == 4 {
-                ConnectivityManager.shared.requestCueSheetIndex(origin: "page.cueSheets")
+                ConnectivityManager.shared.requestCueSheetIndexIfNeeded(origin: "page.cueSheets")
             }
         }
         .onAppear {
@@ -277,10 +290,11 @@ struct NowView: View {
                 cueSheetIndexSummary = cached
                 lastCueSheetIndexSeq = cached.seq
                 cueSheetIndexSource = cached.items.isEmpty ? .none : .cache
+                lastCueSheetIndexUpdateDate = loadCueSheetIndexCacheDate()
             } else {
                 cueSheetIndexSource = .none
             }
-            ConnectivityManager.shared.requestCueSheetIndex(origin: "onAppear")
+            ConnectivityManager.shared.requestCueSheetIndexIfNeeded(origin: "onAppear")
         }
     }
 
@@ -674,7 +688,18 @@ struct NowView: View {
             sheets.contains(where: { $0.id == id }) ? id : nil
         }
         let activationStateLabel = activationStateDescription()
-        let isReachable = ConnectivityManager.shared.session?.isReachable
+        let session = ConnectivityManager.shared.session
+        let isReachable = session?.isReachable
+        let isPaired = session?.isPaired
+        let phoneAvailableForIndex = (session?.activationState == .activated) && (isPaired ?? false)
+        let lastIndexUpdateAgeMs = lastCueSheetIndexUpdateDate.map {
+            max(0, Date().timeIntervalSince($0) * 1000.0)
+        }
+        #if DEBUG
+        let iosDebug = cueSheetIndexContextDebug
+        #else
+        let iosDebug: CueSheetIndexContextDebug? = nil
+        #endif
 
         return WatchCueSheetsModel(
             role: role,
@@ -687,8 +712,13 @@ struct NowView: View {
             selectedSheetID: selection,
             childCount: nil,
             cueSheetIndexSource: cueSheetIndexSource,
+            lastIndexSeq: lastCueSheetIndexSeq,
+            lastIndexUpdateAgeMs: lastIndexUpdateAgeMs,
+            phoneAvailableForIndex: phoneAvailableForIndex,
             activationStateLabel: activationStateLabel,
-            isReachable: isReachable
+            isReachable: isReachable,
+            isPaired: isPaired,
+            iosCueSheetIndexDebug: iosDebug
         )
     }
 
@@ -741,7 +771,11 @@ struct NowView: View {
         lastCueSheetIndexSeq = max(lastCueSheetIndexSeq, summary.seq)
         cueSheetIndexSummary = summary
         cueSheetIndexSource = source
+        lastCueSheetIndexUpdateDate = Date()
         storeCueSheetIndexCache(summary)
+        #if DEBUG
+        print("[WC cue sheets] published source=\(source.rawValue) count=\(summary.items.count) seq=\(summary.seq)")
+        #endif
         if let selectedCueSheetID,
            !summary.items.contains(where: { $0.id == selectedCueSheetID }) {
             self.selectedCueSheetID = nil
@@ -754,10 +788,18 @@ struct NowView: View {
         return try? JSONDecoder().decode(CueSheetIndexSummary.self, from: data)
     }
 
+    private func loadCueSheetIndexCacheDate() -> Date? {
+        let key = "CueSheetIndexSummaryCacheUpdatedAt"
+        let timestamp = UserDefaults.standard.double(forKey: key)
+        guard timestamp > 0 else { return nil }
+        return Date(timeIntervalSince1970: timestamp)
+    }
+
     private func storeCueSheetIndexCache(_ summary: CueSheetIndexSummary) {
         let key = "CueSheetIndexSummaryCache"
         guard let data = try? JSONEncoder().encode(summary) else { return }
         UserDefaults.standard.set(data, forKey: key)
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "CueSheetIndexSummaryCacheUpdatedAt")
     }
 
     private func requestSnapshotIfNeeded(origin: String) {

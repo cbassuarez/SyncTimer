@@ -27,7 +27,7 @@ struct WatchSyncTimerApp: App {
                     if phase == .active {
                         ConnectivityManager.shared.start()
                         ConnectivityManager.shared.requestSnapshot()
-                        ConnectivityManager.shared.requestCueSheetIndex(origin: "watch.active")
+                        ConnectivityManager.shared.requestCueSheetIndexIfNeeded(origin: "watch.active")
                     }
                 }
         }

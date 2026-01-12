@@ -32,6 +32,7 @@ enum WatchRole: String {
 
 enum WatchCueSheetIndexSource: String {
     case phoneIndex
+    case applicationContext
     case cache
     case none
 }
@@ -54,8 +55,13 @@ struct WatchCueSheetsModel {
     let selectedSheetID: UUID?
     let childCount: Int?
     let cueSheetIndexSource: WatchCueSheetIndexSource
+    let lastIndexSeq: UInt64
+    let lastIndexUpdateAgeMs: Double?
+    let phoneAvailableForIndex: Bool
     let activationStateLabel: String
     let isReachable: Bool?
+    let isPaired: Bool?
+    let iosCueSheetIndexDebug: CueSheetIndexContextDebug?
 }
 
 struct WatchTimerProviders {
@@ -607,7 +613,7 @@ struct WatchCueSheetsPage: View {
     let requestCueSheetIndex: () -> Void
 
     #if DEBUG
-    private static let showCueSheetDebugOverlay = false
+    private static let showCueSheetDebugOverlay = true
     #endif
 
     var body: some View {
@@ -673,11 +679,13 @@ struct WatchCueSheetsPage: View {
                 ConnectivityManager.shared.send(ControlRequest(.loadCueSheet, cueSheetID: summary.id))
             }
 
+            #if DEBUG
             Button(action: requestCueSheetIndex) {
                 Text("Refresh List")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
+            #endif
 
             if cueSheetsModel.loadedSheetName != nil {
                 Button(action: {
@@ -701,11 +709,13 @@ struct WatchCueSheetsPage: View {
                 selectedSheetID = summary.id
             }
 
+            #if DEBUG
             Button(action: requestCueSheetIndex) {
                 Text("Refresh List")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
+            #endif
 
             Button(action: {
                 if let selectedSheetID {
@@ -735,6 +745,7 @@ struct WatchCueSheetsPage: View {
             }
             .opacity(interactionsDisabled ? 0.6 : 1.0)
 
+            #if DEBUG
             Button(action: {
                 ConnectivityManager.shared.requestSnapshot(origin: "watch.cueSheets.refresh")
             }) {
@@ -743,6 +754,7 @@ struct WatchCueSheetsPage: View {
             }
             .buttonStyle(.bordered)
             .tint(renderModel.accent)
+            #endif
         }
     }
 
@@ -794,7 +806,13 @@ struct WatchCueSheetsPage: View {
     private var cueSheetDebugOverlay: some View {
         if Self.showCueSheetDebugOverlay {
             let reachableText = cueSheetsModel.isReachable.map { $0 ? "reachable" : "notReachable" } ?? "nil"
-            Text("sheets:\(cueSheetsModel.sheets.count) source:\(cueSheetsModel.cueSheetIndexSource.rawValue) wc:\(cueSheetsModel.activationStateLabel) reach:\(reachableText)")
+            let pairedText = cueSheetsModel.isPaired.map { $0 ? "paired" : "notPaired" } ?? "nil"
+            let ageText = cueSheetsModel.lastIndexUpdateAgeMs.map { String(format: "%.0fms", $0) } ?? "nil"
+            let iosInstalled = cueSheetsModel.iosCueSheetIndexDebug?.isWatchAppInstalled.map { $0 ? "installed" : "notInstalled" } ?? "n/a"
+            let iosPaired = cueSheetsModel.iosCueSheetIndexDebug?.isPaired.map { $0 ? "paired" : "notPaired" } ?? "n/a"
+            let iosReachable = cueSheetsModel.iosCueSheetIndexDebug?.isReachable.map { $0 ? "reachable" : "notReachable" } ?? "n/a"
+            let iosActivation = cueSheetsModel.iosCueSheetIndexDebug?.activationStateRaw.map { "\($0)" } ?? "n/a"
+            Text("sheets:\(cueSheetsModel.sheets.count) source:\(cueSheetsModel.cueSheetIndexSource.rawValue) seq:\(cueSheetsModel.lastIndexSeq) age:\(ageText) wc:\(cueSheetsModel.activationStateLabel) paired:\(pairedText) reach:\(reachableText) phoneAvail:\(cueSheetsModel.phoneAvailableForIndex) iosInstalled:\(iosInstalled) iosPaired:\(iosPaired) iosReach:\(iosReachable) iosAct:\(iosActivation)")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.secondary)
         }
