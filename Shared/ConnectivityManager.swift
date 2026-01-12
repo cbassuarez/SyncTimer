@@ -181,6 +181,7 @@ extension ConnectivityManager: WCSessionDelegate {
                 remaining: msg.remaining,
                 isStopActive: msg.isStopActive,
                 stopRemainingActive: msg.stopRemainingActive,
+                stopIntervalActive: msg.stopIntervalActive,
                 stateSeq: msg.stateSeq,
                 actionSeq: msg.actionSeq,
                 derivedSeq: sequence.value,
@@ -225,6 +226,7 @@ struct InboundDiagnostic: Equatable {
     let remaining: TimeInterval
     let isStopActive: Bool?
     let stopRemainingActive: TimeInterval?
+    let stopIntervalActive: TimeInterval?
     let stateSeq: UInt64?
     let actionSeq: UInt64?
     let derivedSeq: UInt64?

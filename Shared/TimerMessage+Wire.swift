@@ -59,6 +59,7 @@ public struct TimerMessage: Codable, Equatable {
     // NEW: lets parent say “a stop just began”, and how much is left
         public var isStopActive: Bool?
         public var stopRemainingActive: TimeInterval?
+        public var stopIntervalActive: TimeInterval?
     
     // ── NEW (all optional; safe for older builds) ─────────────────────
         /// "parent" | "child"
@@ -106,6 +107,7 @@ public struct TimerMessage: Codable, Equatable {
                   parentLockEnabled: Bool? = nil,
     isStopActive: Bool? = nil,
                       stopRemainingActive: TimeInterval? = nil,
+                      stopIntervalActive: TimeInterval? = nil,
     cueEvents: [CueEventWire]? = nil,
             restartEvents: [RestartEventWire]? = nil,
             sheetLabel: String? = nil,
@@ -142,6 +144,7 @@ public struct TimerMessage: Codable, Equatable {
           self.parentLockEnabled = parentLockEnabled
           self.isStopActive      = isStopActive
           self.stopRemainingActive = stopRemainingActive
+        self.stopIntervalActive = stopIntervalActive
         self.cueEvents = cueEvents
                 self.restartEvents = restartEvents
         self.sheetLabel = sheetLabel

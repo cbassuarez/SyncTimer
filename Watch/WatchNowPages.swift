@@ -1,5 +1,8 @@
 import Foundation
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct WatchNowDetailsModel {
     let isFresh: Bool
@@ -44,7 +47,10 @@ struct WatchNextEventDialModel {
     let isStepped: Bool
     let snapshotToken: UInt64
     let resetToken: UInt64
+    let isStopActive: Bool
+    let stopInterval: TimeInterval?
     let remainingProvider: (TimeInterval) -> TimeInterval?
+    let stopRemainingProvider: (TimeInterval) -> TimeInterval
 }
 
 struct WatchEventDot: Identifiable {
@@ -559,30 +565,52 @@ struct WatchNextEventDialPage: View {
             let lineWidth = ringLineWidth(for: size)
             let trackColor = Color.secondary.opacity(0.18)
             let dimOpacity = (model.isStale || isLuminanceReduced) ? 0.6 : 1.0
-            let rawProgress = dialProgress(nowUptime: nowUptime)
-            let displayProgress = rawProgress.map { resolvedProgress($0) }
+            let isFlashColorRed = isRedColor(model.accent)
+            let normalAccent = isFlashColorRed ? Color.white.opacity(0.85) : model.accent
+            let stopRemaining = model.stopRemainingProvider(nowUptime)
+            let stopInterval = model.stopInterval ?? 0
+            let isStopMode = model.isStopActive && stopInterval > 0 && stopRemaining >= 0
+            let stopProgress = isStopMode
+                ? (stopRemaining / stopInterval).clamped(to: 0...1)
+                : nil
+            let rawProgress = isStopMode ? stopProgress : dialProgress(nowUptime: nowUptime)
+            let displayProgress = isStopMode ? rawProgress : rawProgress.map { resolvedProgress($0) }
 
             ZStack {
                 Circle()
                     .stroke(trackColor, lineWidth: lineWidth)
 
                 if let displayProgress {
-                    Circle()
-                        .trim(from: 0, to: displayProgress == 0 ? 0.001 : displayProgress)
-                        .stroke(
-                            model.accent,
-                            style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                    let trimmed = displayProgress == 0 ? 0.001 : displayProgress
+                    if isStopMode {
+                        let stopStroke = stopStrokeStyle(
+                            lineWidth: lineWidth,
+                            useStencil: isFlashColorRed
                         )
-                        .rotationEffect(.degrees(-90))
-                        .shadow(color: model.accent.opacity(0.25), radius: 2, x: 0, y: 0)
-                        .id(model.snapshotToken)
-
-                    if displayProgress > 0.02 {
                         Circle()
-                            .fill(model.accent.opacity(0.9))
-                            .frame(width: lineWidth * 0.45, height: lineWidth * 0.45)
-                            .offset(y: -size / 2)
-                            .rotationEffect(.degrees(displayProgress * 360.0))
+                            .trim(from: 0, to: trimmed)
+                            .stroke(Color.red, style: stopStroke)
+                            .rotationEffect(.degrees(-90))
+                            .scaleEffect(x: -1, y: 1)
+                            .id(model.snapshotToken)
+                    } else {
+                        Circle()
+                            .trim(from: 0, to: trimmed)
+                            .stroke(
+                                normalAccent,
+                                style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                            )
+                            .rotationEffect(.degrees(-90))
+                            .shadow(color: normalAccent.opacity(0.25), radius: 2, x: 0, y: 0)
+                            .id(model.snapshotToken)
+
+                        if displayProgress > 0.02 {
+                            Circle()
+                                .fill(normalAccent.opacity(0.9))
+                                .frame(width: lineWidth * 0.45, height: lineWidth * 0.45)
+                                .offset(y: -size / 2)
+                                .rotationEffect(.degrees(displayProgress * 360.0))
+                        }
                     }
                 }
 
@@ -596,7 +624,7 @@ struct WatchNextEventDialPage: View {
                 lastQuantizedProgress = 0
             }
             .onChange(of: displayProgress ?? 0) { newValue in
-                if model.scheduleState == .active {
+                if model.scheduleState == .active && !isStopMode {
                     lastQuantizedProgress = max(lastQuantizedProgress, newValue)
                 } else {
                     lastQuantizedProgress = 0
@@ -638,6 +666,9 @@ struct WatchNextEventDialPage: View {
 
     private var markerGlyph: some View {
         let name: String? = {
+            if model.isStopActive, (model.stopInterval ?? 0) > 0 {
+                return glyphName(for: .stop)
+            }
             switch model.scheduleState {
             case .none:
                 return "minus"
@@ -680,6 +711,10 @@ struct WatchNextEventDialPage: View {
 
     private var accessibilityLabel: String {
         let freshness = model.isStale ? "stale" : "fresh"
+        if model.isStopActive, let interval = model.stopInterval, interval > 0 {
+            let remaining = model.stopRemainingProvider(nowUptime)
+            return "Stop hold \(formatDuration(remaining)), \(freshness)"
+        }
         switch model.scheduleState {
         case .none:
             return "No cue sheet loaded, \(freshness)"
@@ -699,6 +734,31 @@ struct WatchNextEventDialPage: View {
         formatter.unitsStyle = .full
         formatter.zeroFormattingBehavior = .pad
         return formatter.string(from: max(0, seconds)) ?? "0 seconds"
+    }
+
+    private func stopStrokeStyle(lineWidth: CGFloat, useStencil: Bool) -> StrokeStyle {
+        if useStencil {
+            let dash = max(2, lineWidth * 0.6)
+            return StrokeStyle(lineWidth: lineWidth, lineCap: .round, dash: [dash, dash])
+        }
+        return StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+    }
+
+    private func isRedColor(_ color: Color) -> Bool {
+        #if canImport(UIKit)
+        let uiColor = UIColor(color)
+        var r: CGFloat = 0
+        var g: CGFloat = 0
+        var b: CGFloat = 0
+        var a: CGFloat = 0
+        guard uiColor.getRed(&r, green: &g, blue: &b, alpha: &a) else {
+            return false
+        }
+        let tolerance: CGFloat = 0.2
+        return r > 0.8 && g < tolerance && b < tolerance && a > 0.4
+        #else
+        return false
+        #endif
     }
 }
 

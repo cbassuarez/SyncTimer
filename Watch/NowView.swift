@@ -37,6 +37,7 @@ struct NowView: View {
     @State private var snapMain: TimeInterval = 0     // value from the last snapshot
     @State private var snapStop: TimeInterval = 0
     @State private var stopActive: Bool = false
+    @State private var stopIntervalActive: TimeInterval = 0
 
     // Local integration baseline (set on each snapshot)
     @State private var baseMain: TimeInterval = 0
@@ -155,6 +156,11 @@ struct NowView: View {
                 snapMain   = msg.remaining
                 stopActive = msg.isStopActive ?? false
                 snapStop   = msg.stopRemainingActive ?? 0
+                if stopActive {
+                    stopIntervalActive = msg.stopIntervalActive ?? stopIntervalActive
+                } else {
+                    stopIntervalActive = 0
+                }
 
                 let shouldIntegrateMain = isIntegratingMain
 
@@ -448,8 +454,13 @@ struct NowView: View {
             isStepped: nextEventStepped,
             snapshotToken: snapshotToken,
             resetToken: nextEventResetToken,
+            isStopActive: stopActive,
+            stopInterval: stopIntervalActive,
             remainingProvider: { nowUptime in
                 currentNextEventRemaining(nowUptime: nowUptime)
+            },
+            stopRemainingProvider: { nowUptime in
+                currentStop(nowUptime: nowUptime)
             }
         )
     }
@@ -587,7 +598,9 @@ struct NowView: View {
 
     private func updateExtendedRuntime() {
         let nowUptime = ProcessInfo.processInfo.systemUptime
-        let shouldRun = scenePhase == .active && (isCounting || nowUptime < boostUntilUptime)
+        let shouldRun = scenePhase == .active
+            && pageSelection == 3
+            && (scheduleState == .active || stopActive || nowUptime < boostUntilUptime)
         runtimeKeeper.update(shouldRun: shouldRun)
     }
 

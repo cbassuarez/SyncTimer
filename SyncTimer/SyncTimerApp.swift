@@ -4409,6 +4409,7 @@ struct MainScreen: View {
             parentLockEnabled: syncSettings.parentLockEnabled,
             isStopActive: stopActive,
             stopRemainingActive: stopRemaining,
+            stopIntervalActive: stopActive ? stopIntervalActive : nil,
             cueEvents: snapshot.cues,
             restartEvents: snapshot.restarts,
             flashStyle: settings.flashStyle.rawValue,
@@ -4553,6 +4554,7 @@ struct MainScreen: View {
     @State private var rawStops: [StopEvent] = []
     @State private var stopActive: Bool = false
     @State private var stopRemaining: TimeInterval = 0
+    @State private var stopIntervalActive: TimeInterval = 0
     @State private var editedAfterFinish: Bool = false
     @State private var editingTarget: EditableField? = nil   // nil = not editing
     @State private var inputText      = ""                   // live buffer
@@ -7624,6 +7626,7 @@ struct MainScreen: View {
             stopRemaining = max(0, stopRemaining - dt)
             if stopRemaining <= 0 {
                 stopActive = false
+                stopIntervalActive = 0
                 elapsed = pausedElapsed
                 startDate = Date().addingTimeInterval(-pausedElapsed)
                 if isChildDevice {
@@ -7651,6 +7654,7 @@ struct MainScreen: View {
                     pausedElapsed = elapsed
                     stopActive = true
                     stopRemaining = s.duration
+                    stopIntervalActive = s.duration
                     events.removeFirst()
                     let snap = encodeCurrentEvents()
                     var stopMsg = TimerMessage(
@@ -7663,6 +7667,7 @@ struct MainScreen: View {
                         parentLockEnabled: syncSettings.parentLockEnabled,
                         isStopActive: true,
                         stopRemainingActive: s.duration,
+                        stopIntervalActive: s.duration,
                         cueEvents: snap.cues,
                         restartEvents: snap.restarts,
                         sheetLabel: cueBadge.label
@@ -8304,6 +8309,7 @@ struct MainScreen: View {
         // DO NOT clear events; just exit any active stop
         stopActive = false
         stopRemaining = 0
+        stopIntervalActive = 0
         stopDigits.removeAll()
         stopStep = 0
         
@@ -8569,6 +8575,7 @@ struct MainScreen: View {
                     startDate = nil
                                 stopActive = false
                                 stopRemaining = 0
+                    stopIntervalActive = 0
                     lastStopAnchorElapsedNs = nil
                     lastStopAnchorUptimeNs = nil
                     lastStopBurstSeq = nil
@@ -8634,12 +8641,18 @@ struct MainScreen: View {
                         elapsed = pausedElapsed
                             // While the packet was in flight, the parent’s stop timer ticked by `delta`
                             stopRemaining = max(0, qcs(parentStopLeft - delta))
+                            stopIntervalActive = msg.stopIntervalActive ?? parentStopLeft
                             childTargetStartDate = nil
                             childDisplayElapsed = pausedElapsed
                             // Ensure the run loop is active so our child ticks the stop timer down
                             startLoop()
                             ignoreRunningUpdatesUntil = now + 0.25
                         }
+                    else if msg.isStopActive == false {
+                        stopActive = false
+                        stopRemaining = 0
+                        stopIntervalActive = 0
+                    }
                 case .addEvent:
                     // caches were already updated at the top of this function (when arrays are present)
                     rebuildChildDisplayEvents()
