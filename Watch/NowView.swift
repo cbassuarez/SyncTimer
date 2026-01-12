@@ -7,10 +7,12 @@ import Combine
 
 struct WatchNowRenderModel {
     let formattedMain: String
+    let compactMain: String
     let phaseLabel: String
     let isStale: Bool
     let stopLine: String?
     let stopDigits: String
+    let compactStop: String
     let isStopActive: Bool
     let isCounting: Bool
     let canStartStop: Bool
@@ -82,7 +84,6 @@ struct NowView: View {
         TimelineView(.periodic(from: .now, by: timelineInterval)) { context in
             let nowUptime = ProcessInfo.processInfo.systemUptime
             let renderModel = makeRenderModel(nowUptime: nowUptime)
-            let detailsModel = makeDetailsModel(nowUptime: nowUptime)
             let timerProviders = makeTimerProviders()
 
             TabView(selection: $pageSelection) {
@@ -96,9 +97,8 @@ struct NowView: View {
                     reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
                 )
                 .tag(0)
-                WatchDetailsPage(
+                WatchTimerFocusPage(
                     renderModel: renderModel,
-                    detailsModel: detailsModel,
                     timerProviders: timerProviders,
                     nowUptime: nowUptime,
                     isLive: pageSelection == 1,
@@ -248,10 +248,12 @@ struct NowView: View {
 
         return WatchNowRenderModel(
             formattedMain: formatWithCC(liveMain, preferHours: resolvedShowHours),
+            compactMain: formatCompactWithCC(liveMain, showHours: resolvedShowHours),
             phaseLabel: phaseLabel,
             isStale: isStale,
             stopLine: stopLine,
             stopDigits: formatWithCC(liveStop, preferHours: false),
+            compactStop: formatCompactWithCC(liveStop, showHours: resolvedShowHours),
             isStopActive: stopActive,
             isCounting: isCounting,
             canStartStop: canStartStop,
@@ -321,18 +323,6 @@ struct NowView: View {
         return Color(.sRGB, red: r, green: g, blue: b, opacity: a)
     }
 
-    private func makeDetailsModel(nowUptime: TimeInterval) -> WatchNowDetailsModel {
-        let age = lastSnapUptime > 0 ? max(0, nowUptime - lastSnapUptime) : 0
-        return WatchNowDetailsModel(
-            isFresh: !isStale,
-            age: age,
-            role: latestMessage?.role,
-            link: latestMessage?.link,
-            sheetLabel: latestMessage?.sheetLabel,
-            eventDots: makeEventDots(message: latestMessage)
-        )
-    }
-
     private func makeTimerProviders() -> WatchTimerProviders {
         WatchTimerProviders(
             mainValueProvider: { nowUptime in
@@ -350,6 +340,12 @@ struct NowView: View {
             },
             stopDigitsProvider: { nowUptime in
                 formatWithCC(currentStop(nowUptime: nowUptime), preferHours: false)
+            },
+            compactMainStringProvider: { nowUptime in
+                formatCompactWithCC(currentMain(nowUptime: nowUptime), showHours: resolvedShowHours)
+            },
+            compactStopStringProvider: { nowUptime in
+                formatCompactWithCC(currentStop(nowUptime: nowUptime), showHours: resolvedShowHours)
             }
         )
     }
@@ -385,6 +381,30 @@ struct NowView: View {
         return neg ? "−" + body : body
     }
 
+    /// H:MM:SS.CC if showHours and hours > 0, else M:SS.CC, else SS.CC. Supports negative values.
+    private func formatCompactWithCC(_ t: TimeInterval, showHours: Bool) -> String {
+        var value = t
+        let neg = value < 0
+        value = abs(value)
+
+        let totalCs = Int((value * 100).rounded())
+        let cs  = totalCs % 100
+        let s   = (totalCs / 100) % 60
+        let m   = (totalCs / 6000) % 60
+        let h   = totalCs / 360000
+
+        let body: String
+        if showHours && h > 0 {
+            body = String(format: "%d:%02d:%02d.%02d", h, m, s, cs)
+        } else if (h > 0) || m > 0 {
+            let minutes = (h * 60) + m
+            body = String(format: "%d:%02d.%02d", minutes, s, cs)
+        } else {
+            body = String(format: "%02d.%02d", s, cs)
+        }
+        return neg ? "−" + body : body
+    }
+
     private func linkIconName(for message: TimerMessage?) -> String? {
         if message?.parentLockEnabled == true { return "iphone.and.arrow.forward" }
         if message?.role == "child" { return "iphone" }
@@ -397,14 +417,6 @@ struct NowView: View {
             }
         }
         return nil
-    }
-
-    private func makeEventDots(message: TimerMessage?) -> [WatchEventDot] {
-        guard let message else { return [] }
-        let stops = message.stopEvents.map { WatchEventDot(kind: .stop, time: $0.eventTime) }
-        let cues = (message.cueEvents ?? []).map { WatchEventDot(kind: .cue, time: $0.cueTime) }
-        let restarts = (message.restartEvents ?? []).map { WatchEventDot(kind: .restart, time: $0.restartTime) }
-        return (stops + cues + restarts).sorted { $0.time < $1.time }
     }
 
     private func makeFaceEvents(message: TimerMessage?) -> [WatchFaceEvent] {

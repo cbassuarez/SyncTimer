@@ -16,6 +16,8 @@ struct WatchTimerProviders {
     let formattedStringProvider: (TimeInterval) -> String
     let stopLineProvider: (TimeInterval) -> String?
     let stopDigitsProvider: (TimeInterval) -> String
+    let compactMainStringProvider: (TimeInterval) -> String
+    let compactStopStringProvider: (TimeInterval) -> String
 }
 
 struct WatchEventDot: Identifiable {
@@ -340,92 +342,112 @@ struct WatchFacePage: View {
     }
 }
 
-struct WatchDetailsPage: View {
+struct WatchTimerFocusPage: View {
     let renderModel: WatchNowRenderModel
-    let detailsModel: WatchNowDetailsModel
     let timerProviders: WatchTimerProviders
     let nowUptime: TimeInterval
     let isLive: Bool
     let snapshotToken: UInt64
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
-        VStack(spacing: 8) {
-            WatchGlassCard(
-                tint: renderModel.accent,
-                flashOverlay: (renderModel.isFlashingNow && renderModel.flashStyle == .tint)
-                    ? renderModel.flashColor.opacity(0.18)
-                    : nil
-            ) {
-                WatchTimerHeader(
-                    formattedMain: renderModel.formattedMain,
-                    stopLine: renderModel.stopLine,
-                    accent: renderModel.accent,
-                    isStale: renderModel.isStale,
-                    size: 32,
-                    isLive: isLive,
-                    alignment: .leading,
-                    frameAlignment: .leading,
-                    timerProviders: timerProviders,
-                    nowUptime: nowUptime,
-                    snapshotToken: snapshotToken,
-                    isFlashingNow: renderModel.isFlashingNow,
-                    flashStyle: renderModel.flashStyle,
+        ZStack {
+            ZStack(alignment: .bottomTrailing) {
+                ZStack {
+                    timerVignette
+                    timerStack
+                }
+
+                WatchFaceEventsSubtleRow(
+                    eventKinds: eventKinds,
                     flashColor: renderModel.flashColor
                 )
-            }
-
-            ScrollView {
-                VStack(spacing: 10) {
-                    WatchGlassCard(tint: renderModel.accent) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Events")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            WatchEventDotsRow(eventDots: detailsModel.eventDots)
-                            if let sheetLabel = detailsModel.sheetLabel, !sheetLabel.isEmpty {
-                                Text(sheetLabel)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-
-                    WatchGlassCard(tint: renderModel.accent) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Connection")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            Text(connectionStatusLine)
-                                .font(.footnote)
-                            if let role = detailsModel.role {
-                                Text("Role: \(role.capitalized)")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if let link = detailsModel.link {
-                                Text("Link: \(link.capitalized)")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal, 4)
+                .padding(.trailing, 6)
                 .padding(.bottom, 6)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 4)
+        .padding(8)
     }
 
-    private var connectionStatusLine: String {
-        let status = detailsModel.isFresh ? "Fresh" : "Stale"
-        return "\(status) · \(formatAge(detailsModel.age))"
+    private var timerStack: some View {
+        ZStack {
+            WatchBigTimerText(
+                text: mainText,
+                keeper: keeperText,
+                fontSize: 56
+            )
+            .opacity(renderModel.isStopActive ? 0 : 1)
+
+            WatchBigTimerText(
+                text: stopText,
+                keeper: keeperText,
+                fontSize: 56
+            )
+            .foregroundStyle(.red)
+            .opacity(renderModel.isStopActive ? 1 : 0)
+            .scaleEffect(renderModel.isStopActive ? 1.0 : (reduceMotion ? 1.0 : 0.99))
+        }
+        .offset(y: -8)
+        .animation(.easeInOut(duration: 0.2), value: renderModel.isStopActive)
+        .accessibilityLabel(Text(accessibilityLabel))
     }
 
-    private func formatAge(_ age: TimeInterval) -> String {
-        let tenths = Int((age * 10).rounded())
-        return String(format: "%.1fs", Double(tenths) / 10)
+    private var timerVignette: some View {
+        RadialGradient(
+            gradient: Gradient(colors: [
+                Color.primary.opacity(0.12),
+                Color.primary.opacity(0.02),
+                Color.clear
+            ]),
+            center: .center,
+            startRadius: 10,
+            endRadius: 120
+        )
+        .allowsHitTesting(false)
+        .blendMode(.plusLighter)
+    }
+
+    private var mainText: String {
+        if isLive {
+            return timerProviders.compactMainStringProvider(nowUptime)
+        }
+        return renderModel.compactMain
+    }
+
+    private var stopText: String {
+        if isLive {
+            return timerProviders.compactStopStringProvider(nowUptime)
+        }
+        return renderModel.compactStop
+    }
+
+    private var keeperText: String {
+        let display = renderModel.isStopActive ? stopText : mainText
+        let trimmed = display.trimmingCharacters(in: .whitespaces)
+        let colonCount = trimmed.filter { $0 == ":" }.count
+        switch colonCount {
+        case 2:
+            return "88:88:88.88"
+        case 1:
+            return "88:88.88"
+        default:
+            return "88.88"
+        }
+    }
+
+    private var eventKinds: [WatchFaceEventKind] {
+        let kinds = renderModel.faceEvents.prefix(5).map(\.kind)
+        if kinds.count >= 5 { return Array(kinds) }
+        return kinds + Array(repeating: .empty, count: 5 - kinds.count)
+    }
+
+    private var accessibilityLabel: String {
+        let freshness = renderModel.isStale ? "Stale" : "Fresh"
+        let phase = renderModel.phaseLabel.capitalized
+        let value = renderModel.isStopActive ? stopText : mainText
+        return "\(phase), \(freshness), \(value)"
     }
 }
 
@@ -626,6 +648,126 @@ private struct WatchTimerFlashText: View {
     }
 }
 
+private struct WatchBigTimerText: View {
+    let text: String
+    let keeper: String
+    let fontSize: CGFloat
+
+    var body: some View {
+        ZStack {
+            Text(keeper)
+                .font(font)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .opacity(0)
+
+            Text(styledText)
+                .font(font)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+        }
+    }
+
+    private var font: Font {
+        .system(size: fontSize, weight: .semibold, design: .rounded)
+    }
+
+    private var styledText: AttributedString {
+        var attributed = AttributedString(text)
+        if text.hasPrefix("−"), let first = attributed.characters.indices.first {
+            attributed[first...first].foregroundColor = .primary.opacity(0.6)
+        }
+        return attributed
+    }
+}
+
+private struct WatchFaceEventsSubtleRow: View {
+    let eventKinds: [WatchFaceEventKind]
+    let flashColor: Color
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(Array(eventKinds.enumerated()), id: \.offset) { _, kind in
+                WatchFaceEventSubtleCircle(kind: kind, accent: flashColor)
+            }
+        }
+    }
+}
+
+private struct WatchFaceEventSubtleCircle: View {
+    let kind: WatchFaceEventKind
+    let accent: Color
+
+    var body: some View {
+        ZStack {
+            circle
+                .frame(width: 11, height: 11)
+            icon
+        }
+    }
+
+    private var strokeColor: Color {
+        accent.opacity(0.7)
+    }
+
+    @ViewBuilder
+    private var circle: some View {
+        switch kind {
+        case .stop:
+            Circle().fill(accent.opacity(0.85))
+        case .message:
+            Circle()
+                .fill(accent.opacity(0.15))
+                .overlay(Circle().stroke(strokeColor, lineWidth: 0.9))
+        case .cue, .restart, .image:
+            Circle().stroke(strokeColor, lineWidth: 0.9)
+        case .empty:
+            Circle().stroke(Color.secondary.opacity(0.35), lineWidth: 0.8)
+        }
+    }
+
+    @ViewBuilder
+    private var icon: some View {
+        let size: Font = .caption2
+        switch kind {
+        case .stop:
+            Image(systemName: "playpause")
+                .font(size.weight(.semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.white)
+        case .cue:
+            Image(systemName: "bolt.fill")
+                .font(size.weight(.semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(strokeColor)
+        case .restart:
+            Image(systemName: "arrow.counterclockwise")
+                .font(size.weight(.semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(strokeColor)
+        case .message:
+            Image(systemName: "text.quote")
+                .font(size.weight(.semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(strokeColor)
+        case .image:
+            ZStack {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .stroke(strokeColor, lineWidth: 0.8)
+                    .frame(width: 7, height: 5.5)
+                Image(systemName: "mountain.2")
+                    .font(size.weight(.semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(strokeColor)
+            }
+        case .empty:
+            EmptyView()
+        }
+    }
+}
+
 private struct WatchEventDotsRow: View {
     let eventDots: [WatchEventDot]
 
@@ -746,10 +888,12 @@ private struct WatchFaceEventCircle: View {
     WatchFacePage(
         renderModel: WatchNowRenderModel(
             formattedMain: "12:34.56",
+            compactMain: "12:34.56",
             phaseLabel: "RUNNING",
             isStale: false,
             stopLine: nil,
             stopDigits: "00:10.00",
+            compactStop: "00:10.00",
             isStopActive: true,
             isCounting: true,
             canStartStop: true,
@@ -771,7 +915,9 @@ private struct WatchFaceEventCircle: View {
             stopValueProvider: { _ in 0 },
             formattedStringProvider: { _ in "12:34.56" },
             stopLineProvider: { _ in nil },
-            stopDigitsProvider: { _ in "00:10.00" }
+            stopDigitsProvider: { _ in "00:10.00" },
+            compactMainStringProvider: { _ in "3.95" },
+            compactStopStringProvider: { _ in "3.95" }
         ),
         nowUptime: 0,
         isLive: false,
