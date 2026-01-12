@@ -40,6 +40,13 @@ public struct TimerMessage: Codable, Equatable {
         public var offset: Int
         public var data: String
     }
+    public struct WatchCueSheetSummary: Codable, Equatable, Identifiable {
+        public var id: UUID
+        public var title: String
+        public var eventCount: Int
+        public var estDurationSec: Double?
+        public var isRecent: Bool?
+    }
 
     public var action   : Action
     public var actionSeq: UInt64?
@@ -89,14 +96,21 @@ public struct TimerMessage: Codable, Equatable {
         public var showHours: Bool?
         public var display: TimerDisplayWire?
         public var assetManifest: [CueAssetManifestItem]?
-        public var assetRequests: [UUID]?
-        public var assetChunks: [CueAssetChunk]?
+    public var assetRequests: [UUID]?
+    public var assetChunks: [CueAssetChunk]?
     // UI-only (optional): watch next-event dial snapshot; no timer semantics change.
         public var scheduleState: String?
         public var nextEventRemaining: TimeInterval?
         public var nextEventInterval: TimeInterval?
         public var nextEventKind: String?
         public var nextEventStepped: Bool?
+    // UI-only (optional): watch cue sheets snapshot; no timer semantics change.
+        public var watchCueSheets: [WatchCueSheetSummary]?
+        public var watchActiveCueSheetID: UUID?
+        public var watchActiveCueSheetTitle: String?
+        public var watchIsCueBroadcasting: Bool?
+        public var watchPeerConnected: Bool?
+        public var watchConnectedChildrenCount: Int?
     /// Optional, only set by the **parent**. Mirrored read-only on children.
         var notesParent: String?
     public init(action: Action,
@@ -137,7 +151,13 @@ public struct TimerMessage: Codable, Equatable {
                       nextEventRemaining: TimeInterval? = nil,
                       nextEventInterval: TimeInterval? = nil,
                       nextEventKind: String? = nil,
-                      nextEventStepped: Bool? = nil) {
+                      nextEventStepped: Bool? = nil,
+                      watchCueSheets: [WatchCueSheetSummary]? = nil,
+                      watchActiveCueSheetID: UUID? = nil,
+                      watchActiveCueSheetTitle: String? = nil,
+                      watchIsCueBroadcasting: Bool? = nil,
+                      watchPeerConnected: Bool? = nil,
+                      watchConnectedChildrenCount: Int? = nil) {
           self.action            = action
           self.actionSeq         = actionSeq
           self.stateSeq          = stateSeq
@@ -177,5 +197,11 @@ public struct TimerMessage: Codable, Equatable {
         self.nextEventInterval = nextEventInterval
         self.nextEventKind     = nextEventKind
         self.nextEventStepped  = nextEventStepped
+        self.watchCueSheets = watchCueSheets
+        self.watchActiveCueSheetID = watchActiveCueSheetID
+        self.watchActiveCueSheetTitle = watchActiveCueSheetTitle
+        self.watchIsCueBroadcasting = watchIsCueBroadcasting
+        self.watchPeerConnected = watchPeerConnected
+        self.watchConnectedChildrenCount = watchConnectedChildrenCount
       }
 }

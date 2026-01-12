@@ -135,6 +135,26 @@ struct NowView: View {
                     nowUptime: nowUptime
                 )
                 .tag(3)
+                WatchCueSheetsPage(
+                    model: makeCueSheetsModel(),
+                    loadSheet: { sheetID in
+                        ConnectivityManager.shared.send(
+                            ControlRequest(.loadCueSheet, cueSheetID: sheetID)
+                        )
+                    },
+                    dismissSheet: {
+                        ConnectivityManager.shared.send(ControlRequest(.dismissCueSheet))
+                    },
+                    setBroadcast: { enabled in
+                        ConnectivityManager.shared.send(
+                            ControlRequest(.setCueBroadcast, cueBroadcastEnabled: enabled)
+                        )
+                    },
+                    requestResync: {
+                        ConnectivityManager.shared.send(ControlRequest(.requestCueSheetIndex))
+                    }
+                )
+                .tag(4)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .tint(appSettings.flashColor)
@@ -292,6 +312,35 @@ struct NowView: View {
             isFlashingNow: isFlashingNow,
             flashStyle: cachedFlashStyle,
             flashColor: flashColor
+        )
+    }
+
+    private func makeCueSheetsModel() -> WatchCueSheetsModel {
+        let role = latestMessage?.role ?? "parent"
+        let isChild = role == "child"
+        let isConnected = latestMessage?.watchPeerConnected ?? false
+        let roleLabel: String = {
+            switch role {
+            case "child":
+                return "CHILD"
+            case "solo":
+                return "SOLO"
+            default:
+                return "PARENT"
+            }
+        }()
+        return WatchCueSheetsModel(
+            isStale: isStale,
+            accent: appSettings.flashColor,
+            snapshotToken: snapshotToken,
+            roleLabel: roleLabel,
+            isChild: isChild,
+            isConnected: isConnected,
+            activeSheetID: latestMessage?.watchActiveCueSheetID,
+            activeSheetTitle: latestMessage?.watchActiveCueSheetTitle,
+            cueSheets: latestMessage?.watchCueSheets ?? [],
+            isBroadcasting: latestMessage?.watchIsCueBroadcasting ?? false,
+            connectedChildrenCount: latestMessage?.watchConnectedChildrenCount
         )
     }
 
