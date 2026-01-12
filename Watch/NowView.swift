@@ -66,47 +66,51 @@ struct NowView: View {
     }
 
     var body: some View {
-        let nowUptime = ProcessInfo.processInfo.systemUptime
-        let renderModel = makeRenderModel(nowUptime: nowUptime)
-        let detailsModel = makeDetailsModel(nowUptime: nowUptime)
-        let timerProviders = makeTimerProviders()
+        let timelineInterval = faceTickInterval(nowUptime: ProcessInfo.processInfo.systemUptime)
 
-        TabView(selection: $pageSelection) {
-            WatchFaceTimelinePage(
-                interval: faceTickInterval(nowUptime: nowUptime),
-                snapshotToken: snapshotToken,
-                isLive: pageSelection == 0,
-                onTick: { tickUptime in
-                    handleTimelineTick(nowUptime: tickUptime)
-                },
-                renderModelProvider: { uptime in
-                    makeRenderModel(nowUptime: uptime)
-                },
-                timerProviders: timerProviders,
-                startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
-                reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
-            )
-            .tag(0)
-            WatchDetailsPage(
-                renderModel: renderModel,
-                detailsModel: detailsModel,
-                timerProviders: timerProviders,
-                nowUptime: nowUptime,
-                isLive: pageSelection == 1
-            )
-            .tag(1)
-            WatchControlsPage(
-                renderModel: renderModel,
-                timerProviders: timerProviders,
-                nowUptime: nowUptime,
-                isLive: pageSelection == 2,
-                startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
-                reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
-            )
-            .tag(2)
+        TimelineView(.periodic(from: .now, by: timelineInterval)) { context in
+            let nowUptime = ProcessInfo.processInfo.systemUptime
+            let renderModel = makeRenderModel(nowUptime: nowUptime)
+            let detailsModel = makeDetailsModel(nowUptime: nowUptime)
+            let timerProviders = makeTimerProviders()
+
+            TabView(selection: $pageSelection) {
+                WatchFacePage(
+                    renderModel: renderModel,
+                    timerProviders: timerProviders,
+                    nowUptime: nowUptime,
+                    isLive: pageSelection == 0,
+                    snapshotToken: snapshotToken,
+                    startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
+                    reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
+                )
+                .tag(0)
+                WatchDetailsPage(
+                    renderModel: renderModel,
+                    detailsModel: detailsModel,
+                    timerProviders: timerProviders,
+                    nowUptime: nowUptime,
+                    isLive: pageSelection == 1,
+                    snapshotToken: snapshotToken
+                )
+                .tag(1)
+                WatchControlsPage(
+                    renderModel: renderModel,
+                    timerProviders: timerProviders,
+                    nowUptime: nowUptime,
+                    isLive: pageSelection == 2,
+                    snapshotToken: snapshotToken,
+                    startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
+                    reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
+                )
+                .tag(2)
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .tint(appSettings.flashColor)
+            .onChange(of: context.date) { _ in
+                handleTimelineTick(nowUptime: nowUptime)
+            }
         }
-        .tabViewStyle(.page(indexDisplayMode: .never))
-        .tint(appSettings.flashColor)
 
         // Receive 4 Hz snapshots → update baseline + estimate velocity
         .onReceive(ConnectivityManager.shared.$incoming.compactMap { $0 }) { msg in
@@ -196,11 +200,10 @@ struct NowView: View {
             }
         }
         .onChange(of: pageSelection) { selection in
-            if selection == 0 {
-                boostUntilUptime = ProcessInfo.processInfo.systemUptime + 6.0
-                updateExtendedRuntime()
-                requestSnapshotIfNeeded(origin: "face.page")
-            }
+            boostUntilUptime = ProcessInfo.processInfo.systemUptime + 6.0
+            updateExtendedRuntime()
+            let origin = selection == 0 ? "face.page" : "page.\(selection)"
+            requestSnapshotIfNeeded(origin: origin)
         }
         .onAppear {
             updateExtendedRuntime()
