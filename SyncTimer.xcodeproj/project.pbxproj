@@ -169,6 +169,7 @@
 		968E1B0A2E79329900F79392 /* Exceptions for "Watch" folder in "SyncTimerWatch Watch App" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				ExtendedRuntimeKeeper.swift,
 				NowView.swift,
 				WatchNowPages.swift,
 				WatchStubs.swift,

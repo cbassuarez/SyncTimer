@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import WatchConnectivity
 
 struct WatchNowRenderModel {
     let formattedMain: String
