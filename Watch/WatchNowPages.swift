@@ -199,25 +199,27 @@ struct WatchFacePage: View {
                         nowUptime: nowUptime,
                         snapshotToken: snapshotToken
                     )
-                    Group {
-                        if isLive {
-                            WatchTimerLiveText(
-                                nowUptime: nowUptime,
-                                timeProvider: timerProviders.stopValueProvider,
-                                formattedProvider: timerProviders.stopDigitsProvider,
-                                fallback: renderModel.stopDigits,
-                                snapshotToken: snapshotToken
-                            )
-                        } else {
-                            Text(renderModel.stopDigits)
+                    if renderModel.isStopActive {
+                        Group {
+                            if isLive {
+                                WatchTimerLiveText(
+                                    nowUptime: nowUptime,
+                                    timeProvider: timerProviders.stopValueProvider,
+                                    formattedProvider: timerProviders.stopDigitsProvider,
+                                    fallback: renderModel.stopDigits,
+                                    snapshotToken: snapshotToken
+                                )
+                            } else {
+                                Text(renderModel.stopDigits)
+                            }
                         }
+                        .font(.footnote.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .frame(maxWidth: .infinity, alignment: .center)
                     }
-                    .font(.footnote.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(renderModel.isStopActive ? .red : .secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .frame(maxWidth: .infinity, alignment: .center)
                     chipRow
                     faceEventsRow
                     controlsRow
@@ -461,24 +463,26 @@ private struct WatchFaceEventsRow: View, Equatable {
                         WatchFaceEventCircle(kind: kind, accent: accent)
                     }
                 }
-                Group {
-                    if isLive {
-                        WatchTimerLiveText(
-                            nowUptime: nowUptime,
-                            timeProvider: timerProviders.stopValueProvider,
-                            formattedProvider: timerProviders.stopDigitsProvider,
-                            fallback: stopDigits,
-                            snapshotToken: snapshotToken
-                        )
-                    } else {
-                        Text(stopDigits)
+                if isStopActive {
+                    Group {
+                        if isLive {
+                            WatchTimerLiveText(
+                                nowUptime: nowUptime,
+                                timeProvider: timerProviders.stopValueProvider,
+                                formattedProvider: timerProviders.stopDigitsProvider,
+                                fallback: stopDigits,
+                                snapshotToken: snapshotToken
+                            )
+                        } else {
+                            Text(stopDigits)
+                        }
                     }
+                    .font(.footnote.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(accent)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                 }
-                .font(.footnote.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(isStopActive ? accent : .secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
             }
             Spacer(minLength: 0)
         }
