@@ -4501,7 +4501,7 @@ struct MainScreen: View {
         let childCount = isParent
             ? syncSettings.peers.filter { $0.role == .child }.count
             : nil
-        let tm = TimerMessage(
+        var tm = TimerMessage(
             action: .update,
             stateSeq: seq,
             timestamp: now,
