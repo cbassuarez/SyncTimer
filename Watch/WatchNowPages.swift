@@ -13,6 +13,42 @@ struct WatchNowDetailsModel {
     let eventDots: [WatchEventDot]
 }
 
+enum WatchRole: String {
+    case parent
+    case child
+    case solo
+
+    init(wireValue: String?) {
+        switch wireValue {
+        case "parent":
+            self = .parent
+        case "child":
+            self = .child
+        default:
+            self = .solo
+        }
+    }
+}
+
+struct WatchCueSheetSummary: Identifiable {
+    let id: UUID
+    let name: String
+    let cueCount: Int?
+    let modifiedAt: Date?
+}
+
+struct WatchCueSheetsModel {
+    let role: WatchRole
+    let isConnected: Bool
+    let isStale: Bool
+    let loadedSheetName: String?
+    let loadedSheetID: UUID?
+    let isLockedFromParent: Bool
+    let sheets: [WatchCueSheetSummary]
+    let selectedSheetID: UUID?
+    let childCount: Int?
+}
+
 struct WatchTimerProviders {
     let mainValueProvider: (TimeInterval) -> TimeInterval
     let stopValueProvider: (TimeInterval) -> TimeInterval
@@ -555,6 +591,228 @@ struct WatchControlsPage: View {
     }
 }
 
+struct WatchCueSheetsPage: View {
+    let renderModel: WatchNowRenderModel
+    let cueSheetsModel: WatchCueSheetsModel
+    @Binding var selectedSheetID: UUID?
+
+    var body: some View {
+        VStack(spacing: 10) {
+            WatchGlassCard(tint: renderModel.accent) {
+                VStack(alignment: .leading, spacing: 8) {
+                    headerRow
+                    chipRow
+                    primaryPanel
+                    footerRow
+                }
+                .padding(.top, 4)
+            }
+            .overlay(lockedBorder)
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 4)
+    }
+
+    private var headerRow: some View {
+        HStack(spacing: 6) {
+            WatchChip(text: statusText, tint: statusTint)
+            Spacer(minLength: 4)
+            WatchIconChip(systemName: connectionIconName, tint: .secondary)
+        }
+    }
+
+    private var chipRow: some View {
+        HStack(spacing: 6) {
+            WatchChip(text: renderModel.phaseLabel, tint: renderModel.accent)
+            WatchChip(
+                text: renderModel.isStale ? "STALE" : "FRESH",
+                tint: renderModel.isStale ? .orange : .green
+            )
+            if let iconName = renderModel.linkIconName {
+                WatchIconChip(systemName: iconName, tint: .secondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private var primaryPanel: some View {
+        switch cueSheetsModel.role {
+        case .child:
+            childPanel
+        case .parent, .solo:
+            if cueSheetsModel.isConnected && cueSheetsModel.role == .parent {
+                parentPanel
+            } else {
+                localPanel
+            }
+        }
+    }
+
+    private var localPanel: some View {
+        let interactionsDisabled = cueSheetsModel.isStale
+        return VStack(alignment: .leading, spacing: 8) {
+            cueSheetList(allowsSelection: false, actionLabel: "Load") { summary in
+                ConnectivityManager.shared.send(ControlRequest(.loadCueSheet, cueSheetID: summary.id))
+            }
+
+            if cueSheetsModel.loadedSheetName != nil {
+                Button(action: {
+                    ConnectivityManager.shared.send(ControlRequest(.dismissCueSheet))
+                }) {
+                    Text("Dismiss Sheet")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .opacity(interactionsDisabled ? 0.6 : 1.0)
+        .disabled(interactionsDisabled)
+        .tint(renderModel.accent)
+    }
+
+    private var parentPanel: some View {
+        let interactionsDisabled = cueSheetsModel.isStale
+        return VStack(alignment: .leading, spacing: 8) {
+            cueSheetList(allowsSelection: true, actionLabel: "Select") { summary in
+                selectedSheetID = summary.id
+            }
+
+            Button(action: {
+                if let selectedSheetID {
+                    ConnectivityManager.shared.send(ControlRequest(.broadcastCueSheet, cueSheetID: selectedSheetID))
+                }
+            }) {
+                Text("Broadcast to Children")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(interactionsDisabled || selectedSheetID == nil)
+        }
+        .opacity(interactionsDisabled ? 0.6 : 1.0)
+        .disabled(interactionsDisabled)
+        .tint(renderModel.accent)
+    }
+
+    private var childPanel: some View {
+        let interactionsDisabled = cueSheetsModel.isStale
+        return VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(cueSheetsModel.isConnected ? "Locked to parent" : "Awaiting parent")
+                    .font(.footnote.weight(.semibold))
+                Text(lockedDetailText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .opacity(interactionsDisabled ? 0.6 : 1.0)
+
+            Button(action: {
+                ConnectivityManager.shared.requestSnapshot(origin: "watch.cueSheets.refresh")
+            }) {
+                Text("Request Refresh")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(renderModel.accent)
+        }
+    }
+
+    private func cueSheetList(
+        allowsSelection: Bool,
+        actionLabel: String,
+        action: @escaping (WatchCueSheetSummary) -> Void
+    ) -> some View {
+        Group {
+            if cueSheetsModel.sheets.isEmpty {
+                Text("No cue sheets")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(cueSheetsModel.sheets) { summary in
+                            WatchCueSheetRow(
+                                summary: summary,
+                                accent: renderModel.accent,
+                                isSelected: allowsSelection && summary.id == selectedSheetID,
+                                showsSelection: allowsSelection
+                            ) {
+                                action(summary)
+                            }
+                            .accessibilityLabel(Text("\(actionLabel) \(summary.name)"))
+                        }
+                    }
+                }
+                .frame(maxHeight: 110)
+            }
+        }
+    }
+
+    private var footerRow: some View {
+        HStack {
+            Spacer()
+            WatchFaceEventsSubtleRow(
+                eventKinds: eventKinds,
+                flashColor: renderModel.flashColor
+            )
+            .scaleEffect(0.75)
+            .opacity(0.6)
+        }
+    }
+
+    private var eventKinds: [WatchFaceEventKind] {
+        let kinds = renderModel.faceEvents.prefix(5).map(\.kind)
+        if kinds.count >= 5 { return Array(kinds) }
+        return kinds + Array(repeating: .empty, count: 5 - kinds.count)
+    }
+
+    private var statusText: String {
+        if cueSheetsModel.isLockedFromParent {
+            return "From Parent: \(cueSheetsModel.loadedSheetName ?? "None")"
+        }
+        if let loaded = cueSheetsModel.loadedSheetName {
+            return "Loaded: \(loaded)"
+        }
+        return "No sheet"
+    }
+
+    private var statusTint: Color {
+        cueSheetsModel.isLockedFromParent ? .orange : renderModel.accent
+    }
+
+    private var connectionIconName: String {
+        if cueSheetsModel.isLockedFromParent {
+            return "lock.fill"
+        }
+        if cueSheetsModel.role == .parent && cueSheetsModel.isConnected {
+            return "antenna.radiowaves.left.and.right"
+        }
+        if cueSheetsModel.isConnected {
+            return "link"
+        }
+        return "iphone"
+    }
+
+    private var lockedDetailText: String {
+        if let loaded = cueSheetsModel.loadedSheetName {
+            return "Using \(loaded)"
+        }
+        return cueSheetsModel.isConnected ? "No sheet from parent yet." : "Connect to sync cue sheets."
+    }
+
+    private var lockedBorder: some View {
+        Group {
+            if cueSheetsModel.isLockedFromParent {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(
+                        renderModel.accent.opacity(0.5),
+                        style: StrokeStyle(lineWidth: 1, dash: [4, 3])
+                    )
+            }
+        }
+    }
+}
+
 struct WatchNextEventDialPage: View {
     let model: WatchNextEventDialModel
     let nowUptime: TimeInterval
@@ -1015,6 +1273,49 @@ private struct WatchFaceEventSubtleCircle: View {
         case .empty:
             EmptyView()
         }
+    }
+}
+
+private struct WatchCueSheetRow: View {
+    let summary: WatchCueSheetSummary
+    let accent: Color
+    let isSelected: Bool
+    let showsSelection: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if showsSelection {
+                    Circle()
+                        .fill(accent)
+                        .frame(width: 6, height: 6)
+                        .opacity(isSelected ? 1.0 : 0.2)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(summary.name)
+                        .font(.footnote.weight(.semibold))
+                        .lineLimit(1)
+                    if let cueCount = summary.cueCount {
+                        Text("\(cueCount) cues")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(0.05))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(isSelected ? accent.opacity(0.7) : Color.white.opacity(0.08), lineWidth: 0.8)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
