@@ -5659,7 +5659,7 @@ struct MainScreen: View {
                                     totalPages:        numberOfPages,
                                     isCounting:        isCounting,
                                     startStop:         toggleStart,
-                                    reset:             resetAll
+                                    reset:             handleSyncReset
                                 )
                                 .disabled(lockActive || uiLockedByParent || parentMode != .sync)
                                 .opacity(
@@ -5781,7 +5781,13 @@ struct MainScreen: View {
                             switch cmd.command {
                             case .start: if !isCounting { toggleStart() }
                             case .stop:  if  isCounting { toggleStart() }
-                            case .reset: if !isCounting { resetAll() }
+                            case .reset:
+                                if !isCounting {
+                                    resetAll(
+                                        rehydrateEventsOnReset: cmd.rehydrateEventsOnReset,
+                                        rehydrateCueSheetID: cmd.rehydrateCueSheetID
+                                    )
+                                }
                             case .requestSnapshot:
                                 break
                             }
@@ -6932,7 +6938,7 @@ struct MainScreen: View {
                                 totalPages:        numberOfPages,
                                 isCounting:        isCounting,
                                 startStop:         toggleStart,
-                                reset:             resetAll
+                                reset:             handleSyncReset
                         )
                         .disabled(lockActive || uiLockedByParent || parentMode != .sync)
                            .opacity(parentMode == .sync ? (uiLockedByParent ? 0.35 : 1.0)
@@ -7346,7 +7352,7 @@ struct MainScreen: View {
                     totalPages:        numberOfPages,
                     isCounting:        isCounting,
                     startStop:         toggleStart,
-                    reset:             resetAll
+                    reset:             handleSyncReset
                 )
                 .disabled(lockActive || uiLockedByParent || parentMode != .sync)
                 .opacity(
@@ -8285,8 +8291,25 @@ struct MainScreen: View {
         msg.notesParent = parentNotePayload
       syncSettings.broadcastToChildren(msg)
     }
+    private func resolveResetRehydrateIntent(rehydrateEventsOnReset: Bool?,
+                                             rehydrateCueSheetID: UUID?) -> (shouldRehydrate: Bool, cueSheetID: UUID?) {
+        if let rehydrateEventsOnReset {
+            return (rehydrateEventsOnReset, rehydrateCueSheetID)
+        }
+        let legacyShouldRehydrate = cueBadge.isActive
+        let legacyCueSheetID = legacyShouldRehydrate ? cueBadge.loadedCueSheetID : nil
+        return (legacyShouldRehydrate, legacyCueSheetID)
+    }
+
+    private func handleSyncReset() {
+        let shouldRehydrate = cueBadge.isActive
+        let cueSheetID = shouldRehydrate ? cueBadge.loadedCueSheetID : nil
+        resetAll(rehydrateEventsOnReset: shouldRehydrate, rehydrateCueSheetID: cueSheetID)
+    }
+
     // MARK: – Reset everything (called by your “Reset” button)
-    private func resetAll() {
+    private func resetAll(rehydrateEventsOnReset: Bool? = nil,
+                          rehydrateCueSheetID: UUID? = nil) {
         guard phase == .idle || phase == .paused else { return }
         defer { sendWatchSnapshot(origin: "resetAll") }
         ticker?.cancel()
@@ -8298,16 +8321,30 @@ struct MainScreen: View {
         lastStopAnchorUptimeNs = nil
         lastStopBurstSeq = nil
 
-        // Rebuild cues/overlays only if a sheet is active
-        if activeCueSheetID != nil {
-            reloadCurrentCueSheet()
-        } else {
-            endActiveCueSheet(reason: "reset-no-active")
+        let intent = resolveResetRehydrateIntent(
+            rehydrateEventsOnReset: rehydrateEventsOnReset,
+            rehydrateCueSheetID: rehydrateCueSheetID
+        )
+        var shouldRehydrateEvents = intent.shouldRehydrate
+        let requestedCueSheetID = intent.cueSheetID
+        if shouldRehydrateEvents {
+            if let requestedCueSheetID,
+               requestedCueSheetID == activeCueSheetID {
+                reloadCurrentCueSheet()
+            } else {
+                shouldRehydrateEvents = false
+            }
         }
+        if !shouldRehydrateEvents {
+            endActiveCueSheet(reason: "reset-no-rehydrate")
+        }
+        #if DEBUG
+        print("[Reset] rehydrate=\(shouldRehydrateEvents) requestedID=\(requestedCueSheetID?.uuidString ?? "nil") activeID=\(activeCueSheetID?.uuidString ?? "nil") cueBadgeActive=\(cueBadge.isActive)")
+        #endif
         
         // Broadcast reset to children if we’re the parent
         if syncSettings.role == .parent && syncSettings.isEnabled {
-            let snap = encodeCurrentEvents() // (stops, cues, restarts)
+            let snap = shouldRehydrateEvents ? encodeCurrentEvents() : (stops: [], cues: [], restarts: [])
             var m = TimerMessage(
                 action: .reset,
                 timestamp: Date().timeIntervalSince1970,
@@ -8318,9 +8355,10 @@ struct MainScreen: View {
                 parentLockEnabled: syncSettings.parentLockEnabled,
                 isStopActive: false,
                 stopRemainingActive: nil,
-                cueEvents: snap.cues,
-                restartEvents: snap.restarts,
-                sheetLabel: cueBadge.label
+                cueEvents: shouldRehydrateEvents ? snap.cues : nil,
+                restartEvents: shouldRehydrateEvents ? snap.restarts : nil,
+                sheetLabel: shouldRehydrateEvents ? cueBadge.label : nil,
+                sheetID: shouldRehydrateEvents ? requestedCueSheetID?.uuidString : nil
             )
             m.notesParent = parentNotePayload
             syncSettings.broadcastToChildren(m)
@@ -8608,10 +8646,14 @@ struct MainScreen: View {
                     lastStopAnchorElapsedNs = nil
                     lastStopAnchorUptimeNs = nil
                     lastStopBurstSeq = nil
-                    childDecorativeCursor = 0
-                    cueDisplay.reset()
-                    if let sheet = activeCueSheet {
-                        cueDisplay.buildTimeline(from: sheet)
+                    if hasRemoteCuePayload {
+                        childDecorativeCursor = 0
+                        cueDisplay.reset()
+                        if let sheet = activeCueSheet {
+                            cueDisplay.buildTimeline(from: sheet)
+                        }
+                    } else {
+                        endActiveCueSheet(reason: "remote-reset-no-rehydrate")
                     }
                     rebuildChildDisplayEvents()
         case .endCueSheet:
@@ -16990,6 +17032,12 @@ final class CueBadgeState: ObservableObject {
             return label
         }
         return fallbackLabel
+    }
+
+    var isActive: Bool {
+        if loadedCueSheetID != nil { return true }
+        if let fallbackLabel, !fallbackLabel.isEmpty { return true }
+        return false
     }
 
     func setLoaded(sheetID: UUID, broadcast: Bool) {
