@@ -610,7 +610,6 @@ struct NowView: View {
         let displayState = resolvedDisplayState(from: latestMessage)
         let eventKinds = latestMessage?.recentEventStamps?.map { $0.kind.rawValue }.joined(separator: ", ") ?? "none"
         let stateSeqLine = "stateSeq: \(latestMessage?.stateSeq.map(String.init) ?? "nil")"
-        let displayIDLine = "displayID: \(displayState?.displayID.map(String.init) ?? "nil")"
         let displayKindLine = "displayKind: \(displayState?.kind.rawValue ?? "nil")"
         let recentLine = "recent: \(eventKinds)"
         let assetStatus = assetStatusLine(displayState: displayState)
@@ -618,7 +617,6 @@ struct NowView: View {
         let uptimeLine = String(format: "uptime: %.2f", nowUptime)
         return VStack(alignment: .leading, spacing: 4) {
             Text(stateSeqLine)
-            Text(displayIDLine)
             Text(displayKindLine)
             Text(recentLine)
             Text(assetStatus)
