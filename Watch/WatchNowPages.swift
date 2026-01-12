@@ -33,7 +33,7 @@ struct WatchEventDot: Identifiable {
     }
 }
 
-enum WatchFaceEventKind {
+enum WatchFaceEventKind: Equatable {
     case stop
     case cue
     case restart
@@ -170,7 +170,6 @@ struct WatchFacePage: View {
     let timerProviders: WatchTimerProviders
     let nowUptime: TimeInterval
     let isLive: Bool
-    let snapshotToken: UInt64
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -221,32 +220,16 @@ struct WatchFacePage: View {
     }
 
     private var faceEventsRow: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 6) {
-                ForEach(Array(eventKinds.enumerated()), id: \.offset) { _, kind in
-                    WatchFaceEventCircle(kind: kind, accent: renderModel.accent)
-                }
-            }
-            .id(snapshotToken)
-            Spacer(minLength: 4)
-            Group {
-                if isLive {
-                    WatchTimerLiveText(
-                        nowUptime: nowUptime,
-                        timeProvider: timerProviders.stopValueProvider,
-                        formattedProvider: timerProviders.stopDigitsProvider,
-                        fallback: renderModel.stopDigits
-                    )
-                } else {
-                    Text(renderModel.stopDigits)
-                }
-            }
-            .font(.footnote.weight(.semibold))
-            .monospacedDigit()
-            .foregroundStyle(renderModel.isStopActive ? renderModel.accent : .secondary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.6)
-        }
+        WatchFaceEventsRow(
+            eventKinds: eventKinds,
+            phaseLabel: renderModel.phaseLabel,
+            isStopActive: renderModel.isStopActive,
+            stopDigits: renderModel.stopDigits,
+            accent: renderModel.accent,
+            isLive: isLive,
+            nowUptime: nowUptime,
+            timerProviders: timerProviders
+        )
     }
 
     private var eventKinds: [WatchFaceEventKind] {
@@ -383,6 +366,52 @@ struct WatchControlsPage: View {
         }
         .padding(.horizontal, 8)
         .padding(.top, 4)
+    }
+}
+
+private struct WatchFaceEventsRow: View, Equatable {
+    let eventKinds: [WatchFaceEventKind]
+    let phaseLabel: String
+    let isStopActive: Bool
+    let stopDigits: String
+    let accent: Color
+    let isLive: Bool
+    let nowUptime: TimeInterval
+    let timerProviders: WatchTimerProviders
+
+    static func == (lhs: WatchFaceEventsRow, rhs: WatchFaceEventsRow) -> Bool {
+        lhs.eventKinds == rhs.eventKinds &&
+        lhs.phaseLabel == rhs.phaseLabel &&
+        lhs.isStopActive == rhs.isStopActive &&
+        lhs.stopDigits == rhs.stopDigits
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                ForEach(Array(eventKinds.enumerated()), id: \.offset) { _, kind in
+                    WatchFaceEventCircle(kind: kind, accent: accent)
+                }
+            }
+            Spacer(minLength: 4)
+            Group {
+                if isLive {
+                    WatchTimerLiveText(
+                        nowUptime: nowUptime,
+                        timeProvider: timerProviders.stopValueProvider,
+                        formattedProvider: timerProviders.stopDigitsProvider,
+                        fallback: stopDigits
+                    )
+                } else {
+                    Text(stopDigits)
+                }
+            }
+            .font(.footnote.weight(.semibold))
+            .monospacedDigit()
+            .foregroundStyle(isStopActive ? accent : .secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+        }
     }
 }
 
@@ -542,7 +571,6 @@ private struct WatchFaceEventCircle: View {
             stopDigitsProvider: { _ in "00:10.00" }
         ),
         nowUptime: 0,
-        isLive: false,
-        snapshotToken: 0
+        isLive: false
     )
 }
