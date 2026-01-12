@@ -29,6 +29,85 @@ public struct TimerMessage: Codable, Equatable {
             self.contentMode = contentMode
         }
     }
+    public struct EventStamp: Codable, Equatable, Identifiable {
+        public enum Kind: String, Codable {
+            case stop
+            case cue
+            case restart
+            case message
+            case image
+            case unknown
+
+            public init(from decoder: Decoder) throws {
+                let container = try decoder.singleValueContainer()
+                let raw = (try? container.decode(String.self)) ?? ""
+                self = Kind(rawValue: raw) ?? .unknown
+            }
+
+            public func encode(to encoder: Encoder) throws {
+                var container = encoder.singleValueContainer()
+                try container.encode(rawValue)
+            }
+        }
+
+        public let id: UInt64
+        public let kind: Kind
+        public let time: TimeInterval
+
+        public init(id: UInt64, kind: Kind, time: TimeInterval) {
+            self.id = id
+            self.kind = kind
+            self.time = time
+        }
+    }
+
+    public struct DisplayState: Codable, Equatable {
+        public enum Kind: String, Codable {
+            case none
+            case cueFlash
+            case message
+            case image
+            case unknown
+
+            public init(from decoder: Decoder) throws {
+                let container = try decoder.singleValueContainer()
+                let raw = (try? container.decode(String.self)) ?? ""
+                self = Kind(rawValue: raw) ?? .unknown
+            }
+
+            public func encode(to encoder: Encoder) throws {
+                var container = encoder.singleValueContainer()
+                try container.encode(rawValue)
+            }
+        }
+
+        public var displayID: UInt64
+        public var kind: Kind
+        public var text: String?
+        public var assetID: UUID?
+        public var rehearsalMark: String?
+        public var flashStartUptimeNs: UInt64?
+        public var flashDurationMs: UInt32?
+        public var holdUntilUptimeNs: UInt64?
+
+        public init(displayID: UInt64,
+                    kind: Kind,
+                    text: String? = nil,
+                    assetID: UUID? = nil,
+                    rehearsalMark: String? = nil,
+                    flashStartUptimeNs: UInt64? = nil,
+                    flashDurationMs: UInt32? = nil,
+                    holdUntilUptimeNs: UInt64? = nil) {
+            self.displayID = displayID
+            self.kind = kind
+            self.text = text
+            self.assetID = assetID
+            self.rehearsalMark = rehearsalMark
+            self.flashStartUptimeNs = flashStartUptimeNs
+            self.flashDurationMs = flashDurationMs
+            self.holdUntilUptimeNs = holdUntilUptimeNs
+        }
+    }
     public struct CueAssetManifestItem: Codable, Equatable {
         public var id: UUID
         public var mime: String
@@ -73,6 +152,8 @@ public struct TimerMessage: Codable, Equatable {
         public var flashNow: Bool?
         public var showHours: Bool?
         public var display: TimerDisplayWire?
+        public var recentEventStamps: [EventStamp]?
+        public var displayState: DisplayState?
         public var assetManifest: [CueAssetManifestItem]?
         public var assetRequests: [UUID]?
         public var assetChunks: [CueAssetChunk]?
@@ -101,6 +182,8 @@ public struct TimerMessage: Codable, Equatable {
                       flashNow: Bool? = nil,
                       showHours: Bool? = nil,
                       display: TimerDisplayWire? = nil,
+                      recentEventStamps: [EventStamp]? = nil,
+                      displayState: DisplayState? = nil,
                       assetManifest: [CueAssetManifestItem]? = nil,
                       assetRequests: [UUID]? = nil,
                       assetChunks: [CueAssetChunk]? = nil) {
@@ -127,6 +210,8 @@ public struct TimerMessage: Codable, Equatable {
                   self.flashNow          = flashNow
         self.showHours         = showHours
         self.display           = display
+        self.recentEventStamps = recentEventStamps
+        self.displayState      = displayState
         self.assetManifest     = assetManifest
         self.assetRequests     = assetRequests
         self.assetChunks       = assetChunks

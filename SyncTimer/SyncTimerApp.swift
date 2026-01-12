@@ -59,6 +59,8 @@ extension Notification.Name {
     static let whatsNewOpenCueSheets = Notification.Name("whatsNewOpenCueSheets")
     /// Countdown quick actions for iOS home-screen shortcuts.
     static let quickActionCountdown = Notification.Name("quickActionCountdown")
+    /// Debug-only event injection for watch display.
+    static let debugInjectWatchEvents = Notification.Name("debugInjectWatchEvents")
 }
 
 extension SyncSettings.SyncConnectionMethod: SegmentedOption {
@@ -4294,6 +4296,103 @@ struct MainScreen: View {
             }
             return (stops, cues, restarts)
         }
+
+        private func makeWatchDisplayState() -> TimerMessage.DisplayState {
+            let rehearsalMark = cueDisplay.rehearsalMarkText
+            let flashDurationMs = UInt32(settings.flashDurationOption)
+            let isCueFlashing = flashZero
+            let flashStartNs: UInt64? = {
+                if isCueFlashing {
+                    if let start = flashStartUptimeNs { return start }
+                    return UInt64((ProcessInfo.processInfo.systemUptime * 1_000_000_000).rounded())
+                }
+                return nil
+            }()
+
+            let kind: TimerMessage.DisplayState.Kind
+            let messageText: String?
+            let imageAssetID: UUID?
+            if isCueFlashing {
+                kind = .cueFlash
+                messageText = nil
+                imageAssetID = nil
+            } else {
+                switch cueDisplay.slot {
+                case .message(let payload):
+                    kind = .message
+                    messageText = payload.text
+                    imageAssetID = nil
+                case .image(let payload):
+                    kind = .image
+                    messageText = nil
+                    imageAssetID = payload.assetID
+                case .none:
+                    if rehearsalMark != nil {
+                        kind = .message
+                        messageText = nil
+                        imageAssetID = nil
+                    } else {
+                        kind = .none
+                        messageText = nil
+                        imageAssetID = nil
+                    }
+                }
+            }
+
+            let signature = "\(kind.rawValue)|\(messageText ?? "")|\(rehearsalMark ?? "")|\(imageAssetID?.uuidString ?? "")|\(flashStartNs.map(String.init) ?? "nil")|\(flashDurationMs)"
+            if signature != lastDisplaySignature {
+                lastDisplaySignature = signature
+                displayStateID &+= 1
+            }
+
+            return TimerMessage.DisplayState(
+                displayID: displayStateID,
+                kind: kind,
+                text: kind == .message ? messageText : nil,
+                assetID: kind == .image ? imageAssetID : nil,
+                rehearsalMark: rehearsalMark,
+                flashStartUptimeNs: flashStartNs,
+                flashDurationMs: flashDurationMs
+            )
+        }
+
+        private func eventStampID(kind: TimerMessage.EventStamp.Kind, time: TimeInterval) -> UInt64 {
+            let millis = UInt64(max(0, (time * 1000.0).rounded()))
+            let offset: UInt64
+            switch kind {
+            case .stop: offset = 1
+            case .cue: offset = 2
+            case .restart: offset = 3
+            case .message: offset = 4
+            case .image: offset = 5
+            case .unknown: offset = 0
+            }
+            return millis &* 10 &+ offset
+        }
+
+        private func makeRecentEventStamps(snapshot: (stops: [StopEventWire], cues: [CueEventWire], restarts: [RestartEventWire]),
+                                           displayState: TimerMessage.DisplayState,
+                                           eventNow: TimeInterval) -> [TimerMessage.EventStamp] {
+            var stamps: [TimerMessage.EventStamp] = []
+            stamps.append(contentsOf: snapshot.stops.map {
+                TimerMessage.EventStamp(id: eventStampID(kind: .stop, time: $0.eventTime), kind: .stop, time: $0.eventTime)
+            })
+            stamps.append(contentsOf: snapshot.cues.map {
+                TimerMessage.EventStamp(id: eventStampID(kind: .cue, time: $0.cueTime), kind: .cue, time: $0.cueTime)
+            })
+            stamps.append(contentsOf: snapshot.restarts.map {
+                TimerMessage.EventStamp(id: eventStampID(kind: .restart, time: $0.restartTime), kind: .restart, time: $0.restartTime)
+            })
+            switch displayState.kind {
+            case .message:
+                stamps.append(TimerMessage.EventStamp(id: eventStampID(kind: .message, time: eventNow), kind: .message, time: eventNow))
+            case .image:
+                stamps.append(TimerMessage.EventStamp(id: eventStampID(kind: .image, time: eventNow), kind: .image, time: eventNow))
+            default:
+                break
+            }
+            return stamps.sorted { $0.time > $1.time }.prefix(5).map { $0 }
+        }
     
         // Build wires + label directly from a CueSheet (used by broadcast(sheet))
         private func wires(from sheet: CueSheet)
@@ -4333,6 +4432,8 @@ struct MainScreen: View {
 
         // Include live event snapshot so children stay in sync while running.
         let snapshot = encodeCurrentEvents()
+        let displayState = makeWatchDisplayState()
+        let recentEventStamps = makeRecentEventStamps(snapshot: snapshot, displayState: displayState, eventNow: elapsed)
         let tm = TimerMessage(
             action: .update,
             stateSeq: seq,
@@ -4346,7 +4447,9 @@ struct MainScreen: View {
             stopRemainingActive: stopRemaining,
             cueEvents: snapshot.cues,
             restartEvents: snapshot.restarts,
-            showHours: settings.showHours
+            showHours: settings.showHours,
+            recentEventStamps: recentEventStamps,
+            displayState: displayState
             // If you extended TimerMessage with role/link/controlsEnabled/etc, you can also pass them here:
             // , role: (syncSettings.role == .parent ? "parent" : "child")
             // , controlsEnabled: (syncSettings.role == .parent && syncSettings.isEnabled && syncSettings.isEstablished && !(syncSettings.parentLockEnabled ?? false))
@@ -4362,6 +4465,86 @@ struct MainScreen: View {
             syncSettings.broadcastToChildren(tm)   // ← keep children’s snapshot hot (stops + cues + restarts)
         }
     }
+
+    private func sendWatchAsset(id: UUID, origin: String) {
+        #if canImport(WatchConnectivity)
+        guard WCSession.isSupported() else { return }
+        let data = CueLibraryStore.shared.assetData(id: id) ?? CueLibraryStore.assetDataFromDisk(id: id)
+        guard let data else {
+            print("⚠️ [WC] asset not found for \(id.uuidString)")
+            return
+        }
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("watch-asset-\(id.uuidString).bin")
+        do {
+            try data.write(to: tempURL, options: [.atomic])
+        } catch {
+            print("❌ [WC] asset write failed: \(error.localizedDescription)")
+            return
+        }
+        WCSession.default.transferFile(tempURL, metadata: ["assetID": id.uuidString, "origin": origin])
+        #if DEBUG
+        print("[WC] transferFile assetID=\(id.uuidString) origin=\(origin)")
+        #endif
+        #endif
+        sendWatchSnapshot(origin: "requestAsset")
+    }
+
+    #if DEBUG
+    private func debugInjectWatchEvents() {
+        let flashInterval: TimeInterval = 2.0
+        let flashWindow: TimeInterval = 30.0
+        let flashCount = Int(flashWindow / flashInterval)
+        for i in 0..<flashCount {
+            DispatchQueue.main.asyncAfter(deadline: .now() + (Double(i) * flashInterval)) {
+                flashZero = true
+                let flashSec = Double(settings.flashDurationOption) / 1000.0
+                DispatchQueue.main.asyncAfter(deadline: .now() + flashSec) {
+                    flashZero = false
+                }
+            }
+        }
+
+        let messageA = CueSheet.MessagePayload(text: "Watch debug message A")
+        let messageB = CueSheet.MessagePayload(text: "Watch debug message B")
+        cueDisplay.debugSetMessage(messageA)
+        cueDisplay.debugSetRehearsalMark("A")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+            cueDisplay.debugSetMessage(nil)
+            cueDisplay.debugSetRehearsalMark(nil)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
+            cueDisplay.debugSetMessage(messageB)
+            cueDisplay.debugSetRehearsalMark("B")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) {
+            cueDisplay.debugSetMessage(nil)
+            cueDisplay.debugSetRehearsalMark(nil)
+        }
+
+        let assetIDs = CueLibraryStore.shared.debugAssetIDs(limit: 2)
+        if assetIDs.indices.contains(0) {
+            let payload = CueSheet.ImagePayload(assetID: assetIDs[0], contentMode: .fit, caption: nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 12.0) {
+                cueDisplay.debugSetImage(payload)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 16.0) {
+                cueDisplay.debugSetImage(nil)
+            }
+        }
+        if assetIDs.indices.contains(1) {
+            let payload = CueSheet.ImagePayload(assetID: assetIDs[1], contentMode: .fit, caption: nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 18.0) {
+                cueDisplay.debugSetImage(payload)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 22.0) {
+                cueDisplay.debugSetImage(nil)
+            }
+        }
+        if assetIDs.isEmpty {
+            print("⚠️ [DEBUG] No cue sheet assets found for image injection.")
+        }
+    }
+    #endif
 
     // ── Environment & Settings ────────────────────────────────
     @EnvironmentObject private var settings   : AppSettings
@@ -4394,6 +4577,9 @@ struct MainScreen: View {
 
     @State var phase: Phase = .idle
     @State private var flashZero: Bool = false
+    @State private var displayStateID: UInt64 = 0
+    @State private var lastDisplaySignature: String = ""
+    @State private var flashStartUptimeNs: UInt64? = nil
     @State var countdownDigits: [Int] = []
     @State private var countdownDuration: TimeInterval = 0
     @State var countdownRemaining: TimeInterval = 0
@@ -5666,8 +5852,15 @@ struct MainScreen: View {
                             case .requestSnapshot:
                                 sendWatchSnapshot(origin: "requestSnapshot")
                                 return
+                            case .requestAsset:
+                                if let assetID = cmd.assetID {
+                                    sendWatchAsset(id: assetID, origin: cmd.origin)
+                                }
+                                return
                             case .start, .stop, .reset:
                                 break
+                            case .unknown:
+                                return
                             }
                             guard isParent && unlocked else { return }
                             switch cmd.command {
@@ -5675,6 +5868,10 @@ struct MainScreen: View {
                             case .stop:  if  isCounting { toggleStart() }
                             case .reset: if !isCounting { resetAll() }
                             case .requestSnapshot:
+                                break
+                            case .requestAsset:
+                                break
+                            case .unknown:
                                 break
                             }
                         }
@@ -5693,15 +5890,27 @@ struct MainScreen: View {
                 .onReceive(NotificationCenter.default.publisher(for: .TimerPause)) { _ in
                      if phase == .running { toggleStart() }
                  }
-                 .onReceive(NotificationCenter.default.publisher(for: .TimerReset)) { _ in
+                .onReceive(NotificationCenter.default.publisher(for: .TimerReset)) { _ in
                      if phase != .running { resetAll() }
                  }
+                .onChange(of: flashZero) { isFlashing in
+                    if isFlashing {
+                        flashStartUptimeNs = UInt64((ProcessInfo.processInfo.systemUptime * 1_000_000_000).rounded())
+                    } else {
+                        flashStartUptimeNs = nil
+                    }
+                }
                 .onReceive(NotificationCenter.default.publisher(for: .quickActionCountdown)) { note in
                     guard !stopActive else { return }
                     parentMode = .sync
                     let seconds = note.userInfo?["seconds"] as? Int ?? lastCountdownSecondsForQuickAction()
                     startCountdownFromQuickAction(seconds: seconds)
                 }
+                #if DEBUG
+                .onReceive(NotificationCenter.default.publisher(for: .debugInjectWatchEvents)) { _ in
+                    debugInjectWatchEvents()
+                }
+                #endif
                 .onDisappear {
                     wcCancellables.removeAll()
                 }
@@ -13933,6 +14142,17 @@ struct AboutPage: View {
                                 }
                                 .buttonStyle(.plain)
                             }
+
+                            #if DEBUG
+                            Button {
+                                NotificationCenter.default.post(name: .debugInjectWatchEvents, object: nil)
+                            } label: {
+                                AboutDrawerSurface {
+                                    AboutDrawerRow(icon: "bolt.badge.clock", title: "Inject Watch Events", tint: aboutTint)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            #endif
                         }
                         .padding(.top, 10)
                     }

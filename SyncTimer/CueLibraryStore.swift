@@ -648,3 +648,16 @@ extension CueLibraryStore {
         return nil
     }
 }
+
+#if DEBUG
+extension CueLibraryStore {
+    func debugAssetIDs(limit: Int = 2) -> [UUID] {
+        let urls = (try? FileManager.default.contentsOfDirectory(at: assetsURL, includingPropertiesForKeys: nil)) ?? []
+        let ids = urls.compactMap { url -> UUID? in
+            guard url.pathExtension == "json" else { return nil }
+            return UUID(uuidString: url.deletingPathExtension().lastPathComponent)
+        }
+        return Array(ids.prefix(limit))
+    }
+}
+#endif
