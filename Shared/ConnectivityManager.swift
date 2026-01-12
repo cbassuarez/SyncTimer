@@ -116,10 +116,6 @@ public final class ConnectivityManager: NSObject, ObservableObject {
     }
 
     public func requestCueSheetIndex(origin: String = "watchOS") {
-        requestCueSheetIndexIfNeeded(origin: origin)
-    }
-
-    public func requestCueSheetIndexIfNeeded(origin: String = "watchOS") {
         #if os(watchOS)
         let now = ProcessInfo.processInfo.systemUptime
         let cooldown: TimeInterval = 2.0

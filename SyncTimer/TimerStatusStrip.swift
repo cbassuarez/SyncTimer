@@ -136,7 +136,11 @@ private extension TimerStatusStrip {
             #if canImport(WatchConnectivity)
             if WCSession.isSupported() {
                 let s = WCSession.default
+                #if os(iOS)
                 if s.activationState == .activated, (s.isPaired || s.isReachable) { return true }
+                #else
+                if s.activationState == .activated, s.isReachable { return true }
+                #endif
             }
             #endif
             return status.isWatchConnected

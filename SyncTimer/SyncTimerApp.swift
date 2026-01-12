@@ -2958,7 +2958,11 @@ struct TimerCard: View {
             let watchConnected: Bool = {
                 guard WCSession.isSupported() else { return false }
                 let s = WCSession.default
+                #if os(iOS)
                 return s.activationState == .activated && (s.isPaired || s.isReachable)
+                #else
+                return s.activationState == .activated && s.isReachable
+                #endif
             }()
             #else
             let watchConnected = false
