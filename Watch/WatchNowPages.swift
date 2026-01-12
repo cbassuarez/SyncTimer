@@ -11,7 +11,6 @@ struct WatchNowDetailsModel {
 }
 
 struct WatchTimerProviders {
-    let nowUptimeProvider: () -> TimeInterval
     let mainValueProvider: (TimeInterval) -> TimeInterval
     let stopValueProvider: (TimeInterval) -> TimeInterval
     let formattedStringProvider: (TimeInterval) -> String
@@ -116,6 +115,7 @@ struct WatchTimerHeader: View {
     let size: CGFloat
     let isLive: Bool
     let timerProviders: WatchTimerProviders
+    let nowUptime: TimeInterval
 
     var body: some View {
         headerStack
@@ -128,7 +128,7 @@ struct WatchTimerHeader: View {
             Group {
                 if isLive {
                     WatchTimerLiveText(
-                        nowUptimeProvider: timerProviders.nowUptimeProvider,
+                        nowUptime: nowUptime,
                         timeProvider: timerProviders.mainValueProvider,
                         formattedProvider: timerProviders.formattedStringProvider,
                         fallback: formattedMain
@@ -144,14 +144,14 @@ struct WatchTimerHeader: View {
 
             if stopLine != nil {
                 Group {
-                    if isLive {
-                        WatchTimerLiveText(
-                            nowUptimeProvider: timerProviders.nowUptimeProvider,
-                            timeProvider: timerProviders.stopValueProvider,
-                            formattedProvider: { nowUptime in
-                                timerProviders.stopLineProvider(nowUptime) ?? ""
-                            },
-                            fallback: stopLine ?? ""
+                if isLive {
+                    WatchTimerLiveText(
+                        nowUptime: nowUptime,
+                        timeProvider: timerProviders.stopValueProvider,
+                        formattedProvider: { nowUptime in
+                            timerProviders.stopLineProvider(nowUptime) ?? ""
+                        },
+                        fallback: stopLine ?? ""
                         )
                     } else if let stopLine {
                         Text(stopLine)
@@ -168,6 +168,7 @@ struct WatchTimerHeader: View {
 struct WatchFacePage: View {
     let renderModel: WatchNowRenderModel
     let timerProviders: WatchTimerProviders
+    let nowUptime: TimeInterval
     let isLive: Bool
     let snapshotToken: UInt64
 
@@ -184,7 +185,8 @@ struct WatchFacePage: View {
                         isStale: renderModel.isStale,
                         size: 40,
                         isLive: isLive,
-                        timerProviders: timerProviders
+                        timerProviders: timerProviders,
+                        nowUptime: nowUptime
                     )
                     chipRow
                     faceEventsRow
@@ -230,7 +232,7 @@ struct WatchFacePage: View {
             Group {
                 if isLive {
                     WatchTimerLiveText(
-                        nowUptimeProvider: timerProviders.nowUptimeProvider,
+                        nowUptime: nowUptime,
                         timeProvider: timerProviders.stopValueProvider,
                         formattedProvider: timerProviders.stopDigitsProvider,
                         fallback: renderModel.stopDigits
@@ -258,6 +260,7 @@ struct WatchDetailsPage: View {
     let renderModel: WatchNowRenderModel
     let detailsModel: WatchNowDetailsModel
     let timerProviders: WatchTimerProviders
+    let nowUptime: TimeInterval
     let isLive: Bool
 
     var body: some View {
@@ -270,7 +273,8 @@ struct WatchDetailsPage: View {
                     isStale: renderModel.isStale,
                     size: 32,
                     isLive: isLive,
-                    timerProviders: timerProviders
+                    timerProviders: timerProviders,
+                    nowUptime: nowUptime
                 )
             }
 
@@ -332,6 +336,7 @@ struct WatchDetailsPage: View {
 struct WatchControlsPage: View {
     let renderModel: WatchNowRenderModel
     let timerProviders: WatchTimerProviders
+    let nowUptime: TimeInterval
     let isLive: Bool
     let startStop: () -> Void
     let reset: () -> Void
@@ -346,7 +351,8 @@ struct WatchControlsPage: View {
                     isStale: renderModel.isStale,
                     size: 30,
                     isLive: isLive,
-                    timerProviders: timerProviders
+                    timerProviders: timerProviders,
+                    nowUptime: nowUptime
                 )
             }
 
@@ -381,17 +387,14 @@ struct WatchControlsPage: View {
 }
 
 private struct WatchTimerLiveText: View {
-    let nowUptimeProvider: () -> TimeInterval
+    let nowUptime: TimeInterval
     let timeProvider: (TimeInterval) -> TimeInterval
     let formattedProvider: (TimeInterval) -> String
     let fallback: String
 
     var body: some View {
-        TimelineView(.animation) { _ in
-            let nowUptime = nowUptimeProvider()
-            let text = formattedProvider(nowUptime)
-            Text(text.isEmpty ? fallback : text)
-        }
+        let text = formattedProvider(nowUptime)
+        return Text(text.isEmpty ? fallback : text)
     }
 }
 
@@ -532,13 +535,13 @@ private struct WatchFaceEventCircle: View {
             accent: .red
         ),
         timerProviders: WatchTimerProviders(
-            nowUptimeProvider: { 0 },
             mainValueProvider: { _ in 0 },
             stopValueProvider: { _ in 0 },
             formattedStringProvider: { _ in "12:34.56" },
             stopLineProvider: { _ in nil },
             stopDigitsProvider: { _ in "00:10.00" }
         ),
+        nowUptime: 0,
         isLive: false,
         snapshotToken: 0
     )
