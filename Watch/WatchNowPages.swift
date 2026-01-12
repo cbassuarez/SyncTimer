@@ -628,6 +628,9 @@ struct WatchCueSheetsPage: View {
         }
         .padding(.horizontal, 8)
         .padding(.top, 4)
+        .onAppear {
+            requestCueSheetIndex()
+        }
     }
 
     private var headerRow: some View {
@@ -673,12 +676,6 @@ struct WatchCueSheetsPage: View {
                 ConnectivityManager.shared.send(ControlRequest(.loadCueSheet, cueSheetID: summary.id))
             }
 
-            Button(action: requestCueSheetIndex) {
-                Text("Refresh List")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-
             if cueSheetsModel.loadedSheetName != nil {
                 Button(action: {
                     ConnectivityManager.shared.send(ControlRequest(.dismissCueSheet))
@@ -700,12 +697,6 @@ struct WatchCueSheetsPage: View {
             cueSheetList(allowsSelection: true, actionLabel: "Select") { summary in
                 selectedSheetID = summary.id
             }
-
-            Button(action: requestCueSheetIndex) {
-                Text("Refresh List")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
 
             Button(action: {
                 if let selectedSheetID {

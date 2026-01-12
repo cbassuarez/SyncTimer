@@ -101,59 +101,20 @@ struct NowView: View {
         let timelineInterval = faceTickInterval(nowUptime: ProcessInfo.processInfo.systemUptime)
 
         TimelineView(.periodic(from: .now, by: timelineInterval)) { context in
-            let nowUptime = ProcessInfo.processInfo.systemUptime
-            let renderModel = makeRenderModel(nowUptime: nowUptime)
-            let timerProviders = makeTimerProviders()
-            let nextEventDialModel = makeNextEventDialModel()
-            let cueSheetsModel = makeCueSheetsModel()
+            let nowUptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+            let renderModel: WatchNowRenderModel = makeRenderModel(nowUptime: nowUptime)
+            let timerProviders: WatchTimerProviders = makeTimerProviders()
+            let nextEventDialModel: WatchNextEventDialModel = makeNextEventDialModel()
+            let cueSheetsModel: WatchCueSheetsModel = makeCueSheetsModel()
 
-            TabView(selection: $pageSelection) {
-                WatchFacePage(
-                    renderModel: renderModel,
-                    timerProviders: timerProviders,
-                    nowUptime: nowUptime,
-                    isLive: pageSelection == 0,
-                    snapshotToken: snapshotToken,
-                    startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
-                    reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
-                )
-                .tag(0)
-                WatchTimerFocusPage(
-                    renderModel: renderModel,
-                    timerProviders: timerProviders,
-                    nowUptime: nowUptime,
-                    isLive: pageSelection == 1,
-                    snapshotToken: snapshotToken
-                )
-                .tag(1)
-                WatchControlsPage(
-                    renderModel: renderModel,
-                    timerProviders: timerProviders,
-                    nowUptime: nowUptime,
-                    isLive: pageSelection == 2,
-                    snapshotToken: snapshotToken,
-                    startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
-                    reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
-                )
-                .tag(2)
-                WatchNextEventDialPage(
-                    model: nextEventDialModel,
-                    nowUptime: nowUptime
-                )
-                .tag(3)
-                WatchCueSheetsPage(
-                    renderModel: renderModel,
-                    cueSheetsModel: cueSheetsModel,
-                    selectedSheetID: $selectedCueSheetID,
-                    requestCueSheetIndex: { ConnectivityManager.shared.requestCueSheetIndex(origin: "watch.cueSheets.refresh") }
-                )
-                .tag(4)
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .tint(appSettings.flashColor)
-            .onChange(of: context.date) { _ in
-                handleTimelineTick(nowUptime: nowUptime)
-            }
+            timelineTabView(
+                renderModel: renderModel,
+                timerProviders: timerProviders,
+                nextEventDialModel: nextEventDialModel,
+                cueSheetsModel: cueSheetsModel,
+                nowUptime: nowUptime,
+                contextDate: context.date
+            )
         }
 
         // Receive 4 Hz snapshots → update baseline + estimate velocity
@@ -248,11 +209,6 @@ struct NowView: View {
         .onReceive(ConnectivityManager.shared.$incomingCueSheetIndexSummary.compactMap { $0 }) { summary in
             handleCueSheetIndex(summary, source: .applicationContext)
         }
-        #if DEBUG
-        .onReceive(ConnectivityManager.shared.$lastCueSheetIndexContextDebug.compactMap { $0 }) { debug in
-            cueSheetIndexContextDebug = debug
-        }
-        #endif
         .onChange(of: scenePhase) { _ in
             updateExtendedRuntime()
             if scenePhase == .active {
@@ -290,6 +246,65 @@ struct NowView: View {
                 cueSheetIndexSource = .none
             }
             ConnectivityManager.shared.requestCueSheetIndex(origin: "onAppear")
+        }
+    }
+
+    @ViewBuilder
+    private func timelineTabView(
+        renderModel: WatchNowRenderModel,
+        timerProviders: WatchTimerProviders,
+        nextEventDialModel: WatchNextEventDialModel,
+        cueSheetsModel: WatchCueSheetsModel,
+        nowUptime: TimeInterval,
+        contextDate: Date
+    ) -> some View {
+        TabView(selection: $pageSelection) {
+            WatchFacePage(
+                renderModel: renderModel,
+                timerProviders: timerProviders,
+                nowUptime: nowUptime,
+                isLive: pageSelection == 0,
+                snapshotToken: snapshotToken,
+                startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
+                reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
+            )
+            .tag(0)
+
+            WatchTimerFocusPage(
+                renderModel: renderModel,
+                timerProviders: timerProviders,
+                nowUptime: nowUptime,
+                isLive: pageSelection == 1,
+                snapshotToken: snapshotToken
+            )
+            .tag(1)
+
+            WatchControlsPage(
+                renderModel: renderModel,
+                timerProviders: timerProviders,
+                nowUptime: nowUptime,
+                isLive: pageSelection == 2,
+                snapshotToken: snapshotToken,
+                startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
+                reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
+            )
+            .tag(2)
+
+            WatchNextEventDialPage(model: nextEventDialModel, nowUptime: nowUptime)
+                .tag(3)
+
+            WatchCueSheetsPage(
+                renderModel: renderModel,
+                cueSheetsModel: cueSheetsModel,
+                selectedSheetID: $selectedCueSheetID,
+                requestCueSheetIndex: { ConnectivityManager.shared.requestCueSheetIndex(origin: "watch.cueSheets.auto") }
+            )
+            .tag(4)
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .tint(appSettings.flashColor)
+        .onChange(of: contextDate) { _ in
+            handleTimelineTick(nowUptime: nowUptime)
         }
     }
 
