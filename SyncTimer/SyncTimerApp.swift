@@ -4417,30 +4417,32 @@ struct MainScreen: View {
         return "unreachable"
     }
 
-    private func cueSheetIndexSummaries() -> [CueSheetIndexSummary] {
+    private func cueSheetIndexItems() -> [CueSheetIndexSummary.Item] {
         let metas = CueLibraryStore.shared.index.sheets.values
         let summaries = metas.map { meta in
-            CueSheetIndexSummary(
+            CueSheetIndexSummary.Item(
                 id: meta.id,
-                title: meta.title,
+                name: meta.title,
                 cueCount: nil,
-                modifiedAt: meta.modified
+                modifiedAt: meta.modified.timeIntervalSince1970
             )
         }
         return summaries.sorted { lhs, rhs in
-            lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
     }
 
     private func sendCueSheetIndexSummary(origin: String) {
-        let summaries = cueSheetIndexSummaries()
+        cueSheetIndexSeq &+= 1
+        let items = cueSheetIndexItems()
+        let summary = CueSheetIndexSummary(items: items, seq: cueSheetIndexSeq)
         let envelope = SyncEnvelope(
             seq: Int(Date().timeIntervalSince1970 * 1000),
-            message: .cueSheetIndex(summaries)
+            message: .cueSheetIndexSummary(summary)
         )
         ConnectivityManager.shared.sendSyncEnvelope(envelope)
         #if DEBUG
-        print("[WC cue sheets] origin=\(origin) count=\(summaries.count)")
+        print("[WC cue sheets] origin=\(origin) count=\(items.count) seq=\(summary.seq)")
         #endif
     }
 
@@ -4528,6 +4530,7 @@ struct MainScreen: View {
     // WC: 4 Hz tick + sink for commands
         @State private var wcTick = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
         @State private var wcCancellables = Set<AnyCancellable>()
+    @State private var cueSheetIndexSeq: UInt64 = 0
         
     // ── UI mode ────────────────────────────────────────────────
     @Binding var parentMode: ViewMode
@@ -5874,6 +5877,13 @@ struct MainScreen: View {
                         .receive(on: DispatchQueue.main)
                         .sink { _ in
                             sendWatchSnapshot(origin: "snapshotRequest")
+                        }
+                        .store(in: &wcCancellables)
+                    CueLibraryStore.shared.$index
+                        .receive(on: DispatchQueue.main)
+                        .debounce(for: .milliseconds(350), scheduler: DispatchQueue.main)
+                        .sink { _ in
+                            sendCueSheetIndexSummary(origin: "cueLibrary.indexChange")
                         }
                         .store(in: &wcCancellables)
                 }
@@ -8484,7 +8494,7 @@ struct MainScreen: View {
                 applyIncomingSyncMessage(.playbackState(pending))
             }
 
-        case .cueSheetIndex:
+        case .cueSheetIndexSummary:
             break
 
         case .playbackState(let state):

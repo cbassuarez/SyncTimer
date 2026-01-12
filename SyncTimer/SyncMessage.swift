@@ -14,13 +14,14 @@ enum SyncMessage: Codable {
     case sheetSnapshot(CueSheet)
     case playbackState(PlaybackState)
     case cueEvent(CueEvent)
-    case cueSheetIndex([CueSheetIndexSummary])
+    case cueSheetIndexSummary(CueSheetIndexSummary)
 
     private enum CodingKeys: String, CodingKey {
         case type
         case sheetSnapshot
         case playbackState
         case cueEvent
+        case cueSheetIndexSummary
         case cueSheetIndex
     }
 
@@ -28,7 +29,15 @@ enum SyncMessage: Codable {
         case sheetSnapshot
         case playbackState
         case cueEvent
+        case cueSheetIndexSummary
         case cueSheetIndex
+    }
+
+    private struct LegacyCueSheetIndexItem: Codable {
+        let id: UUID
+        let title: String
+        let cueCount: Int?
+        let modifiedAt: Date?
     }
 
     private static func encodeSheetSnapshot(_ sheet: CueSheet) throws -> String {
@@ -69,9 +78,20 @@ enum SyncMessage: Codable {
         case .cueEvent:
             let event = try container.decode(CueEvent.self, forKey: .cueEvent)
             self = .cueEvent(event)
+        case .cueSheetIndexSummary:
+            let summary = try container.decode(CueSheetIndexSummary.self, forKey: .cueSheetIndexSummary)
+            self = .cueSheetIndexSummary(summary)
         case .cueSheetIndex:
-            let index = try container.decode([CueSheetIndexSummary].self, forKey: .cueSheetIndex)
-            self = .cueSheetIndex(index)
+            let legacy = try container.decode([LegacyCueSheetIndexItem].self, forKey: .cueSheetIndex)
+            let items = legacy.map {
+                CueSheetIndexSummary.Item(
+                    id: $0.id,
+                    name: $0.title,
+                    cueCount: $0.cueCount,
+                    modifiedAt: $0.modifiedAt?.timeIntervalSince1970
+                )
+            }
+            self = .cueSheetIndexSummary(CueSheetIndexSummary(items: items, seq: 0))
         }
     }
 
@@ -88,9 +108,9 @@ enum SyncMessage: Codable {
         case .cueEvent(let event):
             try container.encode(MessageType.cueEvent, forKey: .type)
             try container.encode(event, forKey: .cueEvent)
-        case .cueSheetIndex(let index):
-            try container.encode(MessageType.cueSheetIndex, forKey: .type)
-            try container.encode(index, forKey: .cueSheetIndex)
+        case .cueSheetIndexSummary(let summary):
+            try container.encode(MessageType.cueSheetIndexSummary, forKey: .type)
+            try container.encode(summary, forKey: .cueSheetIndexSummary)
         }
     }
 }
