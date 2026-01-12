@@ -1,9 +1,8 @@
 import SwiftUI
 import WatchConnectivity
-#if canImport(WatchKit)
+#if os(watchOS)
 import WatchKit
 #endif
-import Combine
 
 struct WatchNowRenderModel {
     let formattedMain: String
@@ -168,7 +167,9 @@ struct NowView: View {
                     let hapticCooldown: TimeInterval = 3.0
                     if now - lastHapticUptime > hapticCooldown {
                         lastHapticUptime = now
+                        #if os(watchOS)
                         WKInterfaceDevice.current().play(.click)
+                        #endif
                     }
                 }
             }
