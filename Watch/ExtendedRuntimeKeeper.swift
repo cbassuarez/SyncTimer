@@ -1,7 +1,10 @@
 import Foundation
-import WatchKit
 import SwiftUI
+#if canImport(WatchKit)
+import WatchKit
+#endif
 
+#if canImport(WatchKit)
 @MainActor
 final class ExtendedRuntimeKeeper: NSObject, WKExtendedRuntimeSessionDelegate, ObservableObject {
     private var session: WKExtendedRuntimeSession?
@@ -45,3 +48,10 @@ final class ExtendedRuntimeKeeper: NSObject, WKExtendedRuntimeSessionDelegate, O
         }
     }
 }
+#else
+@MainActor
+final class ExtendedRuntimeKeeper: ObservableObject {
+    func update(shouldRun: Bool, scenePhase: ScenePhase) {
+    }
+}
+#endif
