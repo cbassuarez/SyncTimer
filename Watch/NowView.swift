@@ -1,6 +1,9 @@
 import SwiftUI
 import WatchConnectivity
+#if canImport(WatchKit)
 import WatchKit
+#endif
+import Combine
 
 struct WatchNowRenderModel {
     let formattedMain: String
