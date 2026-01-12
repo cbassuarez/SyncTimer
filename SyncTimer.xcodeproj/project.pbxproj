@@ -20,6 +20,8 @@
 		96F296452E793F130039B071 /* ControlRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96F296132E793F130039B071 /* ControlRequest.swift */; };
 		96F2965D2E793F130039B071 /* ConnectivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96F296122E793F130039B071 /* ConnectivityManager.swift */; };
 		96F2965E2E793F130039B071 /* ControlRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96F296132E793F130039B071 /* ControlRequest.swift */; };
+		C0E1A2B3C4D5E6F708192A3C /* CueSheetIndexSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0E1A2B3C4D5E6F708192A3B /* CueSheetIndexSummary.swift */; };
+		C0E1A2B3C4D5E6F708192A3D /* CueSheetIndexSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0E1A2B3C4D5E6F708192A3B /* CueSheetIndexSummary.swift */; };
 		96F408E32F133BA3000045BB /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 96F408E22F133BA3000045BB /* Sentry */; };
 /* End PBXBuildFile section */
 
@@ -132,6 +134,7 @@
 		96DF20292E79311700FFB580 /* TimerMessage+Wire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TimerMessage+Wire.swift"; sourceTree = "<group>"; };
 		96F296122E793F130039B071 /* ConnectivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectivityManager.swift; sourceTree = "<group>"; };
 		96F296132E793F130039B071 /* ControlRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlRequest.swift; sourceTree = "<group>"; };
+		C0E1A2B3C4D5E6F708192A3B /* CueSheetIndexSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CueSheetIndexSummary.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -339,6 +342,7 @@
 				96DF20292E79311700FFB580 /* TimerMessage+Wire.swift */,
 				96F296122E793F130039B071 /* ConnectivityManager.swift */,
 				96F296132E793F130039B071 /* ControlRequest.swift */,
+				C0E1A2B3C4D5E6F708192A3B /* CueSheetIndexSummary.swift */,
 				967A69312F0DE3CF00FCD067 /* Join */,
 			);
 			path = Shared;
@@ -768,6 +772,7 @@
 			files = (
 				96F2965D2E793F130039B071 /* ConnectivityManager.swift in Sources */,
 				96F2965E2E793F130039B071 /* ControlRequest.swift in Sources */,
+				C0E1A2B3C4D5E6F708192A3D /* CueSheetIndexSummary.swift in Sources */,
 				968E1B0C2E79357500F79392 /* StopEventWire.swift in Sources */,
 				96DF202B2E79312800FFB580 /* TimerMessage+Wire.swift in Sources */,
 			);
@@ -816,6 +821,7 @@
 				96DF202A2E79311700FFB580 /* TimerMessage+Wire.swift in Sources */,
 				96F296442E793F130039B071 /* ConnectivityManager.swift in Sources */,
 				96F296452E793F130039B071 /* ControlRequest.swift in Sources */,
+				C0E1A2B3C4D5E6F708192A3C /* CueSheetIndexSummary.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

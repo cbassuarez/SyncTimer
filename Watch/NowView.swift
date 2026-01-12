@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import WatchConnectivity
 #if os(watchOS)
@@ -80,6 +81,9 @@ struct NowView: View {
     @State private var lastScheduleStateForBoost: WatchScheduleState = .none
     @State private var lastScheduleStateForHaptic: WatchScheduleState = .none
     @State private var lastCompleteHapticUptime: TimeInterval = 0
+    @State private var cueSheetIndex: [CueSheetIndexSummary] = []
+    @State private var selectedCueSheetID: UUID? = nil
+    @State private var lastCueSheetIndexRequestUptime: TimeInterval = -10
 
     @StateObject private var runtimeKeeper = ExtendedRuntimeKeeper()
 
@@ -100,6 +104,7 @@ struct NowView: View {
             let renderModel = makeRenderModel(nowUptime: nowUptime)
             let timerProviders = makeTimerProviders()
             let nextEventDialModel = makeNextEventDialModel()
+            let cueSheetsModel = makeCueSheetsModel()
 
             TabView(selection: $pageSelection) {
                 WatchFacePage(
@@ -135,6 +140,12 @@ struct NowView: View {
                     nowUptime: nowUptime
                 )
                 .tag(3)
+                WatchCueSheetsPage(
+                    renderModel: renderModel,
+                    cueSheetsModel: cueSheetsModel,
+                    selectedSheetID: $selectedCueSheetID
+                )
+                .tag(4)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .tint(appSettings.flashColor)
@@ -227,6 +238,11 @@ struct NowView: View {
                 }
             }
         }
+        .onReceive(ConnectivityManager.shared.$incomingSyncEnvelope.compactMap { $0 }) { envelope in
+            if case let .cueSheetIndex(index) = envelope.message {
+                handleCueSheetIndex(index)
+            }
+        }
         .onChange(of: scenePhase) { _ in
             updateExtendedRuntime()
             if scenePhase == .active {
@@ -249,9 +265,14 @@ struct NowView: View {
             updateExtendedRuntime()
             let origin = selection == 0 ? "face.page" : "page.\(selection)"
             requestSnapshotIfNeeded(origin: origin)
+            if selection == 4 {
+                requestCueSheetIndexIfNeeded(origin: "page.cueSheets")
+            }
         }
         .onAppear {
             updateExtendedRuntime()
+            cueSheetIndex = loadCueSheetIndexCache()
+            requestCueSheetIndexIfNeeded(origin: "onAppear")
         }
     }
 
@@ -622,6 +643,90 @@ struct NowView: View {
             && pageSelection == 3
             && (scheduleState == .active || stopActive || nowUptime < boostUntilUptime)
         runtimeKeeper.update(shouldRun: shouldRun)
+    }
+
+    private func makeCueSheetsModel() -> WatchCueSheetsModel {
+        let role = WatchRole(wireValue: latestMessage?.role)
+        let isConnected = isConnected(link: latestMessage?.link)
+        let loadedSheetID = latestMessage?.sheetID.flatMap(UUID.init)
+        let loadedSheetName = resolveLoadedSheetName(
+            label: latestMessage?.sheetLabel,
+            sheetID: loadedSheetID
+        )
+        let sheets = cueSheetIndex.map {
+            WatchCueSheetSummary(
+                id: $0.id,
+                name: $0.title,
+                cueCount: $0.cueCount,
+                modifiedAt: $0.modifiedAt
+            )
+        }
+        let selection = selectedCueSheetID.flatMap { id in
+            sheets.contains(where: { $0.id == id }) ? id : nil
+        }
+
+        return WatchCueSheetsModel(
+            role: role,
+            isConnected: isConnected,
+            isStale: isStale,
+            loadedSheetName: loadedSheetName,
+            loadedSheetID: loadedSheetID,
+            isLockedFromParent: role == .child && isConnected,
+            sheets: sheets,
+            selectedSheetID: selection,
+            childCount: nil
+        )
+    }
+
+    private func resolveLoadedSheetName(label: String?, sheetID: UUID?) -> String? {
+        if let label = normalizedLabel(label) {
+            return label
+        }
+        if let sheetID,
+           let match = cueSheetIndex.first(where: { $0.id == sheetID }) {
+            return match.title
+        }
+        return nil
+    }
+
+    private func normalizedLabel(_ label: String?) -> String? {
+        guard let label else { return nil }
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func isConnected(link: String?) -> Bool {
+        guard let link else { return false }
+        return link != "unreachable"
+    }
+
+    private func handleCueSheetIndex(_ index: [CueSheetIndexSummary]) {
+        cueSheetIndex = index
+        storeCueSheetIndexCache(index)
+        if let selectedCueSheetID,
+           !index.contains(where: { $0.id == selectedCueSheetID }) {
+            self.selectedCueSheetID = nil
+        }
+    }
+
+    private func requestCueSheetIndexIfNeeded(origin: String) {
+        let now = ProcessInfo.processInfo.systemUptime
+        let cooldown: TimeInterval = 10.0
+        guard now - lastCueSheetIndexRequestUptime >= cooldown else { return }
+        lastCueSheetIndexRequestUptime = now
+        ConnectivityManager.shared.send(ControlRequest(.requestCueSheetIndex, origin: origin))
+    }
+
+    private func loadCueSheetIndexCache() -> [CueSheetIndexSummary] {
+        let key = "watchCueSheetIndex"
+        guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
+        return (try? JSONDecoder().decode([CueSheetIndexSummary].self, from: data)) ?? []
+    }
+
+    private func storeCueSheetIndexCache(_ index: [CueSheetIndexSummary]) {
+        let key = "watchCueSheetIndex"
+        guard let data = try? JSONEncoder().encode(index) else { return }
+        UserDefaults.standard.set(data, forKey: key)
     }
 
     private func requestSnapshotIfNeeded(origin: String) {
