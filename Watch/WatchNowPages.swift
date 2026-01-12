@@ -114,6 +114,8 @@ struct WatchTimerHeader: View {
     let isStale: Bool
     let size: CGFloat
     let isLive: Bool
+    let alignment: HorizontalAlignment
+    let frameAlignment: Alignment
     let timerProviders: WatchTimerProviders
     let nowUptime: TimeInterval
     let snapshotToken: UInt64?
@@ -125,7 +127,7 @@ struct WatchTimerHeader: View {
 
     @ViewBuilder
     private var headerStack: some View {
-        VStack(spacing: 4) {
+        VStack(alignment: alignment, spacing: 4) {
             Group {
                 if isLive {
                     WatchTimerLiveText(
@@ -143,6 +145,7 @@ struct WatchTimerHeader: View {
             .monospacedDigit()
             .lineLimit(1)
             .minimumScaleFactor(0.5)
+            .frame(maxWidth: .infinity, alignment: frameAlignment)
 
             if stopLine != nil {
                 Group {
@@ -162,7 +165,7 @@ struct WatchTimerHeader: View {
                 }
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: frameAlignment)
             }
         }
     }
@@ -182,7 +185,7 @@ struct WatchFacePage: View {
     var body: some View {
         VStack(spacing: 10) {
             WatchGlassCard(tint: renderModel.accent) {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .center, spacing: 8) {
                     WatchTimerHeader(
                         formattedMain: renderModel.formattedMain,
                         stopLine: nil,
@@ -190,35 +193,36 @@ struct WatchFacePage: View {
                         isStale: renderModel.isStale,
                         size: 40,
                         isLive: isLive,
+                        alignment: .center,
+                        frameAlignment: .center,
                         timerProviders: timerProviders,
                         nowUptime: nowUptime,
                         snapshotToken: snapshotToken
                     )
-                    if renderModel.isStopActive {
-                        Group {
-                            if isLive {
-                                WatchTimerLiveText(
-                                    nowUptime: nowUptime,
-                                    timeProvider: timerProviders.stopValueProvider,
-                                    formattedProvider: timerProviders.stopDigitsProvider,
-                                    fallback: renderModel.stopDigits,
-                                    snapshotToken: snapshotToken
-                                )
-                            } else {
-                                Text(renderModel.stopDigits)
-                            }
+                    Group {
+                        if isLive {
+                            WatchTimerLiveText(
+                                nowUptime: nowUptime,
+                                timeProvider: timerProviders.stopValueProvider,
+                                formattedProvider: timerProviders.stopDigitsProvider,
+                                fallback: renderModel.stopDigits,
+                                snapshotToken: snapshotToken
+                            )
+                        } else {
+                            Text(renderModel.stopDigits)
                         }
-                        .font(.footnote.weight(.semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(renderModel.accent)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
                     }
+                    .font(.footnote.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(renderModel.isStopActive ? .red : .secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(maxWidth: .infinity, alignment: .center)
                     chipRow
                     faceEventsRow
                     controlsRow
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.top, 6)
             }
         }
@@ -263,14 +267,6 @@ struct WatchFacePage: View {
 
     private var controlsRow: some View {
         HStack(spacing: 8) {
-            Button(action: startStop) {
-                Text(renderModel.isCounting ? "Stop" : "Start")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.mini)
-            .disabled(!renderModel.canStartStop)
-
             Button(action: reset) {
                 Text("Reset")
                     .frame(maxWidth: .infinity)
@@ -278,6 +274,14 @@ struct WatchFacePage: View {
             .buttonStyle(.bordered)
             .controlSize(.mini)
             .disabled(!renderModel.canReset)
+
+            Button(action: startStop) {
+                Text(renderModel.isCounting ? "Stop" : "Start")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.mini)
+            .disabled(!renderModel.canStartStop)
         }
     }
 
@@ -294,6 +298,7 @@ struct WatchDetailsPage: View {
     let timerProviders: WatchTimerProviders
     let nowUptime: TimeInterval
     let isLive: Bool
+    let snapshotToken: UInt64
 
     var body: some View {
         VStack(spacing: 8) {
@@ -305,9 +310,11 @@ struct WatchDetailsPage: View {
                     isStale: renderModel.isStale,
                     size: 32,
                     isLive: isLive,
+                    alignment: .leading,
+                    frameAlignment: .leading,
                     timerProviders: timerProviders,
                     nowUptime: nowUptime,
-                    snapshotToken: nil
+                    snapshotToken: snapshotToken
                 )
             }
 
@@ -366,42 +373,12 @@ struct WatchDetailsPage: View {
     }
 }
 
-struct WatchFaceTimelinePage: View {
-    let interval: TimeInterval
-    let snapshotToken: UInt64
-    let isLive: Bool
-    let onTick: (TimeInterval) -> Void
-    let renderModelProvider: (TimeInterval) -> WatchNowRenderModel
-    let timerProviders: WatchTimerProviders
-    let startStop: () -> Void
-    let reset: () -> Void
-
-    var body: some View {
-        // Single periodic timeline for the face so digits update together.
-        TimelineView(.periodic(from: .now, by: interval)) { context in
-            let nowUptime = ProcessInfo.processInfo.systemUptime
-            let renderModel = renderModelProvider(nowUptime)
-            WatchFacePage(
-                renderModel: renderModel,
-                timerProviders: timerProviders,
-                nowUptime: nowUptime,
-                isLive: isLive,
-                snapshotToken: snapshotToken,
-                startStop: startStop,
-                reset: reset
-            )
-            .onChange(of: context.date) { _ in
-                onTick(nowUptime)
-            }
-        }
-    }
-}
-
 struct WatchControlsPage: View {
     let renderModel: WatchNowRenderModel
     let timerProviders: WatchTimerProviders
     let nowUptime: TimeInterval
     let isLive: Bool
+    let snapshotToken: UInt64
     let startStop: () -> Void
     let reset: () -> Void
 
@@ -415,9 +392,11 @@ struct WatchControlsPage: View {
                     isStale: renderModel.isStale,
                     size: 38,
                     isLive: isLive,
+                    alignment: .leading,
+                    frameAlignment: .leading,
                     timerProviders: timerProviders,
                     nowUptime: nowUptime,
-                    snapshotToken: nil
+                    snapshotToken: snapshotToken
                 )
                 .padding(.vertical, -2)
             }
@@ -474,32 +453,36 @@ private struct WatchFaceEventsRow: View, Equatable {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 6) {
-                ForEach(Array(eventKinds.enumerated()), id: \.offset) { _, kind in
-                    WatchFaceEventCircle(kind: kind, accent: accent)
+        HStack {
+            Spacer(minLength: 0)
+            HStack(spacing: 10) {
+                HStack(spacing: 6) {
+                    ForEach(Array(eventKinds.enumerated()), id: \.offset) { _, kind in
+                        WatchFaceEventCircle(kind: kind, accent: accent)
+                    }
                 }
-            }
-            Spacer(minLength: 4)
-            Group {
-                if isLive {
-                    WatchTimerLiveText(
-                        nowUptime: nowUptime,
-                        timeProvider: timerProviders.stopValueProvider,
-                        formattedProvider: timerProviders.stopDigitsProvider,
-                        fallback: stopDigits,
-                        snapshotToken: snapshotToken
-                    )
-                } else {
-                    Text(stopDigits)
+                Group {
+                    if isLive {
+                        WatchTimerLiveText(
+                            nowUptime: nowUptime,
+                            timeProvider: timerProviders.stopValueProvider,
+                            formattedProvider: timerProviders.stopDigitsProvider,
+                            fallback: stopDigits,
+                            snapshotToken: snapshotToken
+                        )
+                    } else {
+                        Text(stopDigits)
+                    }
                 }
+                .font(.footnote.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(isStopActive ? accent : .secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
             }
-            .font(.footnote.weight(.semibold))
-            .monospacedDigit()
-            .foregroundStyle(isStopActive ? accent : .secondary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.6)
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
