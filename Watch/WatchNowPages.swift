@@ -735,6 +735,7 @@ struct WatchCueSheetsPage: View {
             }
             .opacity(interactionsDisabled ? 0.6 : 1.0)
 
+            #if DEBUG
             Button(action: {
                 ConnectivityManager.shared.requestSnapshot(origin: "watch.cueSheets.refresh")
             }) {
@@ -743,6 +744,7 @@ struct WatchCueSheetsPage: View {
             }
             .buttonStyle(.bordered)
             .tint(renderModel.accent)
+            #endif
         }
     }
 

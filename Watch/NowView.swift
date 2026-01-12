@@ -245,10 +245,19 @@ struct NowView: View {
                 handleCueSheetIndex(summary, source: .phoneIndex)
             }
         }
+        .onReceive(ConnectivityManager.shared.$incomingCueSheetIndexSummary.compactMap { $0 }) { summary in
+            handleCueSheetIndex(summary, source: .applicationContext)
+        }
+        #if DEBUG
+        .onReceive(ConnectivityManager.shared.$lastCueSheetIndexContextDebug.compactMap { $0 }) { debug in
+            cueSheetIndexContextDebug = debug
+        }
+        #endif
         .onChange(of: scenePhase) { _ in
             updateExtendedRuntime()
             if scenePhase == .active {
                 requestSnapshotIfNeeded(origin: "scenePhase.active")
+                ConnectivityManager.shared.requestCueSheetIndexIfNeeded(origin: "scenePhase.active")
             }
         }
         .onChange(of: phaseStr) { _ in
@@ -758,6 +767,7 @@ struct NowView: View {
         let key = "CueSheetIndexSummaryCache"
         guard let data = try? JSONEncoder().encode(summary) else { return }
         UserDefaults.standard.set(data, forKey: key)
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "CueSheetIndexSummaryCacheUpdatedAt")
     }
 
     private func requestSnapshotIfNeeded(origin: String) {

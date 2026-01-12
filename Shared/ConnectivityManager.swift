@@ -14,6 +14,10 @@ public final class ConnectivityManager: NSObject, ObservableObject {
 
     private(set) var session: WCSession? = nil
     private var lastTimerMessage: TimerMessage?
+    #if os(iOS)
+    private var lastCueSheetIndexSummaryData: Data?
+    private var lastCueSheetIndexSummarySeq: UInt64 = 0
+    #endif
     #if os(watchOS)
     private var lastAppliedSeq: UInt64 = 0
     private var lastCueSheetIndexRequestUptime: TimeInterval = -10
@@ -21,10 +25,12 @@ public final class ConnectivityManager: NSObject, ObservableObject {
 
     @Published public private(set) var incoming: TimerMessage?
     @Published private(set) var incomingSyncEnvelope: SyncEnvelope?
+    @Published public private(set) var incomingCueSheetIndexSummary: CueSheetIndexSummary?
     public let commands = PassthroughSubject<ControlRequest, Never>()
     public let snapshotRequests = PassthroughSubject<SnapshotRequest, Never>()
     #if DEBUG
     @Published private(set) var lastInboundDiagnostic: InboundDiagnostic?
+    @Published private(set) var lastCueSheetIndexContextDebug: CueSheetIndexContextDebug?
     #endif
     /// Convenience: only returns session when supported **and** activated.
         private var activatedSession: WCSession? {
@@ -122,6 +128,45 @@ public final class ConnectivityManager: NSObject, ObservableObject {
     func sendSyncEnvelope(_ envelope: SyncEnvelope) {
         send(envelope)
     }
+
+    public func pushCueSheetIndexSummaryToWatch(_ summary: CueSheetIndexSummary, origin: String) {
+        #if os(iOS)
+        guard let data = try? JSONEncoder().encode(summary) else {
+            print("⚠️ [WC] cue sheet index encode failed")
+            return
+        }
+        lastCueSheetIndexSummaryData = data
+        lastCueSheetIndexSummarySeq = summary.seq
+        updateCueSheetIndexApplicationContext(data: data, seq: summary.seq, origin: origin)
+        #else
+        _ = summary
+        _ = origin
+        #endif
+    }
+
+    #if os(iOS)
+    private func updateCueSheetIndexApplicationContext(data: Data, seq: UInt64, origin: String) {
+        guard let s = activatedSession else { return }
+        var context: [String: Any] = [
+            "cueSheetIndexSummary": data,
+            "cueSheetIndexSeq": seq
+        ]
+        #if DEBUG
+        context["debug_isWatchAppInstalled"] = s.isWatchAppInstalled
+        context["debug_isPaired"] = s.isPaired
+        context["debug_isReachable"] = s.isReachable
+        context["debug_activationState"] = s.activationState.rawValue
+        #endif
+        do {
+            try s.updateApplicationContext(context)
+            #if DEBUG
+            print("[WC cue sheets] updateApplicationContext origin=\(origin) seq=\(seq)")
+            #endif
+        } catch {
+            print("❌ [WC] updateApplicationContext cue sheets: \(error.localizedDescription)")
+        }
+    }
+    #endif
 }
 
 // MARK: WCSessionDelegate
@@ -135,12 +180,28 @@ extension ConnectivityManager: WCSessionDelegate {
         if let tm = lastTimerMessage, let data = try? JSONEncoder().encode(tm) {
             try? session.updateApplicationContext(["timer": data])
         }
+        if let data = lastCueSheetIndexSummaryData {
+            updateCueSheetIndexApplicationContext(
+                data: data,
+                seq: lastCueSheetIndexSummarySeq,
+                origin: "activation"
+            )
+        }
         #endif
     }
 
     #if os(iOS)
     public func sessionDidBecomeInactive(_ session: WCSession) { session.activate() }
     public func sessionDidDeactivate(_ session: WCSession)     { session.activate() }
+    public func sessionReachabilityDidChange(_ session: WCSession) {
+        if session.isReachable, let data = lastCueSheetIndexSummaryData {
+            updateCueSheetIndexApplicationContext(
+                data: data,
+                seq: lastCueSheetIndexSummarySeq,
+                origin: "reachable"
+            )
+        }
+    }
     #endif
 
 
@@ -148,6 +209,26 @@ extension ConnectivityManager: WCSessionDelegate {
                         didReceiveApplicationContext applicationContext: [String : Any]) {
         if let data = applicationContext["timer"] as? Data {
             decodeAndPublish(data, source: .appContext)
+        }
+        if let data = applicationContext["cueSheetIndexSummary"] as? Data {
+            let dec = JSONDecoder()
+            if let summary = try? dec.decode(CueSheetIndexSummary.self, from: data) {
+                Task { @MainActor in
+                    self.incomingCueSheetIndexSummary = summary
+                    #if DEBUG
+                    self.lastCueSheetIndexContextDebug = CueSheetIndexContextDebug(
+                        isWatchAppInstalled: applicationContext["debug_isWatchAppInstalled"] as? Bool,
+                        isPaired: applicationContext["debug_isPaired"] as? Bool,
+                        isReachable: applicationContext["debug_isReachable"] as? Bool,
+                        activationStateRaw: applicationContext["debug_activationState"] as? Int,
+                        receivedAt: Date()
+                    )
+                    print("[WC cue sheets] received applicationContext seq=\(summary.seq)")
+                    #endif
+                }
+                return
+            }
+            print("⚠️ [WC] cue sheet index decode failed")
         }
     }
 
@@ -228,6 +309,14 @@ private struct SequenceToken {
 enum InboundSource: String {
     case messageData
     case appContext
+}
+
+struct CueSheetIndexContextDebug: Equatable {
+    let isWatchAppInstalled: Bool?
+    let isPaired: Bool?
+    let isReachable: Bool?
+    let activationStateRaw: Int?
+    let receivedAt: Date
 }
 
 #if DEBUG
