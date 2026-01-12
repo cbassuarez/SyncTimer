@@ -245,7 +245,7 @@ struct NowView: View {
             let nextEventDialModel: WatchNextEventDialModel = makeNextEventDialModel()
             let cueSheetsModel: WatchCueSheetsModel = makeCueSheetsModel()
 
-            timelineTabView(
+            timelineTabViewContent(
                 renderModel: renderModel,
                 timerProviders: timerProviders,
                 nextEventDialModel: nextEventDialModel,
@@ -257,66 +257,7 @@ struct NowView: View {
     }
 
     @ViewBuilder
-    private func timelineTabView(
-        renderModel: WatchNowRenderModel,
-        timerProviders: WatchTimerProviders,
-        nextEventDialModel: WatchNextEventDialModel,
-        cueSheetsModel: WatchCueSheetsModel,
-        nowUptime: TimeInterval,
-        contextDate: Date
-    ) -> some View {
-        TabView(selection: $pageSelection) {
-            WatchFacePage(
-                renderModel: renderModel,
-                timerProviders: timerProviders,
-                nowUptime: nowUptime,
-                isLive: pageSelection == 0,
-                snapshotToken: snapshotToken,
-                startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
-                reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
-            )
-            .tag(0)
-
-            WatchTimerFocusPage(
-                renderModel: renderModel,
-                timerProviders: timerProviders,
-                nowUptime: nowUptime,
-                isLive: pageSelection == 1,
-                snapshotToken: snapshotToken
-            )
-            .tag(1)
-
-            WatchControlsPage(
-                renderModel: renderModel,
-                timerProviders: timerProviders,
-                nowUptime: nowUptime,
-                isLive: pageSelection == 2,
-                snapshotToken: snapshotToken,
-                startStop: { ConnectivityManager.shared.sendCommand(isCounting ? .stop : .start) },
-                reset: { if !isCounting { ConnectivityManager.shared.sendCommand(.reset) } }
-            )
-            .tag(2)
-
-            WatchNextEventDialPage(model: nextEventDialModel, nowUptime: nowUptime)
-                .tag(3)
-
-            WatchCueSheetsPage(
-                renderModel: renderModel,
-                cueSheetsModel: cueSheetsModel,
-                selectedSheetID: $selectedCueSheetID,
-                requestCueSheetIndex: { ConnectivityManager.shared.requestCueSheetIndex(origin: "watch.cueSheets.auto") }
-            )
-            .tag(4)
-        }
-        .tabViewStyle(.page(indexDisplayMode: .never))
-        .tint(appSettings.flashColor)
-        .onChange(of: contextDate) { _ in
-            handleTimelineTick(nowUptime: nowUptime)
-        }
-    }
-
-    @ViewBuilder
-    private func timelineTabView(
+    private func timelineTabViewContent(
         renderModel: WatchNowRenderModel,
         timerProviders: WatchTimerProviders,
         nextEventDialModel: WatchNextEventDialModel,
