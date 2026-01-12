@@ -41,13 +41,8 @@ struct NowView: View {
     @State private var prevSnapT   : TimeInterval = 0
     @State private var lastSnapUptime: TimeInterval = 0
     @State private var isStale     : Bool = true
-    @State private var lastSnapSeq: UInt64 = 0
-
     @State private var latestMessage: TimerMessage?
     @State private var pageSelection: Int = 0
-    @State private var snapCounter: UInt64 = 0
-    @State private var tickBucket: Int = 0
-    @State private var tickN: Int = 0
     @State private var lastPokeUptime: TimeInterval = -10
 
     @StateObject private var runtimeKeeper = ExtendedRuntimeKeeper()
@@ -77,14 +72,8 @@ struct NowView: View {
                     renderModel: renderModel,
                     timerProviders: timerProviders,
                     nowUptime: nowUptime,
-                    isLive: pageSelection == 0,
-                    snapshotToken: snapCounter
+                    isLive: pageSelection == 0
                 )
-                #if DEBUG
-                .overlay(alignment: .topLeading) {
-                    WatchDebugOverlay(lines: debugLines)
-                }
-                #endif
                 .tag(0)
                 WatchDetailsPage(
                     renderModel: renderModel,
@@ -149,13 +138,6 @@ struct NowView: View {
                 prevSnapT    = now
 
                 latestMessage = msg
-                let seq = msg.stateSeq ?? msg.actionSeq
-                if let seq {
-                    lastSnapSeq = seq
-                } else {
-                    lastSnapSeq &+= 1
-                }
-                snapCounter = seq ?? (snapCounter &+ 1)
             }
         }
         .onChange(of: scenePhase) { _ in
@@ -326,7 +308,6 @@ struct NowView: View {
 
     private func handleTimelineTick(nowUptime: TimeInterval) {
         updateStaleIfNeeded(nowUptime: nowUptime)
-        updateTickCounter(nowUptime: nowUptime)
     }
 
     private func updateStaleIfNeeded(nowUptime: TimeInterval) {
@@ -345,14 +326,6 @@ struct NowView: View {
         }
     }
 
-    private func updateTickCounter(nowUptime: TimeInterval) {
-        let bucket = Int((nowUptime / 0.2).rounded(.down))
-        if bucket != tickBucket {
-            tickBucket = bucket
-            tickN += 1
-        }
-    }
-
     private func updateExtendedRuntime() {
         runtimeKeeper.update(
             shouldRun: isCounting || stopActive,
@@ -366,48 +339,6 @@ struct NowView: View {
         guard now - lastPokeUptime >= cooldown else { return }
         lastPokeUptime = now
         ConnectivityManager.shared.requestSnapshot(origin: origin)
-    }
-}
-
-#if DEBUG
-private struct WatchDebugOverlay: View {
-    let lines: [String]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(lines, id: \.self) { line in
-                Text(line)
-            }
-        }
-        .font(.system(size: 8, weight: .regular, design: .monospaced))
-        .foregroundStyle(.white)
-        .padding(4)
-        .background(Color.black.opacity(0.55))
-        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-        .padding(.leading, 6)
-        .padding(.top, 4)
-    }
-}
-#endif
-
-private extension NowView {
-    var debugLines: [String] {
-        #if DEBUG
-        let now = ProcessInfo.processInfo.systemUptime
-        let ageMs = Int(max(0, now - lastSnapUptime) * 1000)
-        let session = ConnectivityManager.shared.session
-        let activation = session.map { String(describing: $0.activationState) } ?? "nil"
-        let reachable = session?.isReachable ?? false
-        let seqText = lastSnapSeq
-        return [
-            "scene:\(scenePhase) lum:\(isLuminanceReduced)",
-            "wc:\(activation) reach:\(reachable)",
-            "ageMs:\(ageMs) lastSnapSeq:\(seqText)",
-            "tickN:\(tickN) phase:\(phaseStr)"
-        ]
-        #else
-        return []
-        #endif
     }
 }
 
