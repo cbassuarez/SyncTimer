@@ -4402,6 +4402,46 @@ struct MainScreen: View {
         }
     }
 
+    private func refreshWatchCueSheetSummaries() {
+        let index = CueLibraryStore.shared.index
+        let recentIDs = Array(index.recents.prefix(3))
+        let recentSet = Set(recentIDs)
+        let metas = Array(index.sheets.values)
+        guard !metas.isEmpty else {
+            watchCueSheetSummaries = []
+            watchCueSheetIndexDirty = true
+            return
+        }
+        DispatchQueue.global(qos: .utility).async {
+            let makeSummary: (CueLibraryIndex.SheetMeta, Bool) -> TimerMessage.WatchCueSheetSummary = { meta, isRecent in
+                let sheet = CueLibraryStore.shared.sheets[meta.id] ?? (try? CueLibraryStore.shared.load(meta: meta))
+                let eventCount = sheet?.events.count ?? 0
+                let estDuration = sheet?.events.map { $0.at + ($0.holdSeconds ?? 0) }.max()
+                return TimerMessage.WatchCueSheetSummary(
+                    id: meta.id,
+                    title: meta.title,
+                    eventCount: eventCount,
+                    estDurationSec: estDuration,
+                    isRecent: isRecent,
+                    modifiedAt: meta.modified
+                )
+            }
+            let recentSummaries = recentIDs.compactMap { id -> TimerMessage.WatchCueSheetSummary? in
+                guard let meta = index.sheets[id] else { return nil }
+                return makeSummary(meta, true)
+            }
+            let remainingSummaries = metas
+                .filter { !recentSet.contains($0.id) }
+                .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+                .map { makeSummary($0, false) }
+            let orderedSummaries = recentSummaries + remainingSummaries
+            DispatchQueue.main.async {
+                watchCueSheetSummaries = orderedSummaries
+                watchCueSheetIndexDirty = true
+            }
+        }
+    }
+
     private func sendWatchSnapshot(origin: String = "tick") {
         // Snapshot checklist:
         // - Cadence is still driven by wcTick (4 Hz).
@@ -4425,7 +4465,44 @@ struct MainScreen: View {
 
         // Include live event snapshot so children stay in sync while running.
         let snapshot = encodeCurrentEvents()
-        let tm = TimerMessage(
+        let isParent = syncSettings.role == .parent
+        let isSyncEnabled = syncSettings.isEnabled
+        let peerConnected = isSyncEnabled && syncSettings.isEstablished
+        let roleString: String? = {
+            guard isSyncEnabled else { return "solo" }
+            return isParent ? "parent" : "child"
+        }()
+        let linkString: String? = {
+            guard isSyncEnabled else { return nil }
+            guard peerConnected else { return "unreachable" }
+            switch syncSettings.connectionMethod {
+            case .bluetooth:
+                return "nearby"
+            case .network:
+                return "network"
+            case .bonjour:
+                return "bonjour"
+            }
+        }()
+        let activeCueSheetIDPayload: UUID? = {
+            let resolved = loadedCueSheetID ?? activeCueSheetID
+            if resolved == remoteActiveCueSheetSentinelID { return nil }
+            return resolved
+        }()
+        let activeCueSheetTitle = cueBadge.label ?? loadedCueSheet?.title ?? activeCueSheet?.title
+        let includeCueSheetIndex = watchCueSheetIndexDirty
+            || origin == "requestSnapshot"
+            || origin == "snapshotRequest"
+            || origin == "requestCueSheetIndex"
+            || origin == "page.4"
+        let cueSheetsPayload = includeCueSheetIndex ? watchCueSheetSummaries : nil
+        if includeCueSheetIndex {
+            watchCueSheetIndexDirty = false
+        }
+        let childCount = isParent
+            ? syncSettings.peers.filter { $0.role == .child }.count
+            : nil
+        var tm = TimerMessage(
             action: .update,
             stateSeq: seq,
             timestamp: now,
@@ -4452,13 +4529,21 @@ struct MainScreen: View {
             nextEventRemaining: nextEventSnapshot.remaining,
             nextEventInterval: nextEventSnapshot.interval,
             nextEventKind: nextEventSnapshot.kind,
-            nextEventStepped: false
+            nextEventStepped: false,
+            watchCueSheets: cueSheetsPayload,
+            watchActiveCueSheetID: activeCueSheetIDPayload,
+            watchActiveCueSheetTitle: activeCueSheetTitle,
+            watchIsCueBroadcasting: cueBadge.broadcast,
+            watchPeerConnected: peerConnected,
+            watchConnectedChildrenCount: childCount
             // If you extended TimerMessage with role/link/controlsEnabled/etc, you can also pass them here:
             // , role: (syncSettings.role == .parent ? "parent" : "child")
             // , controlsEnabled: (syncSettings.role == .parent && syncSettings.isEnabled && syncSettings.isEstablished && !(syncSettings.parentLockEnabled ?? false))
             // , syncLamp: (syncSettings.isEnabled && syncSettings.isEstablished ? "green" : (syncSettings.isEnabled ? "amber" : "red"))
             // , flashNow: flashZero
         )
+        tm.role = roleString
+        tm.link = linkString
         #if DEBUG
         print("[WC snapshot] origin=\(origin) phase=\(phaseString) remaining=\(String(format: "%.2f", tm.remaining)) stopActive=\(tm.isStopActive ?? false) stopRemaining=\(String(format: "%.2f", tm.stopRemainingActive ?? 0)) stateSeq=\(seq)")
         #endif
@@ -4580,6 +4665,8 @@ struct MainScreen: View {
     @State private var events: [Event] = []
     @StateObject private var cueDisplay = CueDisplayController()
     @EnvironmentObject private var cueBadge: CueBadgeState
+    @State private var watchCueSheetSummaries: [TimerMessage.WatchCueSheetSummary] = []
+    @State private var watchCueSheetIndexDirty: Bool = false
     @State private var rawStops: [StopEvent] = []
     @State private var stopActive: Bool = false
     @State private var stopRemaining: TimeInterval = 0
@@ -5082,6 +5169,30 @@ struct MainScreen: View {
            syncSettings.isEnabled {
             broadcastEndCueSheet(sheetID: endedID)
         }
+    }
+
+    private func loadCueSheetFromWatch(id: UUID) {
+        guard let meta = CueLibraryStore.shared.index.sheets[id],
+              let sheet = try? CueLibraryStore.shared.load(meta: meta) else { return }
+        apply(sheet, broadcastBadge: false)
+        sendWatchSnapshot(origin: "watch.loadCueSheet")
+    }
+
+    private func setCueBroadcastFromWatch(enabled: Bool) {
+        guard syncSettings.role == .parent, syncSettings.isEnabled else { return }
+        if enabled {
+            guard let sheet = activeCueSheet ?? loadedCueSheet else { return }
+            cueBadge.setLoaded(sheetID: sheet.id, broadcast: true)
+            broadcast(sheet)
+        } else {
+            if let sheetID = cueBadge.loadedCueSheetID ?? activeCueSheetID {
+                cueBadge.setLoaded(sheetID: sheetID, broadcast: false)
+            } else {
+                cueBadge.broadcast = false
+            }
+            broadcastEndCueSheet(sheetID: cueBadge.loadedCueSheetID ?? activeCueSheetID)
+        }
+        sendWatchSnapshot(origin: "watch.setCueBroadcast")
     }
 
     @State private var eventMode: EventMode = .stop
@@ -5772,9 +5883,14 @@ struct MainScreen: View {
                             let unlocked = !(syncSettings.parentLockEnabled ?? false)
                             switch cmd.command {
                             case .requestSnapshot:
+                                watchCueSheetIndexDirty = true
                                 sendWatchSnapshot(origin: "requestSnapshot")
                                 return
-                            case .start, .stop, .reset:
+                            case .requestCueSheetIndex:
+                                watchCueSheetIndexDirty = true
+                                sendWatchSnapshot(origin: "requestCueSheetIndex")
+                                return
+                            case .start, .stop, .reset, .loadCueSheet, .dismissCueSheet, .setCueBroadcast:
                                 break
                             }
                             guard isParent && unlocked else { return }
@@ -5788,7 +5904,18 @@ struct MainScreen: View {
                                         rehydrateCueSheetID: cmd.rehydrateCueSheetID
                                     )
                                 }
-                            case .requestSnapshot:
+                            case .loadCueSheet:
+                                if let id = cmd.cueSheetID {
+                                    loadCueSheetFromWatch(id: id)
+                                }
+                            case .dismissCueSheet:
+                                dismissActiveCueSheet()
+                                sendWatchSnapshot(origin: "watch.dismissCueSheet")
+                            case .setCueBroadcast:
+                                if let enabled = cmd.cueBroadcastEnabled {
+                                    setCueBroadcastFromWatch(enabled: enabled)
+                                }
+                            case .requestSnapshot, .requestCueSheetIndex:
                                 break
                             }
                         }
@@ -5910,6 +6037,9 @@ struct MainScreen: View {
                     guard let sheet = note.object as? CueSheet else { return }
                     mapEvents(from: sheet)
                 }
+                .onReceive(CueLibraryStore.shared.$index) { _ in
+                    refreshWatchCueSheetSummaries()
+                }
                 .onReceive(NotificationCenter.default.publisher(for: .whatsNewOpenCueSheets)) { note in
                     if let shouldCreate = note.userInfo?["createBlank"] as? Bool, shouldCreate {
                         pendingCueSheetCreateFromWhatsNew = true
@@ -5952,6 +6082,7 @@ struct MainScreen: View {
                                 }
                 .onAppear {
                     syncPresentationState()
+                    refreshWatchCueSheetSummaries()
                 }
                 .onChange(of: showCueSheets) { _ in
                     syncPresentationState()
