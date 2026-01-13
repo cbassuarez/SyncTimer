@@ -615,9 +615,10 @@ struct WatchCueSheetsPage: View {
             WatchGlassCard(tint: renderModel.accent) {
                 VStack(alignment: .leading, spacing: 8) {
                     headerRow
-                    chipRow
                     primaryPanel
-                    footerRow
+                    if shouldShowFooterEvents {
+                        footerRow
+                    }
                     #if DEBUG
                     cueSheetDebugOverlay
                     #endif
@@ -639,20 +640,6 @@ struct WatchCueSheetsPage: View {
             Spacer(minLength: 4)
             WatchIconChip(systemName: connectionIconName, tint: .secondary)
         }
-    }
-
-    private var chipRow: some View {
-        HStack(spacing: 6) {
-            WatchChip(text: renderModel.phaseLabel, tint: renderModel.accent)
-            WatchChip(
-                text: renderModel.isStale ? "STALE" : "FRESH",
-                tint: renderModel.isStale ? .orange : .green
-            )
-            if let iconName = renderModel.linkIconName {
-                WatchIconChip(systemName: iconName, tint: .secondary)
-            }
-        }
-        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
@@ -780,6 +767,13 @@ struct WatchCueSheetsPage: View {
             .scaleEffect(0.75)
             .opacity(0.6)
         }
+    }
+
+    private var shouldShowFooterEvents: Bool {
+        if cueSheetsModel.isLockedFromParent {
+            return cueSheetsModel.loadedSheetName != nil
+        }
+        return cueSheetsModel.loadedSheetName != nil
     }
 
     #if DEBUG
