@@ -118,7 +118,7 @@ struct NowView: View {
 
         v = AnyView(
             v.onReceive(ConnectivityManager.shared.$incomingCueSheetIndexSummary.compactMap { $0 }) { summary in
-                handleCueSheetIndex(summary, source: .applicationContext)
+                handleCueSheetIndex(summary, source: .phoneIndex)
             }
         )
 
@@ -244,7 +244,7 @@ struct NowView: View {
         updateExtendedRuntime()
         if scenePhase == .active {
             requestSnapshotIfNeeded(origin: "scenePhase.active")
-            ConnectivityManager.shared.requestCueSheetIndexIfNeeded(origin: "scenePhase.active")
+            ConnectivityManager.shared.requestCueSheetIndex(origin: "scenePhase.active")
         }
     }
 

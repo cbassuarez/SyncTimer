@@ -807,7 +807,7 @@ struct WatchCueSheetsPage: View {
         if let loaded = cueSheetsModel.loadedSheetName {
             return "Loaded: \(loaded)"
         }
-        return "No sheet"
+        return "Cue sheets"
     }
 
     private var statusTint: Color {
