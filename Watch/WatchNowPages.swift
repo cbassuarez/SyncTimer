@@ -179,21 +179,27 @@ struct WatchGlassCard<Content: View>: View {
                     }
                 }
             )
-            .overlay(shape.stroke(rimColor, lineWidth: 0.6))
+            .overlay(shape.stroke(rimColor, lineWidth: 0.8))
             .shadow(color: Color.black.opacity(0.12), radius: 1, x: 0, y: 0.5)
     }
 
     private var rimColor: Color {
-        (tint ?? .white).opacity(0.14)
+        (tint ?? .white).opacity(0.18)
     }
 
     @ViewBuilder
     private func glassBackground(in shape: RoundedRectangle) -> some View {
         if #available(watchOS 26.0, *) {
-            shape.fill(.ultraThinMaterial)
+            shape.fill(.thinMaterial)
+            shape.fill(glassTint)
         } else {
-            shape.fill(Color.white.opacity(0.08))
+            shape.fill(Color.white.opacity(0.12))
+            shape.fill(glassTint)
         }
+    }
+
+    private var glassTint: Color {
+        (tint ?? .white).opacity(0.10)
     }
 }
 
